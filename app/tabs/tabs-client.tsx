@@ -346,7 +346,7 @@ export function TabsClient({
 										}
 									>
 										<DialogTrigger asChild>
-											<Button>
+											<Button className="hidden">
 												<Plus className="mr-2 h-4 w-4" />
 												Add Customer
 											</Button>
@@ -367,16 +367,6 @@ export function TabsClient({
 										}
 										title="No customer accounts yet"
 										description="Add your first customer to start tracking credit balances."
-										action={
-											<Button
-												onClick={() =>
-													setAddCustomerOpen(true)
-												}
-											>
-												<Plus className="mr-2 h-4 w-4" />
-												Add Customer
-											</Button>
-										}
 									/>
 								) : (
 									<Card className="shadow-lg">
@@ -588,7 +578,7 @@ export function TabsClient({
 							</Alert>
 						) : (
 							<>
-								<div className="mb-4 flex flex-wrap justify-end gap-2">
+								<div className="mb-4 hidden flex-wrap justify-end gap-2">
 									<Dialog
 										open={directSaleDialogOpen}
 										onOpenChange={

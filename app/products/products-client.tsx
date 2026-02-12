@@ -108,12 +108,12 @@ export function ProductsClient() {
 					open={addDialogOpen}
 					onOpenChange={setAddDialogOpen}
 				>
-					<DialogTrigger asChild>
-						<Button>
-							<Plus className="mr-2 h-4 w-4" />
-							Add Product
-						</Button>
-					</DialogTrigger>
+						<DialogTrigger asChild>
+							<Button className="hidden">
+								<Plus className="mr-2 h-4 w-4" />
+								Add Product
+							</Button>
+						</DialogTrigger>
 					<AddProductDialog
 						mutateProducts={mutate}
 						onSuccess={() => {
@@ -137,16 +137,6 @@ export function ProductsClient() {
 				<EmptyState
 					title="No products"
 					description="Get started by adding your first product."
-					action={
-						<Button
-							onClick={() =>
-								setAddDialogOpen(true)
-							}
-						>
-							<Plus className="mr-2 h-4 w-4" />
-							Add Product
-						</Button>
-					}
 				/>
 			) : (
 				<Card className="shadow-lg">

@@ -133,7 +133,7 @@ export function PurchasesClient() {
 						onOpenChange={setRecordDialogOpen}
 					>
 						<DialogTrigger asChild>
-							<Button>
+							<Button className="hidden">
 								<Plus className="mr-2 h-4 w-4" />
 								Add Purchase
 							</Button>
@@ -168,16 +168,6 @@ export function PurchasesClient() {
 				<EmptyState
 					title="No purchases for this date"
 					description="Record a purchase to track stock received."
-					action={
-						<Button
-							onClick={() =>
-								setRecordDialogOpen(true)
-							}
-						>
-							<Plus className="mr-2 h-4 w-4" />
-							Add Purchase
-						</Button>
-					}
 				/>
 			) : (
 				<div className="space-y-4">

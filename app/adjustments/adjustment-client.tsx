@@ -177,6 +177,8 @@ export function AdjustmentsClient() {
 	);
 	const {
 		data: adjustmentsHistory,
+		error: adjustmentsError,
+		isLoading: adjustmentsLoading,
 		mutate: mutateHistory,
 	} = useSWR<AdjustmentHistory[]>(
 		`/api/adjustments?date=${date}`,
@@ -376,6 +378,7 @@ export function AdjustmentsClient() {
 					/>
 					<Button
 						type="button"
+						className="hidden"
 						onClick={() => {
 							setItems([
 								{
@@ -394,14 +397,17 @@ export function AdjustmentsClient() {
 				</div>
 			}
 		>
-			{isLoading ? (
+			{isLoading || adjustmentsLoading ? (
 				<LoadingForm />
-			) : error ? (
+			) : error || adjustmentsError ? (
 				<Alert variant="destructive">
 					<AlertCircle className="h-4 w-4" />
 					<AlertTitle>Error</AlertTitle>
 					<AlertDescription>
-						{error.message}
+						{(
+							error ?? adjustmentsError
+						)?.message ??
+							"Failed to load adjustments"}
 					</AlertDescription>
 				</Alert>
 			) : (
@@ -579,20 +585,10 @@ export function AdjustmentsClient() {
 					</Dialog>
 
 					{!adjustmentsHistory?.length ? (
-						<EmptyState
-							title="No adjustments for this date"
-							description="Add an adjustment to track stock losses or corrections."
-							action={
-								<Button
-									onClick={() =>
-										setIsFormOpen(true)
-									}
-								>
-									<Plus className="mr-2 h-4 w-4" />
-									Add Adjustment
-								</Button>
-							}
-						/>
+				<EmptyState
+					title="No adjustments for this date"
+					description="Add an adjustment to track stock losses or corrections."
+				/>
 					) : (
 					<Card className="shadow-md">
 						<CardHeader>

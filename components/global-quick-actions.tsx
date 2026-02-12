@@ -1,0 +1,2356 @@
+"use client";
+
+import * as React from "react";
+import { usePathname } from "next/navigation";
+import useSWR, { useSWRConfig } from "swr";
+import { toast } from "sonner";
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
+import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import { ProductSelect } from "@/components/product-select";
+import { CustomerSelect } from "@/components/customer-select";
+import { MoneyInput } from "@/components/money-input";
+import { DatePickerYMD } from "@/components/date-picker-ymd";
+import {
+	Box,
+	CreditCard,
+	PackageMinus,
+	Plus,
+	Receipt,
+	ShoppingCart,
+	Trash2,
+	Users,
+} from "lucide-react";
+import {
+	formatDateDisplay,
+	getTodayJHB,
+} from "@/lib/date-utils";
+import { formatZAR } from "@/lib/money";
+import type {
+	AdjustmentReason,
+	Customer,
+	PaymentMethod,
+	Product,
+	Supplier,
+} from "@/lib/types";
+
+const ENABLED_PATHS = [
+	"/dashboard",
+	"/products",
+	"/purchases",
+	"/adjustments",
+	"/tabs",
+	"/transactions",
+];
+
+const MODAL_CONTENT_CLASS =
+	"h-[70vh] w-[90vw] max-w-[90vw] overflow-hidden p-0 md:max-w-3xl";
+
+type QuickAction =
+	| "quick-checkout"
+	| "direct-sale"
+	| "account-sale"
+	| "account-payment"
+	| "customer"
+	| "product"
+	| "purchase"
+	| "adjustment";
+
+interface ChargeItem {
+	productId: string;
+	units: string;
+}
+
+interface PurchaseItemForm {
+	productId: string;
+	cases: string;
+	singles: string;
+	unitCostCents: number;
+}
+
+interface AdjustmentItemForm {
+	productId: string;
+	unitsDelta: string;
+	reason: AdjustmentReason | "";
+	note: string;
+}
+
+const CATEGORIES = [
+	"Beer",
+	"Cider",
+	"Spirits",
+	"Wine",
+	"Mixers",
+	"Snacks",
+	"Other",
+];
+
+const ADJUSTMENT_REASONS: {
+	value: AdjustmentReason;
+	label: string;
+}[] = [
+	{ value: "SPILLAGE", label: "Spillage" },
+	{ value: "BREAKAGE", label: "Breakage" },
+	{ value: "FREEBIES", label: "Freebies" },
+	{
+		value: "THEFT_SUSPECTED",
+		label: "Theft (Suspected)",
+	},
+	{
+		value: "COUNT_CORRECTION",
+		label: "Count Correction",
+	},
+];
+
+const fetcher = async (url: string) => {
+	const res = await fetch(url);
+	const json = await res.json().catch(() => ({}));
+	if (!res.ok) {
+		throw new Error(
+			json?.error?.message ??
+				json?.error ??
+				"Failed to fetch data",
+		);
+	}
+	return json?.data ?? json;
+};
+
+const getApiErrorMessage = (
+	payload: unknown,
+	fallback: string,
+) => {
+	if (!payload || typeof payload !== "object")
+		return fallback;
+	const maybePayload = payload as Record<
+		string,
+		unknown
+	>;
+	const maybeError = maybePayload.error;
+	if (typeof maybeError === "string")
+		return maybeError;
+	if (
+		maybeError &&
+		typeof maybeError === "object"
+	) {
+		const maybeErrorObj = maybeError as Record<
+			string,
+			unknown
+		>;
+		if (
+			typeof maybeErrorObj.message === "string"
+		) {
+			return maybeErrorObj.message;
+		}
+	}
+	return fallback;
+};
+
+export function GlobalQuickActions() {
+	const pathname = usePathname();
+	const show = ENABLED_PATHS.some((path) =>
+		pathname.startsWith(path),
+	);
+	const [open, setOpen] = React.useState(false);
+	const [activeAction, setActiveAction] =
+		React.useState<QuickAction | null>(null);
+	const [date, setDate] = React.useState(
+		getTodayJHB(),
+	);
+	const { mutate } = useSWRConfig();
+
+	const { data: products = [] } = useSWR<
+		Product[]
+	>("/api/products", fetcher);
+	const { data: customers = [] } = useSWR<
+		Customer[]
+	>("/api/customers", fetcher);
+	const { data: suppliers = [] } = useSWR<
+		Supplier[]
+	>("/api/suppliers", fetcher);
+
+	if (!show) return null;
+
+	const onSaved = async () => {
+		await Promise.all([
+			mutate(
+				(key) =>
+					typeof key === "string" &&
+					key.startsWith("/api/products"),
+			),
+			mutate(
+				(key) =>
+					typeof key === "string" &&
+					key.startsWith("/api/purchases"),
+			),
+			mutate(
+				(key) =>
+					typeof key === "string" &&
+					key.startsWith("/api/adjustments"),
+			),
+			mutate(
+				(key) =>
+					typeof key === "string" &&
+					key.startsWith("/api/transactions"),
+			),
+			mutate(
+				(key) =>
+					typeof key === "string" &&
+					key.startsWith("/api/customers"),
+			),
+			mutate(
+				(key) =>
+					typeof key === "string" &&
+					key.startsWith("/api/reports"),
+			),
+		]);
+		setActiveAction(null);
+	};
+
+	return (
+		<>
+			<div className="fixed bottom-4 right-4 z-40">
+				<Popover
+					open={open}
+					onOpenChange={setOpen}
+				>
+					<PopoverTrigger asChild>
+						<Button
+							size="icon"
+							className="h-12 w-12 rounded-full shadow-lg"
+						>
+							<Plus className="h-5 w-5" />
+							<span className="sr-only">
+								Open quick actions
+							</span>
+						</Button>
+					</PopoverTrigger>
+					<PopoverContent
+						side="top"
+						align="end"
+						className="w-64 p-2"
+					>
+						<div className="flex max-h-[50vh] flex-col gap-2 overflow-y-auto">
+							<ActionBtn
+								label="Quick Checkout"
+								icon={
+									<Receipt className="mr-2 h-4 w-4" />
+								}
+								variant="secondary"
+								onClick={() => {
+									setActiveAction(
+										"quick-checkout",
+									);
+									setOpen(false);
+								}}
+							/>
+							<ActionBtn
+								label="Add Direct Sale"
+								icon={
+									<Receipt className="mr-2 h-4 w-4" />
+								}
+								variant="outline"
+								onClick={() => {
+									setActiveAction("direct-sale");
+									setOpen(false);
+								}}
+							/>
+							<ActionBtn
+								label="Add Sale to Account"
+								icon={
+									<Receipt className="mr-2 h-4 w-4" />
+								}
+								onClick={() => {
+									setActiveAction("account-sale");
+									setOpen(false);
+								}}
+							/>
+							<ActionBtn
+								label="Add Account Payment"
+								icon={
+									<CreditCard className="mr-2 h-4 w-4" />
+								}
+								onClick={() => {
+									setActiveAction(
+										"account-payment",
+									);
+									setOpen(false);
+								}}
+							/>
+							<ActionBtn
+								label="Add Customer"
+								icon={
+									<Users className="mr-2 h-4 w-4" />
+								}
+								onClick={() => {
+									setActiveAction("customer");
+									setOpen(false);
+								}}
+							/>
+							<ActionBtn
+								label="Add Product"
+								icon={
+									<Box className="mr-2 h-4 w-4" />
+								}
+								onClick={() => {
+									setActiveAction("product");
+									setOpen(false);
+								}}
+							/>
+							<ActionBtn
+								label="Add Purchase"
+								icon={
+									<ShoppingCart className="mr-2 h-4 w-4" />
+								}
+								onClick={() => {
+									setActiveAction("purchase");
+									setOpen(false);
+								}}
+							/>
+							<ActionBtn
+								label="Add Adjustment"
+								icon={
+									<PackageMinus className="mr-2 h-4 w-4" />
+								}
+								onClick={() => {
+									setActiveAction("adjustment");
+									setOpen(false);
+								}}
+							/>
+						</div>
+					</PopoverContent>
+				</Popover>
+			</div>
+
+			<Dialog
+				open={activeAction !== null}
+				onOpenChange={(isOpen) => {
+					if (!isOpen) setActiveAction(null);
+				}}
+			>
+				{activeAction === "quick-checkout" && (
+					<ActionDialog
+						title="Quick Checkout"
+						description={`Scan barcode, set quantity, and save paid sale for ${formatDateDisplay(date)}.`}
+					>
+						<QuickCheckoutForm
+							products={products}
+							date={date}
+							onSuccess={onSaved}
+						/>
+					</ActionDialog>
+				)}
+				{activeAction === "direct-sale" && (
+					<ActionDialog
+						title="Add Direct Sale"
+						description={`Record an immediate paid sale for ${formatDateDisplay(date)}.`}
+					>
+						<DirectSaleForm
+							products={products}
+							date={date}
+							onSuccess={onSaved}
+						/>
+					</ActionDialog>
+				)}
+				{activeAction === "account-sale" && (
+					<ActionDialog
+						title="Add Sale to Account"
+						description={`Record a customer account sale for ${formatDateDisplay(date)}.`}
+					>
+						<AccountSaleForm
+							products={products}
+							customers={customers}
+							date={date}
+							onSuccess={onSaved}
+						/>
+					</ActionDialog>
+				)}
+				{activeAction === "account-payment" && (
+					<ActionDialog
+						title="Record Account Payment"
+						description={`Save a customer payment for ${formatDateDisplay(date)}.`}
+					>
+						<AccountPaymentForm
+							customers={customers}
+							date={date}
+							onSuccess={onSaved}
+						/>
+					</ActionDialog>
+				)}
+				{activeAction === "customer" && (
+					<ActionDialog
+						title="Add Customer"
+						description="Create a customer account for credit purchases and payments."
+					>
+						<AddCustomerForm
+							onSuccess={onSaved}
+						/>
+					</ActionDialog>
+				)}
+				{activeAction === "product" && (
+					<ActionDialog
+						title="Add Product"
+						description="Add a new product to your catalog."
+					>
+						<AddProductForm onSuccess={onSaved} />
+					</ActionDialog>
+				)}
+				{activeAction === "purchase" && (
+					<ActionDialog
+						title="Add Purchase"
+						description={`Record stock purchase for ${formatDateDisplay(date)}.`}
+					>
+						<AddPurchaseForm
+							products={products}
+							suppliers={suppliers}
+							date={date}
+							onSuccess={onSaved}
+						/>
+					</ActionDialog>
+				)}
+				{activeAction === "adjustment" && (
+					<ActionDialog
+						title="Stock Adjustment"
+						description={`Add one or more stock adjustments for ${formatDateDisplay(date)}.`}
+					>
+						<AddAdjustmentForm
+							products={products}
+							date={date}
+							onSuccess={onSaved}
+						/>
+					</ActionDialog>
+				)}
+			</Dialog>
+		</>
+	);
+}
+
+function ActionBtn({
+	label,
+	icon,
+	onClick,
+	variant = "outline",
+}: {
+	label: string;
+	icon: React.ReactNode;
+	onClick: () => void;
+	variant?: "outline" | "secondary";
+}) {
+	return (
+		<Button
+			type="button"
+			variant={variant}
+			className="justify-start"
+			onClick={onClick}
+		>
+			{icon}
+			{label}
+		</Button>
+	);
+}
+
+function ActionDialog({
+	title,
+	description,
+	children,
+}: {
+	title: string;
+	description: string;
+	children: React.ReactNode;
+}) {
+	return (
+		<DialogContent
+			className={MODAL_CONTENT_CLASS}
+		>
+			<DialogHeader className="h-16 shrink-0 space-y-0.5 border-b px-4 py-1.5">
+				<DialogTitle>{title}</DialogTitle>
+				<DialogDescription className="text-xs leading-tight">
+					{description}
+				</DialogDescription>
+			</DialogHeader>
+			{children}
+		</DialogContent>
+	);
+}
+
+function SaveFooter({
+	disabled,
+	loading,
+	label = "Save",
+}: {
+	disabled: boolean;
+	loading: boolean;
+	label?: string;
+}) {
+	return (
+		<div className="shrink-0 border-t px-4 py-3">
+			<Button
+				type="submit"
+				className="w-full"
+				disabled={disabled}
+			>
+				{loading ? "Saving..." : label}
+			</Button>
+		</div>
+	);
+}
+
+function ItemsSection({
+	items,
+	products,
+	onRemove,
+	onChange,
+}: {
+	items: ChargeItem[];
+	products: Product[];
+	onRemove: (index: number) => void;
+	onChange: (
+		index: number,
+		updates: Partial<ChargeItem>,
+	) => void;
+}) {
+	return (
+		<div className="flex h-[50vh] min-h-0 flex-1 flex-col space-y-2">
+			<Label>Items Sold</Label>
+			<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+				{items.map((item, index) => (
+					<div
+						key={index}
+						className="flex items-end gap-2"
+					>
+						<div className="flex-1">
+							<ProductSelect
+								products={products}
+								value={item.productId}
+								onChange={(v) =>
+									onChange(index, {
+										productId: v,
+									})
+								}
+								placeholder="Product"
+							/>
+						</div>
+						<div className="w-20">
+							<Input
+								type="number"
+								min="1"
+								value={item.units}
+								onChange={(e) =>
+									onChange(index, {
+										units: e.target.value,
+									})
+								}
+								placeholder="Qty"
+							/>
+						</div>
+						{items.length > 1 && (
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon"
+								onClick={() => onRemove(index)}
+							>
+								<Trash2 className="h-4 w-4" />
+							</Button>
+						)}
+					</div>
+				))}
+			</div>
+		</div>
+	);
+}
+
+function BottomItemButtons({
+	onAddItem,
+	showNote,
+	setShowNote,
+	note,
+	setNote,
+	notePlaceholder,
+}: {
+	onAddItem: () => void;
+	showNote: boolean;
+	setShowNote: React.Dispatch<
+		React.SetStateAction<boolean>
+	>;
+	note: string;
+	setNote: React.Dispatch<
+		React.SetStateAction<string>
+	>;
+	notePlaceholder: string;
+}) {
+	return (
+		<div className="space-y-2">
+			<div className="grid grid-cols-2 gap-2">
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					className="w-full"
+					onClick={onAddItem}
+				>
+					<Plus className="mr-2 h-4 w-4" />
+					Add Item
+				</Button>
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					className="w-full"
+					onClick={() =>
+						setShowNote((prev) => !prev)
+					}
+				>
+					{showNote ? "Hide Note" : "Add Note"}
+				</Button>
+			</div>
+			{showNote && (
+				<Textarea
+					value={note}
+					onChange={(e) =>
+						setNote(e.target.value)
+					}
+					placeholder={notePlaceholder}
+					rows={2}
+				/>
+			)}
+		</div>
+	);
+}
+
+function QuickCheckoutForm({
+	products,
+	date,
+	onSuccess,
+}: {
+	products: Product[];
+	date: string;
+	onSuccess: () => void;
+}) {
+	const [loading, setLoading] =
+		React.useState(false);
+	const [scanInput, setScanInput] =
+		React.useState("");
+	const [items, setItems] = React.useState<
+		ChargeItem[]
+	>([]);
+	const [paymentMethod, setPaymentMethod] =
+		React.useState<PaymentMethod>("CASH");
+	const scanInputRef =
+		React.useRef<HTMLInputElement | null>(null);
+	const lastScanKeyTsRef = React.useRef(0);
+	const fastKeyStreakRef = React.useRef(0);
+	const autoAddTimerRef = React.useRef<
+		ReturnType<typeof setTimeout> | null
+	>(null);
+
+	const productMap = React.useMemo(
+		() => new Map(products.map((p) => [p.id, p])),
+		[products],
+	);
+	const productByBarcode = React.useMemo(
+		() =>
+			new Map(
+				products
+					.filter((p) => Boolean(p.barcode))
+					.map((p) => [
+						String(p.barcode)
+							.trim()
+							.toLowerCase(),
+						p,
+					]),
+			),
+		[products],
+	);
+
+	React.useEffect(() => {
+		if (!scanInputRef.current) return;
+		scanInputRef.current.focus();
+	}, []);
+
+	React.useEffect(() => {
+		return () => {
+			if (autoAddTimerRef.current) {
+				clearTimeout(autoAddTimerRef.current);
+			}
+		};
+	}, []);
+
+	const addByBarcode = React.useCallback(
+		(rawCode: string) => {
+			const normalizedCode = rawCode
+				.trim()
+				.toLowerCase();
+			if (!normalizedCode) return;
+			const matchedProduct =
+				productByBarcode.get(normalizedCode);
+			if (!matchedProduct) {
+				toast.error(
+					`No product for barcode "${rawCode.trim()}"`,
+				);
+				return;
+			}
+
+			setItems((prev) => {
+				const existingIndex = prev.findIndex(
+					(item) =>
+						item.productId === matchedProduct.id,
+				);
+				if (existingIndex >= 0) {
+					return prev.map((item, index) =>
+						index === existingIndex
+							? {
+									...item,
+									units: String(
+										(parseInt(
+											item.units,
+											10,
+										) || 0) + 1,
+									),
+							  }
+							: item,
+					);
+				}
+				return [
+					...prev,
+					{
+						productId: matchedProduct.id,
+						units: "1",
+					},
+				];
+			});
+			setScanInput("");
+			requestAnimationFrame(() =>
+				scanInputRef.current?.focus(),
+			);
+		},
+		[productByBarcode],
+	);
+
+	const adjustUnits = (
+		productId: string,
+		delta: number,
+	) => {
+		setItems((prev) =>
+			prev
+				.map((item) => {
+					if (item.productId !== productId)
+						return item;
+					const nextUnits =
+						(parseInt(item.units, 10) || 0) + delta;
+					return {
+						...item,
+						units: String(nextUnits),
+					};
+				})
+				.filter(
+					(item) =>
+						(parseInt(item.units, 10) || 0) > 0,
+				),
+		);
+	};
+
+	const setUnits = (
+		productId: string,
+		nextUnits: number,
+	) => {
+		setItems((prev) =>
+			prev
+				.map((item) =>
+					item.productId === productId
+						? {
+								...item,
+								units: String(nextUnits),
+						  }
+						: item,
+				)
+				.filter(
+					(item) =>
+						(parseInt(item.units, 10) || 0) > 0,
+				),
+		);
+	};
+
+	const removeItem = (productId: string) => {
+		setItems((prev) =>
+			prev.filter(
+				(item) => item.productId !== productId,
+			),
+		);
+	};
+
+	const scheduleAutoAdd = React.useCallback(
+		(rawCode: string) => {
+			if (autoAddTimerRef.current) {
+				clearTimeout(autoAddTimerRef.current);
+			}
+			autoAddTimerRef.current = setTimeout(() => {
+				addByBarcode(rawCode);
+			}, 80);
+		},
+		[addByBarcode],
+	);
+
+	const totalCents = React.useMemo(
+		() =>
+			items.reduce((sum, item) => {
+				const units = parseInt(item.units, 10) || 0;
+				const unitPrice =
+					productMap.get(item.productId)
+						?.currentPriceCents ?? 0;
+				return sum + units * unitPrice;
+			}, 0),
+		[items, productMap],
+	);
+
+	const handleSubmit = async (
+		e: React.FormEvent,
+	) => {
+		e.preventDefault();
+		setLoading(true);
+
+		const validItems = items
+			.map((item) => ({
+				productId: item.productId,
+				units: parseInt(item.units, 10) || 0,
+			}))
+			.filter((item) => item.units > 0);
+
+		if (!validItems.length) {
+			toast.error("Scan at least one item");
+			setLoading(false);
+			return;
+		}
+
+		try {
+			const res = await fetch("/api/sales", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					date,
+					paymentMethod,
+					items: validItems,
+				}),
+			});
+			if (!res.ok) {
+				const errorBody = await res
+					.json()
+					.catch(() => ({}));
+				throw new Error(
+					getApiErrorMessage(
+						errorBody,
+						"Failed to complete checkout",
+					),
+				);
+			}
+			toast.success("Checkout saved");
+			onSuccess();
+		} catch (err) {
+			toast.error(
+				err instanceof Error
+					? err.message
+					: "Failed to complete checkout",
+			);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	return (
+		<form
+			onSubmit={handleSubmit}
+			className="flex flex-col h-[60vh]"
+		>
+			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
+				<div className="space-y-2">
+					<Label>Scan Barcode</Label>
+					<div className="flex gap-2">
+						<Input
+							ref={scanInputRef}
+							value={scanInput}
+							onChange={(e) => {
+								const nextValue =
+									e.target.value;
+								const now = Date.now();
+								const addedChars =
+									nextValue.length -
+									scanInput.length;
+
+								if (addedChars > 1) {
+									if (
+										nextValue.trim().length >=
+										6
+									) {
+										scheduleAutoAdd(
+											nextValue,
+										);
+									}
+								} else if (
+									addedChars === 1
+								) {
+									const delta =
+										now -
+										lastScanKeyTsRef.current;
+									if (delta > 0 && delta < 35) {
+										fastKeyStreakRef.current += 1;
+									} else {
+										fastKeyStreakRef.current = 0;
+									}
+									if (
+										fastKeyStreakRef.current >=
+											5 &&
+										nextValue.trim().length >=
+											6
+									) {
+										scheduleAutoAdd(
+											nextValue,
+										);
+									}
+								} else if (
+									nextValue.length === 0
+								) {
+									fastKeyStreakRef.current = 0;
+								}
+
+								lastScanKeyTsRef.current = now;
+								setScanInput(nextValue);
+							}}
+							onKeyDown={(e) => {
+								if (e.key !== "Enter") return;
+								e.preventDefault();
+								addByBarcode(scanInput);
+							}}
+							placeholder="Scan and press Enter"
+						/>
+						<Button
+							type="button"
+							variant="outline"
+							onClick={() =>
+								addByBarcode(scanInput)
+							}
+						>
+							Add
+						</Button>
+					</div>
+				</div>
+
+				<div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+					<Label>Items</Label>
+					{items.length === 0 ? (
+						<p className="rounded-md border p-3 text-sm text-muted-foreground">
+							No items yet. Scan a barcode to add.
+						</p>
+					) : (
+						items.map((item) => {
+							const product =
+								productMap.get(item.productId);
+							const units =
+								parseInt(item.units, 10) || 0;
+							const lineTotal =
+								(product?.currentPriceCents ??
+									0) * units;
+							return (
+								<div
+									key={item.productId}
+									className="rounded-md border p-2"
+								>
+									<div className="mb-2 flex items-start justify-between gap-2">
+										<p className="font-medium">
+											{product?.name ??
+												item.productId}
+										</p>
+										<p className="text-sm font-semibold">
+											{formatZAR(lineTotal)}
+										</p>
+									</div>
+									<div className="grid grid-cols-4 gap-2">
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											onClick={() =>
+												adjustUnits(
+													item.productId,
+													-1,
+												)
+											}
+										>
+											-
+										</Button>
+										<Input
+											value={units}
+											onChange={(e) => {
+												const next =
+													parseInt(
+														e.target.value,
+														10,
+													) || 0;
+												setUnits(
+													item.productId,
+													next,
+												);
+											}}
+											className="text-center"
+										/>
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											onClick={() =>
+												adjustUnits(
+													item.productId,
+													1,
+												)
+											}
+										>
+											+
+										</Button>
+										<Button
+											type="button"
+											variant="ghost"
+											size="sm"
+											onClick={() =>
+												removeItem(
+													item.productId,
+												)
+											}
+										>
+											Remove
+										</Button>
+									</div>
+								</div>
+							);
+						})
+					)}
+				</div>
+
+				<div className="grid grid-cols-2 gap-3">
+					<div className="space-y-2">
+						<Label>Payment Method</Label>
+						<Select
+							value={paymentMethod}
+							onValueChange={(v) =>
+								setPaymentMethod(
+									v as PaymentMethod,
+								)
+							}
+						>
+							<SelectTrigger>
+								<SelectValue placeholder="Method" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="CASH">
+									Cash
+								</SelectItem>
+								<SelectItem value="CARD">
+									Card
+								</SelectItem>
+								<SelectItem value="EFT">
+									EFT
+								</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+					<div className="rounded-md border p-3">
+						<p className="text-xs text-muted-foreground">
+							Total
+						</p>
+						<p className="text-lg font-semibold">
+							{formatZAR(totalCents)}
+						</p>
+					</div>
+				</div>
+			</div>
+			<SaveFooter
+				disabled={loading || items.length === 0}
+				loading={loading}
+				label="Checkout"
+			/>
+		</form>
+	);
+}
+
+function DirectSaleForm({
+	products,
+	date,
+	onSuccess,
+}: {
+	products: Product[];
+	date: string;
+	onSuccess: () => void;
+}) {
+	const [loading, setLoading] =
+		React.useState(false);
+	const [items, setItems] = React.useState<
+		ChargeItem[]
+	>([{ productId: "", units: "" }]);
+	const [paymentMethod, setPaymentMethod] =
+		React.useState<PaymentMethod | "">("");
+	const [note, setNote] = React.useState("");
+	const [showNote, setShowNote] =
+		React.useState(false);
+
+	const updateItem = (
+		index: number,
+		updates: Partial<ChargeItem>,
+	) => {
+		setItems((prev) =>
+			prev.map((item, i) =>
+				i === index
+					? { ...item, ...updates }
+					: item,
+			),
+		);
+	};
+
+	const handleSubmit = async (
+		e: React.FormEvent,
+	) => {
+		e.preventDefault();
+		setLoading(true);
+		const validItems = items
+			.filter(
+				(item) => item.productId && item.units,
+			)
+			.map((item) => ({
+				productId: item.productId,
+				units: parseInt(item.units, 10) || 0,
+			}))
+			.filter((item) => item.units > 0);
+		if (!validItems.length) {
+			toast.error("Please add at least one item");
+			setLoading(false);
+			return;
+		}
+		try {
+			const res = await fetch("/api/sales", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					date,
+					paymentMethod,
+					items: validItems,
+					note:
+						showNote && note ? note : undefined,
+				}),
+			});
+			if (!res.ok) {
+				const errorBody = await res
+					.json()
+					.catch(() => ({}));
+				throw new Error(
+					getApiErrorMessage(
+						errorBody,
+						"Failed to save direct sale",
+					),
+				);
+			}
+			toast.success("Direct sale saved");
+			onSuccess();
+		} catch (err) {
+			toast.error(
+				err instanceof Error
+					? err.message
+					: "Failed to save direct sale",
+			);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	return (
+		<form
+			onSubmit={handleSubmit}
+			className="flex flex-col h-[60vh]"
+		>
+			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
+				<ItemsSection
+					items={items}
+					products={products}
+					onRemove={(index) =>
+						setItems((prev) =>
+							prev.filter((_, i) => i !== index),
+						)
+					}
+					onChange={updateItem}
+				/>
+				<div className="space-y-3">
+					<Label>Payment Method</Label>
+					<Select
+						value={paymentMethod}
+						onValueChange={(v) =>
+							setPaymentMethod(v as PaymentMethod)
+						}
+					>
+						<SelectTrigger>
+							<SelectValue placeholder="Select method" />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="CASH">
+								Cash
+							</SelectItem>
+							<SelectItem value="CARD">
+								Card
+							</SelectItem>
+							<SelectItem value="EFT">
+								EFT
+							</SelectItem>
+						</SelectContent>
+					</Select>
+				</div>
+				<BottomItemButtons
+					onAddItem={() =>
+						setItems((prev) => [
+							...prev,
+							{ productId: "", units: "" },
+						])
+					}
+					showNote={showNote}
+					setShowNote={setShowNote}
+					note={note}
+					setNote={setNote}
+					notePlaceholder="Any notes..."
+				/>
+			</div>
+			<SaveFooter
+				disabled={loading || !paymentMethod}
+				loading={loading}
+			/>
+		</form>
+	);
+}
+
+function AccountSaleForm({
+	products,
+	customers,
+	date,
+	onSuccess,
+}: {
+	products: Product[];
+	customers: Customer[];
+	date: string;
+	onSuccess: () => void;
+}) {
+	const [loading, setLoading] =
+		React.useState(false);
+	const [customerId, setCustomerId] =
+		React.useState("");
+	const [items, setItems] = React.useState<
+		ChargeItem[]
+	>([{ productId: "", units: "" }]);
+	const [note, setNote] = React.useState("");
+	const [showNote, setShowNote] =
+		React.useState(false);
+
+	const updateItem = (
+		index: number,
+		updates: Partial<ChargeItem>,
+	) => {
+		setItems((prev) =>
+			prev.map((item, i) =>
+				i === index
+					? { ...item, ...updates }
+					: item,
+			),
+		);
+	};
+
+	const handleSubmit = async (
+		e: React.FormEvent,
+	) => {
+		e.preventDefault();
+		setLoading(true);
+		const validItems = items
+			.filter(
+				(item) => item.productId && item.units,
+			)
+			.map((item) => ({
+				productId: item.productId,
+				units: parseInt(item.units, 10) || 0,
+			}))
+			.filter((item) => item.units > 0);
+		if (!validItems.length) {
+			toast.error("Please add at least one item");
+			setLoading(false);
+			return;
+		}
+		try {
+			const res = await fetch(
+				"/api/tabs/charge",
+				{
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+					},
+					body: JSON.stringify({
+						date,
+						customerId,
+						items: validItems,
+						note:
+							showNote && note ? note : undefined,
+					}),
+				},
+			);
+			if (!res.ok) {
+				const errorBody = await res
+					.json()
+					.catch(() => ({}));
+				throw new Error(
+					getApiErrorMessage(
+						errorBody,
+						"Failed to add sale to account",
+					),
+				);
+			}
+			toast.success(
+				"Sale added to customer account",
+			);
+			onSuccess();
+		} catch (err) {
+			toast.error(
+				err instanceof Error
+					? err.message
+					: "Failed to add sale to account",
+			);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	return (
+		<form
+			onSubmit={handleSubmit}
+			className="flex flex-col h-[60vh]"
+		>
+			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
+				<ItemsSection
+					items={items}
+					products={products}
+					onRemove={(index) =>
+						setItems((prev) =>
+							prev.filter((_, i) => i !== index),
+						)
+					}
+					onChange={updateItem}
+				/>
+				<div className="space-y-3">
+					<CustomerSelect
+						customers={customers}
+						value={customerId}
+						onChange={setCustomerId}
+						label="Customer Account"
+					/>
+				</div>
+				<BottomItemButtons
+					onAddItem={() =>
+						setItems((prev) => [
+							...prev,
+							{ productId: "", units: "" },
+						])
+					}
+					showNote={showNote}
+					setShowNote={setShowNote}
+					note={note}
+					setNote={setNote}
+					notePlaceholder="Optional note for this account sale"
+				/>
+			</div>
+			<SaveFooter
+				disabled={loading || !customerId}
+				loading={loading}
+			/>
+		</form>
+	);
+}
+
+function AccountPaymentForm({
+	customers,
+	date,
+	onSuccess,
+}: {
+	customers: Customer[];
+	date: string;
+	onSuccess: () => void;
+}) {
+	const [loading, setLoading] =
+		React.useState(false);
+	const [customerId, setCustomerId] =
+		React.useState("");
+	const [amountCents, setAmountCents] =
+		React.useState(0);
+	const [paymentMethod, setPaymentMethod] =
+		React.useState<PaymentMethod | "">("");
+	const [reference, setReference] =
+		React.useState("");
+	const [showReference, setShowReference] =
+		React.useState(false);
+	const [note, setNote] = React.useState("");
+	const [showNote, setShowNote] =
+		React.useState(false);
+
+	const handleSubmit = async (
+		e: React.FormEvent,
+	) => {
+		e.preventDefault();
+		setLoading(true);
+		try {
+			const res = await fetch(
+				"/api/tabs/payment",
+				{
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+					},
+					body: JSON.stringify({
+						date,
+						customerId,
+						amountCents,
+						paymentMethod,
+						reference:
+							showReference && reference
+								? reference
+								: undefined,
+						note:
+							showNote && note ? note : undefined,
+					}),
+				},
+			);
+			if (!res.ok) {
+				const errorBody = await res
+					.json()
+					.catch(() => ({}));
+				throw new Error(
+					getApiErrorMessage(
+						errorBody,
+						"Failed to record payment",
+					),
+				);
+			}
+			toast.success(
+				"Payment recorded successfully",
+			);
+			onSuccess();
+		} catch (err) {
+			toast.error(
+				err instanceof Error
+					? err.message
+					: "Failed to record payment",
+			);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	return (
+		<form
+			onSubmit={handleSubmit}
+			className="flex flex-col h-[60vh]"
+		>
+			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
+				<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+					<CustomerSelect
+						customers={customers}
+						value={customerId}
+						onChange={setCustomerId}
+						label="Customer Account"
+					/>
+					<MoneyInput
+						label="Amount"
+						value={amountCents}
+						onChange={setAmountCents}
+					/>
+				</div>
+
+				<div className="space-y-3">
+					<Label>Payment Method</Label>
+					<Select
+						value={paymentMethod}
+						onValueChange={(v) =>
+							setPaymentMethod(v as PaymentMethod)
+						}
+					>
+						<SelectTrigger>
+							<SelectValue placeholder="Select method" />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="CASH">
+								Cash
+							</SelectItem>
+							<SelectItem value="CARD">
+								Card
+							</SelectItem>
+							<SelectItem value="EFT">
+								EFT
+							</SelectItem>
+						</SelectContent>
+					</Select>
+				</div>
+
+				<div className="space-y-2">
+					<div className="grid grid-cols-2 gap-2">
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="w-full"
+							onClick={() =>
+								setShowReference((prev) => !prev)
+							}
+						>
+							{showReference
+								? "Hide Ref"
+								: "Add Ref"}
+						</Button>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="w-full"
+							onClick={() =>
+								setShowNote((prev) => !prev)
+							}
+						>
+							{showNote
+								? "Hide Note"
+								: "Add Note"}
+						</Button>
+					</div>
+					{showReference && (
+						<div className="space-y-2">
+							<Label>Reference (optional)</Label>
+							<Input
+								value={reference}
+								onChange={(e) =>
+									setReference(e.target.value)
+								}
+								placeholder="e.g. Receipt #123"
+							/>
+						</div>
+					)}
+					{showNote && (
+						<Textarea
+							value={note}
+							onChange={(e) =>
+								setNote(e.target.value)
+							}
+							placeholder="Any notes..."
+							rows={2}
+						/>
+					)}
+				</div>
+			</div>
+			<SaveFooter
+				disabled={
+					loading ||
+					!customerId ||
+					!paymentMethod ||
+					amountCents <= 0
+				}
+				loading={loading}
+			/>
+		</form>
+	);
+}
+
+function AddCustomerForm({
+	onSuccess,
+}: {
+	onSuccess: () => void;
+}) {
+	const [loading, setLoading] =
+		React.useState(false);
+	const [name, setName] = React.useState("");
+	const [phone, setPhone] = React.useState("");
+	const [note, setNote] = React.useState("");
+	const [creditLimitCents, setCreditLimitCents] =
+		React.useState(0);
+	const [dueDays, setDueDays] =
+		React.useState("");
+
+	const handleSubmit = async (
+		e: React.FormEvent,
+	) => {
+		e.preventDefault();
+		setLoading(true);
+		try {
+			const res = await fetch("/api/customers", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					name,
+					phone: phone || undefined,
+					note: note || undefined,
+					creditLimitCents,
+					dueDays: dueDays
+						? parseInt(dueDays, 10)
+						: undefined,
+				}),
+			});
+
+			if (!res.ok) {
+				const errorBody = await res
+					.json()
+					.catch(() => ({}));
+				throw new Error(
+					getApiErrorMessage(
+						errorBody,
+						"Failed to add customer",
+					),
+				);
+			}
+
+			toast.success("Customer account added");
+			onSuccess();
+		} catch (err) {
+			toast.error(
+				err instanceof Error
+					? err.message
+					: "Failed to add customer",
+			);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	return (
+		<form
+			onSubmit={handleSubmit}
+			className="flex flex-col h-[60vh]"
+		>
+			<div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-3 pt-2">
+				<div className="space-y-2">
+					<Label>Name</Label>
+					<Input
+						value={name}
+						onChange={(e) =>
+							setName(e.target.value)
+						}
+						placeholder="John Doe"
+						required
+					/>
+				</div>
+				<div className="space-y-2">
+					<Label>Phone (optional)</Label>
+					<Input
+						type="tel"
+						value={phone}
+						onChange={(e) =>
+							setPhone(e.target.value)
+						}
+						placeholder="072 123 4567"
+					/>
+				</div>
+				<MoneyInput
+					label="Credit Limit"
+					value={creditLimitCents}
+					onChange={setCreditLimitCents}
+				/>
+				<div className="space-y-2">
+					<Label>
+						Payment Due Days (optional)
+					</Label>
+					<Input
+						type="number"
+						min="1"
+						value={dueDays}
+						onChange={(e) =>
+							setDueDays(e.target.value)
+						}
+						placeholder="30"
+					/>
+				</div>
+				<div className="space-y-2">
+					<Label>Note (optional)</Label>
+					<Textarea
+						value={note}
+						onChange={(e) =>
+							setNote(e.target.value)
+						}
+						placeholder="Any notes about this customer..."
+						rows={2}
+					/>
+				</div>
+			</div>
+			<SaveFooter
+				disabled={loading || !name}
+				loading={loading}
+			/>
+		</form>
+	);
+}
+
+function AddProductForm({
+	onSuccess,
+}: {
+	onSuccess: () => void;
+}) {
+	const [loading, setLoading] =
+		React.useState(false);
+	const [name, setName] = React.useState("");
+	const [category, setCategory] =
+		React.useState("");
+	const [barcode, setBarcode] =
+		React.useState("");
+	const [packSize, setPackSize] =
+		React.useState("");
+	const [
+		reorderLevelUnits,
+		setReorderLevelUnits,
+	] = React.useState("");
+
+	const handleSubmit = async (
+		e: React.FormEvent,
+	) => {
+		e.preventDefault();
+		setLoading(true);
+		try {
+			const res = await fetch("/api/products", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					name,
+					category,
+					barcode: barcode || undefined,
+					packSize: parseInt(packSize, 10) || 1,
+					reorderLevelUnits:
+						parseInt(reorderLevelUnits, 10) || 0,
+				}),
+			});
+			if (!res.ok) {
+				const errorBody = await res
+					.json()
+					.catch(() => ({}));
+				throw new Error(
+					getApiErrorMessage(
+						errorBody,
+						"Failed to add product",
+					),
+				);
+			}
+			toast.success("Product added successfully");
+			onSuccess();
+		} catch (err) {
+			toast.error(
+				err instanceof Error
+					? err.message
+					: "Failed to add product",
+			);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	return (
+		<form
+			onSubmit={handleSubmit}
+			className="flex flex-col h-[60vh]"
+		>
+			<div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-3 pt-2">
+				<div className="space-y-2">
+					<Label>Name</Label>
+					<Input
+						value={name}
+						onChange={(e) =>
+							setName(e.target.value)
+						}
+						placeholder="Castle Lager 500ml"
+						required
+					/>
+				</div>
+				<div className="space-y-2">
+					<Label>Category</Label>
+					<Select
+						value={category}
+						onValueChange={setCategory}
+					>
+						<SelectTrigger>
+							<SelectValue placeholder="Select category" />
+						</SelectTrigger>
+						<SelectContent>
+							{CATEGORIES.map((cat) => (
+								<SelectItem key={cat} value={cat}>
+									{cat}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				</div>
+				<div className="space-y-2">
+					<Label>Barcode (optional)</Label>
+					<Input
+						value={barcode}
+						onChange={(e) =>
+							setBarcode(e.target.value)
+						}
+						placeholder="6001234567890"
+					/>
+				</div>
+				<div className="grid grid-cols-2 gap-3">
+					<div className="space-y-2">
+						<Label>Pack Size</Label>
+						<Input
+							type="number"
+							min="1"
+							value={packSize}
+							onChange={(e) =>
+								setPackSize(e.target.value)
+							}
+							placeholder="24"
+							required
+						/>
+					</div>
+					<div className="space-y-2">
+						<Label>Reorder Level</Label>
+						<Input
+							type="number"
+							min="0"
+							value={reorderLevelUnits}
+							onChange={(e) =>
+								setReorderLevelUnits(
+									e.target.value,
+								)
+							}
+							placeholder="12"
+							required
+						/>
+					</div>
+				</div>
+			</div>
+			<SaveFooter
+				disabled={loading || !name || !category}
+				loading={loading}
+			/>
+		</form>
+	);
+}
+
+function AddPurchaseForm({
+	products,
+	suppliers,
+	date,
+	onSuccess,
+}: {
+	products: Product[];
+	suppliers: Supplier[];
+	date: string;
+	onSuccess: () => void;
+}) {
+	const [loading, setLoading] =
+		React.useState(false);
+	const [supplierId, setSupplierId] =
+		React.useState("");
+	const [invoiceNo, setInvoiceNo] =
+		React.useState("");
+	const [items, setItems] = React.useState<
+		PurchaseItemForm[]
+	>([
+		{
+			productId: "",
+			cases: "",
+			singles: "",
+			unitCostCents: 0,
+		},
+	]);
+
+	const productMap = React.useMemo(
+		() => new Map(products.map((p) => [p.id, p])),
+		[products],
+	);
+
+	const calculateUnits = (
+		item: PurchaseItemForm,
+	) => {
+		const product = productMap.get(
+			item.productId,
+		);
+		const packSize = product?.packSize || 1;
+		const cases = parseInt(item.cases, 10) || 0;
+		const singles =
+			parseInt(item.singles, 10) || 0;
+		return cases * packSize + singles;
+	};
+
+	const updateItem = (
+		index: number,
+		updates: Partial<PurchaseItemForm>,
+	) => {
+		setItems((prev) =>
+			prev.map((item, i) =>
+				i === index
+					? { ...item, ...updates }
+					: item,
+			),
+		);
+	};
+
+	const handleSubmit = async (
+		e: React.FormEvent,
+	) => {
+		e.preventDefault();
+		setLoading(true);
+		const validItems = items
+			.filter(
+				(item) =>
+					item.productId &&
+					(item.cases || item.singles),
+			)
+			.map((item) => ({
+				productId: item.productId,
+				cases: parseInt(item.cases, 10) || 0,
+				singles: parseInt(item.singles, 10) || 0,
+				units: calculateUnits(item),
+				unitCostCents:
+					item.unitCostCents || undefined,
+			}));
+		if (!validItems.length) {
+			toast.error("Please add at least one item");
+			setLoading(false);
+			return;
+		}
+		try {
+			const res = await fetch("/api/purchases", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					supplierId: supplierId || undefined,
+					invoiceNo: invoiceNo || undefined,
+					purchaseDate: date,
+					items: validItems,
+				}),
+			});
+			if (!res.ok) {
+				const errorBody = await res
+					.json()
+					.catch(() => ({}));
+				throw new Error(
+					getApiErrorMessage(
+						errorBody,
+						"Failed to record purchase",
+					),
+				);
+			}
+			toast.success(
+				"Purchase recorded successfully",
+			);
+			onSuccess();
+		} catch (err) {
+			toast.error(
+				err instanceof Error
+					? err.message
+					: "Failed to record purchase",
+			);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	return (
+		<form
+			onSubmit={handleSubmit}
+			className="flex flex-col h-[60vh]"
+		>
+			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
+				<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+					<div className="space-y-2">
+						<Label>Supplier (optional)</Label>
+						<Select
+							value={supplierId}
+							onValueChange={setSupplierId}
+						>
+							<SelectTrigger>
+								<SelectValue placeholder="Select supplier" />
+							</SelectTrigger>
+							<SelectContent>
+								{suppliers.map((s) => (
+									<SelectItem
+										key={s.id}
+										value={s.id}
+									>
+										{s.name}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					</div>
+					<div className="space-y-2">
+						<Label>
+							Invoice Number (optional)
+						</Label>
+						<Input
+							value={invoiceNo}
+							onChange={(e) =>
+								setInvoiceNo(e.target.value)
+							}
+							placeholder="INV-12345"
+						/>
+					</div>
+					<div className="space-y-2">
+						<Label>Items</Label>
+						<div className="space-y-3">
+							{items.map((item, index) => (
+								<div
+									key={index}
+									className="grid grid-cols-12 items-end gap-2 rounded-lg border p-2"
+								>
+									<div className="col-span-12 sm:col-span-4">
+										<ProductSelect
+											products={products}
+											value={item.productId}
+											onChange={(v) =>
+												updateItem(index, {
+													productId: v,
+												})
+											}
+											placeholder="Product"
+										/>
+									</div>
+									<div className="col-span-4 sm:col-span-2">
+										<Input
+											type="number"
+											min="0"
+											value={item.cases}
+											onChange={(e) =>
+												updateItem(index, {
+													cases: e.target.value,
+												})
+											}
+											placeholder="Cases"
+										/>
+									</div>
+									<div className="col-span-4 sm:col-span-2">
+										<Input
+											type="number"
+											min="0"
+											value={item.singles}
+											onChange={(e) =>
+												updateItem(index, {
+													singles: e.target.value,
+												})
+											}
+											placeholder="Singles"
+										/>
+									</div>
+									<div className="col-span-4 sm:col-span-2">
+										<Input
+											value={calculateUnits(item)}
+											disabled
+											placeholder="Units"
+										/>
+									</div>
+									<div className="col-span-8 flex items-end gap-1 sm:col-span-2">
+										<MoneyInput
+											value={item.unitCostCents}
+											onChange={(v) =>
+												updateItem(index, {
+													unitCostCents: v,
+												})
+											}
+											placeholder="Cost"
+										/>
+										{items.length > 1 && (
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon"
+												onClick={() =>
+													setItems((prev) =>
+														prev.filter(
+															(_, i) =>
+																i !== index,
+														),
+													)
+												}
+											>
+												<Trash2 className="h-4 w-4" />
+											</Button>
+										)}
+									</div>
+								</div>
+							))}
+						</div>
+					</div>
+				</div>
+				<div className="space-y-2">
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						className="w-full"
+						onClick={() =>
+							setItems((prev) => [
+								...prev,
+								{
+									productId: "",
+									cases: "",
+									singles: "",
+									unitCostCents: 0,
+								},
+							])
+						}
+					>
+						<Plus className="mr-2 h-4 w-4" />
+						Add Item
+					</Button>
+				</div>
+			</div>
+			<SaveFooter
+				disabled={loading}
+				loading={loading}
+			/>
+		</form>
+	);
+}
+
+function AddAdjustmentForm({
+	products,
+	date,
+	onSuccess,
+}: {
+	products: Product[];
+	date: string;
+	onSuccess: () => void;
+}) {
+	const [loading, setLoading] =
+		React.useState(false);
+	const [items, setItems] = React.useState<
+		AdjustmentItemForm[]
+	>([
+		{
+			productId: "",
+			unitsDelta: "",
+			reason: "",
+			note: "",
+		},
+	]);
+
+	const updateItem = (
+		index: number,
+		updates: Partial<AdjustmentItemForm>,
+	) => {
+		setItems((prev) =>
+			prev.map((item, i) =>
+				i === index
+					? { ...item, ...updates }
+					: item,
+			),
+		);
+	};
+
+	const handleSubmit = async (
+		e: React.FormEvent,
+	) => {
+		e.preventDefault();
+		setLoading(true);
+		const validItems = items
+			.filter(
+				(item) =>
+					item.productId &&
+					item.unitsDelta &&
+					item.reason,
+			)
+			.map((item) => ({
+				productId: item.productId,
+				unitsDelta:
+					parseInt(item.unitsDelta, 10) || 0,
+				reason: item.reason as AdjustmentReason,
+				note: item.note || undefined,
+			}));
+		if (!validItems.length) {
+			toast.error(
+				"Please add at least one valid adjustment item",
+			);
+			setLoading(false);
+			return;
+		}
+		try {
+			const res = await fetch(
+				"/api/adjustments",
+				{
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+					},
+					body: JSON.stringify({
+						date,
+						items: validItems,
+					}),
+				},
+			);
+			if (!res.ok) {
+				const errorBody = await res
+					.json()
+					.catch(() => ({}));
+				throw new Error(
+					getApiErrorMessage(
+						errorBody,
+						"Failed to submit adjustments",
+					),
+				);
+			}
+			toast.success(
+				"Adjustments submitted successfully",
+			);
+			onSuccess();
+		} catch (err) {
+			toast.error(
+				err instanceof Error
+					? err.message
+					: "Failed to submit adjustments",
+			);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	return (
+		<form
+			onSubmit={handleSubmit}
+			className="flex flex-col h-[60vh]"
+		>
+			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
+				<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+					{items.map((item, index) => (
+						<div
+							key={index}
+							className="space-y-3 rounded-lg border p-3"
+						>
+							<div className="flex items-end gap-2">
+								<div className="flex-1">
+									<ProductSelect
+										products={products}
+										value={item.productId}
+										onChange={(v) =>
+											updateItem(index, {
+												productId: v,
+											})
+										}
+										placeholder="Product"
+									/>
+								</div>
+								{items.length > 1 && (
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon"
+										onClick={() =>
+											setItems((prev) =>
+												prev.filter(
+													(_, i) => i !== index,
+												),
+											)
+										}
+									>
+										<Trash2 className="h-4 w-4" />
+									</Button>
+								)}
+							</div>
+							<div className="grid grid-cols-2 gap-2">
+								<Select
+									value={item.reason}
+									onValueChange={(
+										v: AdjustmentReason | "",
+									) =>
+										updateItem(index, {
+											reason: v,
+										})
+									}
+								>
+									<SelectTrigger>
+										<SelectValue placeholder="Reason" />
+									</SelectTrigger>
+									<SelectContent>
+										{ADJUSTMENT_REASONS.map(
+											(reason) => (
+												<SelectItem
+													key={reason.value}
+													value={reason.value}
+												>
+													{reason.label}
+												</SelectItem>
+											),
+										)}
+									</SelectContent>
+								</Select>
+								<Input
+									type="number"
+									value={item.unitsDelta}
+									onChange={(e) =>
+										updateItem(index, {
+											unitsDelta: e.target.value,
+										})
+									}
+									placeholder="Units (+/-)"
+								/>
+							</div>
+							<Textarea
+								value={item.note}
+								onChange={(e) =>
+									updateItem(index, {
+										note: e.target.value,
+									})
+								}
+								placeholder="Note (optional)"
+								rows={2}
+							/>
+						</div>
+					))}
+				</div>
+				<div className="space-y-2">
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						className="w-full"
+						onClick={() =>
+							setItems((prev) => [
+								...prev,
+								{
+									productId: "",
+									unitsDelta: "",
+									reason: "",
+									note: "",
+								},
+							])
+						}
+					>
+						<Plus className="mr-2 h-4 w-4" />
+						Add Item
+					</Button>
+				</div>
+			</div>
+			<SaveFooter
+				disabled={loading}
+				loading={loading}
+			/>
+		</form>
+	);
+}
