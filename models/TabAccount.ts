@@ -14,7 +14,7 @@ export interface TabAccountDoc {
 
 const TabAccountSchema = new Schema<TabAccountDoc>(
   {
-    customerId: { type: String, required: true, index: true },
+    customerId: { type: String, required: true },
     creditLimitCents: { type: Number, required: true, default: 0 },
     status: { type: String, required: true, default: 'ACTIVE' },
     dueDays: { type: Number },

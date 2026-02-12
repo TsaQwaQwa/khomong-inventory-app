@@ -33,7 +33,7 @@ export interface TabTransactionDoc {
 
 const TabTransactionSchema = new Schema<TabTransactionDoc>(
   {
-    customerId: { type: String, required: true, index: true },
+    customerId: { type: String, required: true },
     businessDayId: { type: String, required: true, index: true },
     type: { type: String, required: true },
     amountCents: { type: Number, required: true },

@@ -24,7 +24,7 @@ const PurchaseSchema = new Schema<PurchaseDoc>(
   {
     supplierId: { type: String },
     invoiceNo: { type: String },
-    purchaseDate: { type: String, required: true, index: true },
+    purchaseDate: { type: String, required: true },
     items: [
       {
         productId: { type: String, required: true },

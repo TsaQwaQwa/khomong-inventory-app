@@ -1,6 +1,8 @@
 import { requireOrgAuth } from "@/lib/authz";
 import { TabsClient } from "@/app/tabs/tabs-client";
 
+export const dynamic = "force-dynamic";
+
 export default async function TransactionsPage() {
 	try {
 		await requireOrgAuth();

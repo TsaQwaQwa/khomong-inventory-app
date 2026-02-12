@@ -18,10 +18,12 @@ export async function jsonFetcher<T>(
 	const res = await fetch(input, init);
 	const payload = (await res.json()) as ApiResponse<T>;
 
-	if (!res.ok || !payload.ok) {
-		throw new Error(
-			payload.error?.message || "Failed to fetch data",
-		);
+	if (!res.ok || payload.ok === false) {
+		const message =
+			payload.ok === false
+				? payload.error.message
+				: "Failed to fetch data";
+		throw new Error(message);
 	}
 
 	return payload.data;

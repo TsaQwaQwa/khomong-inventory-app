@@ -29,7 +29,6 @@ const SaleTransactionSchema =
 			businessDayId: {
 				type: String,
 				required: true,
-				index: true,
 			},
 			paymentMethod: {
 				type: String,
