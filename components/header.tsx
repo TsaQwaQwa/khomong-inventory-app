@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import useSWR from "swr";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +21,7 @@ import {
 	CreditCard,
 	Menu,
 } from "lucide-react";
+import { getTodayJHB } from "@/lib/date-utils";
 
 const navItems = [
 	{
@@ -54,9 +56,33 @@ const navItems = [
 	},
 ];
 
+interface HeaderReport {
+	stockRecommendations: {
+		priority: "HIGH" | "MEDIUM";
+	}[];
+}
+
+const fetcher = async (url: string) => {
+	const res = await fetch(url);
+	const json = await res.json().catch(() => ({}));
+	if (!res.ok) return null;
+	return (json?.data ?? json) as HeaderReport;
+};
+
 export function Header() {
 	const pathname = usePathname();
 	const [open, setOpen] = React.useState(false);
+	const today = React.useMemo(() => getTodayJHB(), []);
+	const { data: report } = useSWR<HeaderReport | null>(
+		`/api/reports/daily?date=${today}`,
+		fetcher,
+	);
+	const lowStockCount =
+		report?.stockRecommendations?.length ?? 0;
+	const outOfStockCount =
+		report?.stockRecommendations?.filter(
+			(item) => item.priority === "HIGH",
+		).length ?? 0;
 
 	return (
 		<header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60">
@@ -69,6 +95,16 @@ export function Header() {
 						Kgomong
 					</span>
 				</Link>
+				{lowStockCount > 0 && (
+					<Link
+						href="/dashboard"
+						className="mr-2 hidden rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 md:inline-flex"
+					>
+						{outOfStockCount > 0
+							? `${outOfStockCount} out`
+							: `${lowStockCount} low`}
+					</Link>
+				)}
 
 				{/* Desktop Navigation */}
 				<nav className="hidden md:flex items-center space-x-1 text-sm">
@@ -110,9 +146,22 @@ export function Header() {
 						side="left"
 						className="w-70"
 					>
-						<SheetTitle className="text-left mb-6">
-							Kgomong
-						</SheetTitle>
+						<div className="mb-6 flex items-center gap-2">
+							<SheetTitle className="text-left">
+								Kgomong
+							</SheetTitle>
+							{lowStockCount > 0 && (
+								<Link
+									href="/dashboard"
+									onClick={() => setOpen(false)}
+									className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800"
+								>
+									{outOfStockCount > 0
+										? `${outOfStockCount} out`
+										: `${lowStockCount} low`}
+								</Link>
+							)}
+						</div>
 						<nav className="flex flex-col space-y-1">
 							{navItems.map((item) => {
 								const isActive =

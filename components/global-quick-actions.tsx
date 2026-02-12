@@ -30,7 +30,6 @@ import {
 import { ProductSelect } from "@/components/product-select";
 import { CustomerSelect } from "@/components/customer-select";
 import { MoneyInput } from "@/components/money-input";
-import { DatePickerYMD } from "@/components/date-picker-ymd";
 import {
 	Box,
 	CreditCard,
@@ -71,6 +70,7 @@ type QuickAction =
 	| "direct-sale"
 	| "account-sale"
 	| "account-payment"
+	| "restock"
 	| "customer"
 	| "product"
 	| "purchase"
@@ -93,6 +93,21 @@ interface AdjustmentItemForm {
 	unitsDelta: string;
 	reason: AdjustmentReason | "";
 	note: string;
+}
+
+interface DailyReportLite {
+	stockRecommendations: {
+		productId: string;
+		recommendedOrderUnits: number;
+	}[];
+}
+
+interface PurchaseHistoryLite {
+	supplierId?: string;
+	items: {
+		productId: string;
+		unitCostCents?: number;
+	}[];
 }
 
 const CATEGORIES = [
@@ -173,9 +188,7 @@ export function GlobalQuickActions() {
 	const [open, setOpen] = React.useState(false);
 	const [activeAction, setActiveAction] =
 		React.useState<QuickAction | null>(null);
-	const [date, setDate] = React.useState(
-		getTodayJHB(),
-	);
+	const date = React.useMemo(() => getTodayJHB(), []);
 	const { mutate } = useSWRConfig();
 
 	const { data: products = [] } = useSWR<
@@ -187,6 +200,115 @@ export function GlobalQuickActions() {
 	const { data: suppliers = [] } = useSWR<
 		Supplier[]
 	>("/api/suppliers", fetcher);
+	const { data: report } = useSWR<DailyReportLite>(
+		`/api/reports/daily?date=${date}`,
+		fetcher,
+	);
+	const { data: purchaseHistory = [] } = useSWR<
+		PurchaseHistoryLite[]
+	>(
+		`/api/purchases?date=${date}&lookbackDays=60`,
+		fetcher,
+	);
+	const restockSeed = React.useMemo(
+		() => {
+			const recommendations = (
+				report?.stockRecommendations ?? []
+			).filter(
+				(item) => item.recommendedOrderUnits > 0,
+			);
+			const productPackSizeById = new Map(
+				products.map((product) => [
+					product.id,
+					Math.max(product.packSize || 1, 1),
+				]),
+			);
+
+			const perProductRecentMeta = new Map<
+				string,
+				{ supplierId: string; unitCostCents: number }
+			>();
+			for (const purchase of purchaseHistory) {
+				for (const item of purchase.items ?? []) {
+					if (
+						!item.productId ||
+						perProductRecentMeta.has(
+							item.productId,
+						)
+					) {
+						continue;
+					}
+					perProductRecentMeta.set(item.productId, {
+						supplierId:
+							purchase.supplierId ?? "",
+						unitCostCents:
+							item.unitCostCents ?? 0,
+					});
+				}
+			}
+
+			const restockItems = recommendations.map(
+				(item) => {
+					const recent =
+						perProductRecentMeta.get(
+							item.productId,
+						);
+					const packSize =
+						productPackSizeById.get(
+							item.productId,
+						) ?? 1;
+					const recommendedUnits =
+						item.recommendedOrderUnits;
+					const cases = Math.floor(
+						recommendedUnits / packSize,
+					);
+					const singles =
+						recommendedUnits % packSize;
+					return {
+						productId: item.productId,
+						cases:
+							cases > 0 ? String(cases) : "",
+						singles:
+							singles > 0
+								? String(singles)
+								: "",
+						unitCostCents:
+							recent?.unitCostCents ?? 0,
+						suggestedSupplierId:
+							recent?.supplierId ?? "",
+					};
+				},
+			);
+
+			const supplierFrequency = new Map<
+				string,
+				number
+			>();
+			for (const item of restockItems) {
+				if (!item.suggestedSupplierId) continue;
+				supplierFrequency.set(
+					item.suggestedSupplierId,
+					(supplierFrequency.get(
+						item.suggestedSupplierId,
+					) ?? 0) + 1,
+				);
+			}
+			const sortedSuppliers = Array.from(
+				supplierFrequency.entries(),
+			).sort((a, b) => b[1] - a[1]);
+			const initialSupplierId =
+				sortedSuppliers[0]?.[0] ?? "";
+
+			return {
+				items: restockItems.map(
+					({ suggestedSupplierId, ...rest }) =>
+						rest,
+				),
+				initialSupplierId,
+			};
+		},
+		[report, purchaseHistory, products],
+	);
 
 	if (!show) return null;
 
@@ -224,6 +346,41 @@ export function GlobalQuickActions() {
 			),
 		]);
 		setActiveAction(null);
+	};
+
+	const onSavedKeepOpen = async () => {
+		await Promise.all([
+			mutate(
+				(key) =>
+					typeof key === "string" &&
+					key.startsWith("/api/products"),
+			),
+			mutate(
+				(key) =>
+					typeof key === "string" &&
+					key.startsWith("/api/purchases"),
+			),
+			mutate(
+				(key) =>
+					typeof key === "string" &&
+					key.startsWith("/api/adjustments"),
+			),
+			mutate(
+				(key) =>
+					typeof key === "string" &&
+					key.startsWith("/api/transactions"),
+			),
+			mutate(
+				(key) =>
+					typeof key === "string" &&
+					key.startsWith("/api/customers"),
+			),
+			mutate(
+				(key) =>
+					typeof key === "string" &&
+					key.startsWith("/api/reports"),
+			),
+		]);
 	};
 
 	return (
@@ -297,6 +454,19 @@ export function GlobalQuickActions() {
 								}}
 							/>
 							<ActionBtn
+								label={`Restock Low Stock (${restockSeed.items.length})`}
+								icon={
+									<ShoppingCart className="mr-2 h-4 w-4" />
+								}
+								onClick={() => {
+									setActiveAction("restock");
+									setOpen(false);
+								}}
+								disabled={
+									restockSeed.items.length === 0
+								}
+							/>
+							<ActionBtn
 								label="Add Customer"
 								icon={
 									<Users className="mr-2 h-4 w-4" />
@@ -355,7 +525,7 @@ export function GlobalQuickActions() {
 						<QuickCheckoutForm
 							products={products}
 							date={date}
-							onSuccess={onSaved}
+							onSuccess={onSavedKeepOpen}
 						/>
 					</ActionDialog>
 				)}
@@ -427,6 +597,23 @@ export function GlobalQuickActions() {
 						/>
 					</ActionDialog>
 				)}
+				{activeAction === "restock" && (
+					<ActionDialog
+						title="Restock Low Stock"
+						description={`Prefilled from stock recommendations for ${formatDateDisplay(date)}.`}
+					>
+						<AddPurchaseForm
+							products={products}
+							suppliers={suppliers}
+							date={date}
+							initialItems={restockSeed.items}
+							initialSupplierId={
+								restockSeed.initialSupplierId
+							}
+							onSuccess={onSaved}
+						/>
+					</ActionDialog>
+				)}
 				{activeAction === "adjustment" && (
 					<ActionDialog
 						title="Stock Adjustment"
@@ -449,11 +636,13 @@ function ActionBtn({
 	icon,
 	onClick,
 	variant = "outline",
+	disabled = false,
 }: {
 	label: string;
 	icon: React.ReactNode;
 	onClick: () => void;
 	variant?: "outline" | "secondary";
+	disabled?: boolean;
 }) {
 	return (
 		<Button
@@ -461,6 +650,7 @@ function ActionBtn({
 			variant={variant}
 			className="justify-start"
 			onClick={onClick}
+			disabled={disabled}
 		>
 			{icon}
 			{label}
@@ -865,6 +1055,12 @@ function QuickCheckoutForm({
 				);
 			}
 			toast.success("Checkout saved");
+			setItems([]);
+			setScanInput("");
+			fastKeyStreakRef.current = 0;
+			requestAnimationFrame(() =>
+				scanInputRef.current?.focus(),
+			);
 			onSuccess();
 		} catch (err) {
 			toast.error(
@@ -1855,29 +2051,53 @@ function AddPurchaseForm({
 	products,
 	suppliers,
 	date,
+	initialItems,
+	initialSupplierId,
 	onSuccess,
 }: {
 	products: Product[];
 	suppliers: Supplier[];
 	date: string;
+	initialItems?: PurchaseItemForm[];
+	initialSupplierId?: string;
 	onSuccess: () => void;
 }) {
 	const [loading, setLoading] =
 		React.useState(false);
 	const [supplierId, setSupplierId] =
-		React.useState("");
+		React.useState(initialSupplierId ?? "");
 	const [invoiceNo, setInvoiceNo] =
 		React.useState("");
 	const [items, setItems] = React.useState<
 		PurchaseItemForm[]
-	>([
-		{
-			productId: "",
-			cases: "",
-			singles: "",
-			unitCostCents: 0,
-		},
-	]);
+	>(
+		initialItems && initialItems.length > 0
+			? initialItems
+			: [
+					{
+						productId: "",
+						cases: "",
+						singles: "",
+						unitCostCents: 0,
+					},
+				],
+	);
+
+	React.useEffect(() => {
+		setSupplierId(initialSupplierId ?? "");
+		if (initialItems && initialItems.length > 0) {
+			setItems(initialItems);
+			return;
+		}
+		setItems([
+			{
+				productId: "",
+				cases: "",
+				singles: "",
+				unitCostCents: 0,
+			},
+		]);
+	}, [initialItems, initialSupplierId]);
 
 	const productMap = React.useMemo(
 		() => new Map(products.map((p) => [p.id, p])),

@@ -5,7 +5,7 @@ import { requireOrgAuth } from "@/lib/authz";
 import { ok, fail } from "@/lib/http";
 import { parseJson } from "@/lib/validate";
 import { purchaseCreateSchema } from "@/lib/schemas";
-import { todayYMD } from "@/lib/dates";
+import { addDays, todayYMD } from "@/lib/dates";
 import { Purchase } from "@/models/Purchase";
 import { Supplier } from "@/models/Supplier";
 import { serializeDoc, serializeDocs } from "@/lib/serialize";
@@ -18,10 +18,25 @@ export async function GET(req: Request) {
 	const url = new URL(req.url);
 	const date =
 		url.searchParams.get("date") ?? todayYMD();
+	const lookbackDaysParam =
+		url.searchParams.get("lookbackDays");
+	const lookbackDays = lookbackDaysParam
+		? Math.max(
+				0,
+				parseInt(lookbackDaysParam, 10) || 0,
+			)
+		: 0;
+	const purchaseDateFilter =
+		lookbackDays > 0
+			? {
+					$gte: addDays(date, -lookbackDays),
+					$lte: date,
+				}
+			: date;
 
 	await connectDB();
 	const docs = await Purchase.find({
-		purchaseDate: date,
+		purchaseDate: purchaseDateFilter,
 	})
 		.sort({ createdAt: -1 })
 		.lean();
