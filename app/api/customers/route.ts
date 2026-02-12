@@ -9,6 +9,7 @@ import { Customer } from "@/models/Customer";
 import { TabAccount } from "@/models/TabAccount";
 import { TabTransaction } from "@/models/TabTransaction";
 import { serializeDoc, serializeDocs } from "@/lib/serialize";
+import { todayYMD } from "@/lib/dates";
 
 export async function GET() {
 	try {
@@ -83,6 +84,26 @@ export async function GET() {
 					},
 			  ])
 			: [];
+	const latestChargeAgg =
+		customerIds.length > 0
+			? await TabTransaction.aggregate([
+					{
+						$match: {
+							customerId: { $in: customerIds },
+							type: "CHARGE",
+						},
+					},
+					{ $sort: { createdAt: -1 } },
+					{
+						$group: {
+							_id: "$customerId",
+							latestChargeAt: {
+								$first: "$createdAt",
+							},
+						},
+					},
+			  ])
+			: [];
 
 	const accountMap = new Map(
 		accounts.map((account) => [
@@ -100,6 +121,15 @@ export async function GET() {
 			},
 		]),
 	);
+	const latestChargeMap = new Map(
+		latestChargeAgg.map((entry) => [
+			entry._id,
+			entry.latestChargeAt
+				? new Date(entry.latestChargeAt)
+				: null,
+		]),
+	);
+	const today = todayYMD();
 
 	const payload = docs
 		.map((doc) => serializeDoc(doc))
@@ -112,6 +142,22 @@ export async function GET() {
 				(agg?.charges ?? 0) -
 				(agg?.payments ?? 0) +
 				(agg?.adjustments ?? 0);
+			const latestChargeAt =
+				latestChargeMap.get(id) ?? null;
+			let dueDate: string | undefined;
+			if (
+				balance > 0 &&
+				account?.dueDays &&
+				latestChargeAt
+			) {
+				const dueAt = new Date(latestChargeAt);
+				dueAt.setDate(
+					dueAt.getDate() + account.dueDays,
+				);
+				dueDate = dueAt
+					.toISOString()
+					.slice(0, 10);
+			}
 
 			return {
 				...customer,
@@ -120,6 +166,14 @@ export async function GET() {
 				balanceCents: balance,
 				dueDays: account?.dueDays,
 				tabStatus: account?.status,
+				lastChargeAt: latestChargeAt
+					? latestChargeAt.toISOString()
+					: undefined,
+				dueDate,
+				isOverdue:
+					Boolean(dueDate) &&
+					balance > 0 &&
+					dueDate! < today,
 			};
 		});
 

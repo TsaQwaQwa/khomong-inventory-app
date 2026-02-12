@@ -171,20 +171,7 @@ export async function computeDailySummary(
 		productIds.add(id);
 	for (const id of adjUnitsByProduct.keys())
 		productIds.add(id);
-	const lookupProductIds = Array.from(
-		productIds,
-	).filter(
-		(pid): pid is string =>
-			typeof pid === "string" &&
-			pid !== "undefined",
-	);
-
-	const products =
-		lookupProductIds.length > 0
-			? await Product.find({
-					_id: { $in: lookupProductIds },
-				}).lean()
-			: [];
+	const products = await Product.find({}).lean();
 	const productById = new Map<
 		string,
 		{
@@ -369,6 +356,10 @@ export async function computeDailySummary(
 		string,
 		number
 	>();
+	const purchaseCostTotalsByProduct = new Map<
+		string,
+		{ costCents: number; units: number }
+	>();
 	const purchasesToDate = await Purchase.find({
 		purchaseDate: { $lte: date },
 	})
@@ -382,6 +373,31 @@ export async function computeDailySummary(
 					item.productId,
 				) ?? 0) + (item.units ?? 0),
 			);
+			if (
+				typeof item.unitCostCents === "number" &&
+				item.unitCostCents >= 0 &&
+				(item.units ?? 0) > 0
+			) {
+				const existing =
+					purchaseCostTotalsByProduct.get(
+						item.productId,
+					) ?? {
+						costCents: 0,
+						units: 0,
+					};
+				purchaseCostTotalsByProduct.set(
+					item.productId,
+					{
+						costCents:
+							existing.costCents +
+							item.unitCostCents *
+								(item.units ?? 0),
+						units:
+							existing.units +
+							(item.units ?? 0),
+					},
+				);
+			}
 		}
 	}
 
@@ -412,13 +428,31 @@ export async function computeDailySummary(
 		number
 	>();
 	if (dayIdsUpToDate.length > 0) {
-		const salesToDate = await TabTransaction.find({
-			businessDayId: { $in: dayIdsUpToDate },
-			type: "CHARGE",
-		})
-			.select({ items: 1 })
-			.lean();
-		for (const txn of salesToDate) {
+		const [tabSalesToDate, directSalesToDate] =
+			await Promise.all([
+				TabTransaction.find({
+					businessDayId: { $in: dayIdsUpToDate },
+					type: "CHARGE",
+				})
+					.select({ items: 1 })
+					.lean(),
+				SaleTransaction.find({
+					businessDayId: { $in: dayIdsUpToDate },
+				})
+					.select({ items: 1 })
+					.lean(),
+			]);
+		for (const txn of tabSalesToDate) {
+			for (const item of txn.items ?? []) {
+				soldUnitsToDateByProduct.set(
+					item.productId,
+					(soldUnitsToDateByProduct.get(
+						item.productId,
+					) ?? 0) + (item.units ?? 0),
+				);
+			}
+		}
+		for (const txn of directSalesToDate) {
 			for (const item of txn.items ?? []) {
 				soldUnitsToDateByProduct.set(
 					item.productId,
@@ -429,6 +463,124 @@ export async function computeDailySummary(
 			}
 		}
 	}
+
+	const last30StartDate = addDays(date, -29);
+	const dayDocsLast30 = await BusinessDay.find({
+		date: { $gte: last30StartDate, $lte: date },
+	})
+		.select({ _id: 1 })
+		.lean();
+	const dayIdsLast30 = dayDocsLast30.map((doc) =>
+		String(doc._id),
+	);
+	const soldUnitsLast30ByProduct = new Map<
+		string,
+		number
+	>();
+	if (dayIdsLast30.length > 0) {
+		const [tabSalesLast30, directSalesLast30] =
+			await Promise.all([
+				TabTransaction.find({
+					businessDayId: { $in: dayIdsLast30 },
+					type: "CHARGE",
+				})
+					.select({ items: 1 })
+					.lean(),
+				SaleTransaction.find({
+					businessDayId: { $in: dayIdsLast30 },
+				})
+					.select({ items: 1 })
+					.lean(),
+			]);
+		for (const txn of tabSalesLast30) {
+			for (const item of txn.items ?? []) {
+				soldUnitsLast30ByProduct.set(
+					item.productId,
+					(soldUnitsLast30ByProduct.get(
+						item.productId,
+					) ?? 0) + (item.units ?? 0),
+				);
+			}
+		}
+		for (const txn of directSalesLast30) {
+			for (const item of txn.items ?? []) {
+				soldUnitsLast30ByProduct.set(
+					item.productId,
+					(soldUnitsLast30ByProduct.get(
+						item.productId,
+					) ?? 0) + (item.units ?? 0),
+				);
+			}
+		}
+	}
+
+	let estimatedCogsCents = 0;
+	for (const item of byProduct) {
+		const summary =
+			purchaseCostTotalsByProduct.get(
+				item.productId,
+			);
+		if (!summary || summary.units <= 0) continue;
+		const avgUnitCost =
+			summary.costCents / summary.units;
+		estimatedCogsCents += Math.round(
+			(item.unitsSold ?? 0) * avgUnitCost,
+		);
+	}
+	const grossProfitCents =
+		expectedRevenueCents - estimatedCogsCents;
+	const grossMarginPct =
+		expectedRevenueCents > 0
+			? (grossProfitCents / expectedRevenueCents) *
+				100
+			: null;
+
+	const inventoryRows = Array.from(
+		productById.entries(),
+	).map(([productId, meta]) => {
+		const currentUnits =
+			(purchasedUnitsToDateByProduct.get(productId) ??
+				0) +
+			(adjustedUnitsToDateByProduct.get(productId) ??
+				0) -
+			(soldUnitsToDateByProduct.get(productId) ??
+				0);
+		return {
+			productId,
+			productName: meta.name,
+			currentUnits,
+			unitsSoldToday:
+				soldUnitsByProduct.get(productId) ?? 0,
+			unitsSoldLast30Days:
+				soldUnitsLast30ByProduct.get(productId) ?? 0,
+		};
+	});
+	const topMovers = inventoryRows
+		.filter((row) => row.unitsSoldToday > 0)
+		.sort(
+			(a, b) => b.unitsSoldToday - a.unitsSoldToday,
+		)
+		.slice(0, 5);
+	const slowMovers = inventoryRows
+		.filter(
+			(row) =>
+				row.currentUnits > 0 &&
+				row.unitsSoldLast30Days > 0,
+		)
+		.sort(
+			(a, b) =>
+				a.unitsSoldLast30Days -
+				b.unitsSoldLast30Days,
+		)
+		.slice(0, 5);
+	const deadStock = inventoryRows
+		.filter(
+			(row) =>
+				row.currentUnits > 0 &&
+				row.unitsSoldLast30Days === 0,
+		)
+		.sort((a, b) => b.currentUnits - a.currentUnits)
+		.slice(0, 5);
 
 	const stockRecommendations: DailyReport["stockRecommendations"] =
 		Array.from(productById.entries())
@@ -529,6 +681,16 @@ export async function computeDailySummary(
 				changePct: salesChangePct,
 			},
 			topProducts,
+		},
+		grossProfit: {
+			estimatedCogsCents,
+			grossProfitCents,
+			grossMarginPct,
+		},
+		inventoryInsights: {
+			topMovers,
+			slowMovers,
+			deadStock,
 		},
 		recommendations,
 		stockRecommendations,

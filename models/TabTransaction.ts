@@ -23,6 +23,8 @@ export interface TabTransactionDoc {
   items?: TabTxnItem[];
   note?: string;
   attachmentId?: string;
+  reversalOfId?: string;
+  reversalReason?: string;
 
   createdByUserId: string;
   createdAt: Date;
@@ -49,6 +51,8 @@ const TabTransactionSchema = new Schema<TabTransactionDoc>(
     ],
     note: { type: String },
     attachmentId: { type: String },
+    reversalOfId: { type: String },
+    reversalReason: { type: String },
 
     createdByUserId: { type: String, required: true },
   },

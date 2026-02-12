@@ -137,7 +137,46 @@ export async function GET(req: Request) {
 			})
 			.slice(0, limit);
 
-		return ok(entries);
+		const originalIds = entries
+			.map((entry) => entry.id)
+			.filter(
+				(entryId): entryId is string =>
+					typeof entryId === "string" &&
+					entryId.length > 0,
+			);
+
+		const [tabReversals, saleReversals] =
+			originalIds.length > 0
+				? await Promise.all([
+						TabTransaction.find({
+							reversalOfId: { $in: originalIds },
+						})
+							.select({ reversalOfId: 1 })
+							.lean(),
+						SaleTransaction.find({
+							reversalOfId: { $in: originalIds },
+						})
+							.select({ reversalOfId: 1 })
+							.lean(),
+				  ])
+				: [[], []];
+
+		const reversedIdSet = new Set([
+			...tabReversals
+				.map((doc) => doc.reversalOfId)
+				.filter(Boolean),
+			...saleReversals
+				.map((doc) => doc.reversalOfId)
+				.filter(Boolean),
+		]);
+
+		const entriesWithFlags = entries.map((entry) => ({
+			...entry,
+			isReversal: Boolean(entry.reversalOfId),
+			isReversed: reversedIdSet.has(entry.id),
+		}));
+
+		return ok(entriesWithFlags);
 	} catch {
 		return fail("Failed to load transactions", {
 			status: 500,

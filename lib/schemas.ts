@@ -107,3 +107,9 @@ export const directSaleSchema = z.object({
   })).min(1),
   note: z.string().optional(),
 });
+
+export const transactionReverseSchema = z.object({
+  transactionId: z.string().min(1),
+  type: z.enum(['DIRECT_SALE', 'CHARGE', 'PAYMENT']),
+  reason: z.string().min(3),
+});

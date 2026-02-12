@@ -25,6 +25,9 @@ export interface Customer {
 	dueDays?: number;
 	balanceCents?: number;
 	tabStatus?: string;
+	lastChargeAt?: string;
+	dueDate?: string;
+	isOverdue?: boolean;
 }
 
 // Purchase types
@@ -116,6 +119,31 @@ export interface DailyReport {
 			productName: string;
 			unitsSold: number;
 			revenueCents: number;
+		}[];
+	};
+	grossProfit: {
+		estimatedCogsCents: number;
+		grossProfitCents: number;
+		grossMarginPct: number | null;
+	};
+	inventoryInsights: {
+		topMovers: {
+			productId: string;
+			productName: string;
+			unitsSoldToday: number;
+			currentUnits: number;
+		}[];
+		slowMovers: {
+			productId: string;
+			productName: string;
+			unitsSoldLast30Days: number;
+			currentUnits: number;
+		}[];
+		deadStock: {
+			productId: string;
+			productName: string;
+			unitsSoldLast30Days: number;
+			currentUnits: number;
 		}[];
 	};
 	recommendations: {

@@ -96,6 +96,12 @@ interface AdjustmentItemForm {
 }
 
 interface DailyReportLite {
+	trends?: {
+		topProducts?: {
+			productId: string;
+			productName: string;
+		}[];
+	};
 	stockRecommendations: {
 		productId: string;
 		recommendedOrderUnits: number;
@@ -136,6 +142,11 @@ const ADJUSTMENT_REASONS: {
 		label: "Count Correction",
 	},
 ];
+
+interface QuickProductLite {
+	id: string;
+	name: string;
+}
 
 const fetcher = async (url: string) => {
 	const res = await fetch(url);
@@ -348,41 +359,6 @@ export function GlobalQuickActions() {
 		setActiveAction(null);
 	};
 
-	const onSavedKeepOpen = async () => {
-		await Promise.all([
-			mutate(
-				(key) =>
-					typeof key === "string" &&
-					key.startsWith("/api/products"),
-			),
-			mutate(
-				(key) =>
-					typeof key === "string" &&
-					key.startsWith("/api/purchases"),
-			),
-			mutate(
-				(key) =>
-					typeof key === "string" &&
-					key.startsWith("/api/adjustments"),
-			),
-			mutate(
-				(key) =>
-					typeof key === "string" &&
-					key.startsWith("/api/transactions"),
-			),
-			mutate(
-				(key) =>
-					typeof key === "string" &&
-					key.startsWith("/api/customers"),
-			),
-			mutate(
-				(key) =>
-					typeof key === "string" &&
-					key.startsWith("/api/reports"),
-			),
-		]);
-	};
-
 	return (
 		<>
 			<div className="fixed bottom-4 right-4 z-40">
@@ -524,8 +500,32 @@ export function GlobalQuickActions() {
 					>
 						<QuickCheckoutForm
 							products={products}
+							quickProducts={
+								(report?.trends
+									?.topProducts ?? []
+								)
+									.map((item) =>
+										products.find(
+											(product) =>
+												product.id ===
+												item.productId,
+										),
+									)
+									.filter(
+										(
+											product,
+										): product is Product =>
+											Boolean(
+												product,
+											),
+									)
+									.map((product) => ({
+										id: product.id,
+										name: product.name,
+									}))
+							}
 							date={date}
-							onSuccess={onSavedKeepOpen}
+							onSuccess={onSaved}
 						/>
 					</ActionDialog>
 				)}
@@ -829,10 +829,12 @@ function BottomItemButtons({
 
 function QuickCheckoutForm({
 	products,
+	quickProducts,
 	date,
 	onSuccess,
 }: {
 	products: Product[];
+	quickProducts: QuickProductLite[];
 	date: string;
 	onSuccess: () => void;
 }) {
@@ -845,6 +847,10 @@ function QuickCheckoutForm({
 	>([]);
 	const [paymentMethod, setPaymentMethod] =
 		React.useState<PaymentMethod>("CASH");
+	const [manualProductId, setManualProductId] =
+		React.useState("");
+	const [manualUnits, setManualUnits] =
+		React.useState("1");
 	const scanInputRef =
 		React.useRef<HTMLInputElement | null>(null);
 	const lastScanKeyTsRef = React.useRef(0);
@@ -987,6 +993,86 @@ function QuickCheckoutForm({
 			),
 		);
 	};
+
+	const addManualItem = React.useCallback(() => {
+		const units =
+			parseInt(manualUnits, 10) || 0;
+		if (!manualProductId || units <= 0) {
+			toast.error(
+				"Select product and quantity first",
+			);
+			return;
+		}
+		setItems((prev) => {
+			const existingIndex = prev.findIndex(
+				(item) => item.productId === manualProductId,
+			);
+			if (existingIndex >= 0) {
+				return prev.map((item, index) =>
+					index === existingIndex
+						? {
+								...item,
+								units: String(
+									(parseInt(
+										item.units,
+										10,
+									) || 0) + units,
+							  ),
+						  }
+						: item,
+				);
+			}
+			return [
+				...prev,
+				{
+					productId: manualProductId,
+					units: String(units),
+				},
+			];
+		});
+		setManualProductId("");
+		setManualUnits("1");
+		requestAnimationFrame(() =>
+			scanInputRef.current?.focus(),
+		);
+	}, [manualProductId, manualUnits]);
+
+	const addProductUnits = React.useCallback(
+		(productId: string, unitsToAdd: number) => {
+			if (!productId || unitsToAdd <= 0) return;
+			setItems((prev) => {
+				const existingIndex = prev.findIndex(
+					(item) => item.productId === productId,
+				);
+				if (existingIndex >= 0) {
+					return prev.map((item, index) =>
+						index === existingIndex
+							? {
+									...item,
+									units: String(
+										(parseInt(
+											item.units,
+											10,
+										) || 0) + unitsToAdd,
+									),
+							  }
+							: item,
+					);
+				}
+				return [
+					...prev,
+					{
+						productId,
+						units: String(unitsToAdd),
+					},
+				];
+			});
+			requestAnimationFrame(() =>
+				scanInputRef.current?.focus(),
+			);
+		},
+		[],
+	);
 
 	const scheduleAutoAdd = React.useCallback(
 		(rawCode: string) => {
@@ -1150,6 +1236,66 @@ function QuickCheckoutForm({
 						</Button>
 					</div>
 				</div>
+				<div className="space-y-2">
+					<Label>Manual Add (Fallback)</Label>
+					<div className="grid grid-cols-12 gap-2">
+						<div className="col-span-8">
+							<ProductSelect
+								products={products}
+								value={manualProductId}
+								onChange={setManualProductId}
+								placeholder="Select product"
+							/>
+						</div>
+						<div className="col-span-2">
+							<Input
+								type="number"
+								min="1"
+								value={manualUnits}
+								onChange={(e) =>
+									setManualUnits(
+										e.target.value,
+									)
+								}
+								placeholder="Qty"
+							/>
+						</div>
+						<div className="col-span-2">
+							<Button
+								type="button"
+								variant="outline"
+								className="w-full"
+								onClick={addManualItem}
+							>
+								Add
+							</Button>
+						</div>
+					</div>
+				</div>
+				{quickProducts.length > 0 && (
+					<div className="space-y-2">
+						<Label>Top Sellers</Label>
+						<div className="flex gap-2 overflow-x-auto pb-1">
+							{quickProducts.map((product) => (
+								<Button
+									key={product.id}
+									type="button"
+									variant="outline"
+									size="sm"
+									className="shrink-0"
+									onClick={() =>
+										addProductUnits(
+											product.id,
+											1,
+										)
+									}
+								>
+									{product.name}
+								</Button>
+							))}
+						</div>
+					</div>
+				)}
 
 				<div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
 					<Label>Items</Label>

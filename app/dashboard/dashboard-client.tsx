@@ -314,7 +314,62 @@ export function DashboardClient() {
 									{},
 								)}
 							/>
+							<SummaryCard
+								title="Est. Gross Profit"
+								value={
+									report.grossProfit
+										.grossProfitCents
+								}
+								variant={
+									report.grossProfit
+										.grossProfitCents < 0
+										? "negative"
+										: "default"
+								}
+							/>
 						</div>
+						<Card className="shadow-md">
+							<CardHeader>
+								<CardTitle>
+									Gross Profit Estimate
+								</CardTitle>
+							</CardHeader>
+							<CardContent className="grid gap-3 sm:grid-cols-3">
+								<div className="rounded-lg border p-3">
+									<p className="text-xs text-muted-foreground">
+										Estimated COGS
+									</p>
+									<p className="text-lg font-semibold">
+										{formatZAR(
+											report.grossProfit
+												.estimatedCogsCents,
+										)}
+									</p>
+								</div>
+								<div className="rounded-lg border p-3">
+									<p className="text-xs text-muted-foreground">
+										Gross Profit
+									</p>
+									<p className="text-lg font-semibold">
+										{formatZAR(
+											report.grossProfit
+												.grossProfitCents,
+										)}
+									</p>
+								</div>
+								<div className="rounded-lg border p-3">
+									<p className="text-xs text-muted-foreground">
+										Gross Margin
+									</p>
+									<p className="text-lg font-semibold">
+										{report.grossProfit
+											.grossMarginPct === null
+											? "-"
+											: `${report.grossProfit.grossMarginPct.toFixed(1)}%`}
+									</p>
+								</div>
+							</CardContent>
+						</Card>
 					</TabsContent>
 
 					<TabsContent value="sales-by-product">
@@ -723,6 +778,42 @@ export function DashboardClient() {
 								)}
 							</CardContent>
 						</Card>
+
+						<div className="grid gap-4 lg:grid-cols-3">
+							<InventoryListCard
+								title="Top Movers Today"
+								emptyLabel="No movers yet for this date."
+								rows={
+									report.inventoryInsights
+										.topMovers
+								}
+								rightLabel={(row) =>
+									`${row.unitsSoldToday} sold`
+								}
+							/>
+							<InventoryListCard
+								title="Slow Movers (30 Days)"
+								emptyLabel="No slow movers in current stock."
+								rows={
+									report.inventoryInsights
+										.slowMovers
+								}
+								rightLabel={(row) =>
+									`${row.unitsSoldLast30Days} sold`
+								}
+							/>
+							<InventoryListCard
+								title="Dead Stock (30 Days)"
+								emptyLabel="No dead stock detected."
+								rows={
+									report.inventoryInsights
+										.deadStock
+								}
+								rightLabel={(row) =>
+									`${row.currentUnits} on hand`
+								}
+							/>
+						</div>
 					</TabsContent>
 				</Tabs>
 			)}
@@ -771,5 +862,60 @@ function SummaryCard({
 		>
 			{card}
 		</Link>
+	);
+}
+
+function InventoryListCard({
+	title,
+	rows,
+	emptyLabel,
+	rightLabel,
+}: {
+	title: string;
+	rows: {
+		productId: string;
+		productName: string;
+		currentUnits: number;
+		unitsSoldToday?: number;
+		unitsSoldLast30Days?: number;
+	}[];
+	emptyLabel: string;
+	rightLabel: (row: {
+		productId: string;
+		productName: string;
+		currentUnits: number;
+		unitsSoldToday?: number;
+		unitsSoldLast30Days?: number;
+	}) => string;
+}) {
+	return (
+		<Card className="shadow-md">
+			<CardHeader>
+				<CardTitle>{title}</CardTitle>
+			</CardHeader>
+			<CardContent>
+				{rows.length === 0 ? (
+					<p className="text-sm text-muted-foreground">
+						{emptyLabel}
+					</p>
+				) : (
+					<div className="space-y-2">
+						{rows.map((row) => (
+							<div
+								key={row.productId}
+								className="flex items-center justify-between gap-2 rounded-lg border p-2"
+							>
+								<p className="truncate text-sm font-medium">
+									{row.productName}
+								</p>
+								<p className="text-xs text-muted-foreground">
+									{rightLabel(row)}
+								</p>
+							</div>
+						))}
+					</div>
+				)}
+			</CardContent>
+		</Card>
 	);
 }

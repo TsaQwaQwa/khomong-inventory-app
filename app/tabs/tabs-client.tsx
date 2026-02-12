@@ -2,7 +2,11 @@
 /* eslint-disable max-len */
 
 import * as React from "react";
-import { useSearchParams } from "next/navigation";
+import {
+	usePathname,
+	useRouter,
+	useSearchParams,
+} from "next/navigation";
 import useSWR from "swr";
 import { toast } from "sonner";
 import {
@@ -12,6 +16,7 @@ import {
 	Users,
 	Receipt,
 	Pencil,
+	RotateCcw,
 } from "lucide-react";
 import { PageWrapper } from "@/components/page-wrapper";
 import { DatePickerYMD } from "@/components/date-picker-ymd";
@@ -146,6 +151,10 @@ interface TabTransactionHistory {
 		productId: string;
 		units: number;
 	}[];
+	reversalOfId?: string;
+	reversalReason?: string;
+	isReversal?: boolean;
+	isReversed?: boolean;
 }
 
 interface TabsClientProps {
@@ -155,6 +164,8 @@ interface TabsClientProps {
 export function TabsClient({
 	view = "both",
 }: TabsClientProps) {
+	const router = useRouter();
+	const pathname = usePathname();
 	const searchParams = useSearchParams();
 	const [date, setDate] = React.useState(
 		getTodayJHB(),
@@ -216,6 +227,16 @@ export function TabsClient({
 		directSaleDialogOpen,
 		setDirectSaleDialogOpen,
 	] = React.useState(false);
+	const [reverseReason, setReverseReason] =
+		React.useState("");
+	const [
+		reversingTxn,
+		setReversingTxn,
+	] = React.useState<TabTransactionHistory | null>(
+		null,
+	);
+	const [reverseLoading, setReverseLoading] =
+		React.useState(false);
 	const kindFilter =
 		searchParams.get("kind") ?? "all";
 	const productFilter =
@@ -259,6 +280,10 @@ export function TabsClient({
 								? txn.type === "CHARGE"
 								: kindFilter === "payment"
 									? txn.type === "PAYMENT"
+									: kindFilter === "reversals"
+										? Boolean(
+												txn.isReversal,
+										  )
 									: true;
 					if (!kindMatch) return false;
 					if (!productFilter) return true;
@@ -274,6 +299,71 @@ export function TabsClient({
 			productFilter,
 		],
 	);
+
+	const updateKindFilter = React.useCallback(
+		(nextKind: string) => {
+			const params = new URLSearchParams(
+				searchParams.toString(),
+			);
+			if (nextKind === "all") {
+				params.delete("kind");
+			} else {
+				params.set("kind", nextKind);
+			}
+			const qs = params.toString();
+			router.replace(
+				qs ? `${pathname}?${qs}` : pathname,
+			);
+		},
+		[pathname, router, searchParams],
+	);
+
+	const handleReverseTransaction = async () => {
+		if (!reversingTxn) return;
+		setReverseLoading(true);
+		try {
+			const res = await fetch(
+				"/api/transactions/reverse",
+				{
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+					},
+					body: JSON.stringify({
+						transactionId: reversingTxn.id,
+						type: reversingTxn.type,
+						reason: reverseReason.trim(),
+					}),
+				},
+			);
+
+			if (!res.ok) {
+				const errorBody = await res
+					.json()
+					.catch(() => ({}));
+				throw new Error(
+					getApiErrorMessage(
+						errorBody,
+						"Failed to reverse transaction",
+					),
+				);
+			}
+
+			toast.success("Transaction reversed");
+			setReversingTxn(null);
+			setReverseReason("");
+			mutateTransactions();
+			mutateCustomers();
+		} catch (err) {
+			toast.error(
+				err instanceof Error
+					? err.message
+					: "Failed to reverse transaction",
+			);
+		} finally {
+			setReverseLoading(false);
+		}
+	};
 
 	return (
 		<PageWrapper
@@ -379,6 +469,12 @@ export function TabsClient({
 															0;
 														const hasBalance =
 															balanceCents > 0;
+														const dueDateLabel =
+															customer.dueDate
+																? formatDateDisplay(
+																		customer.dueDate,
+																  )
+																: "-";
 
 														return (
 															<div
@@ -424,7 +520,7 @@ export function TabsClient({
 																	</div>
 																	<div className="text-right">
 																		<p className="text-muted-foreground">
-																			Balance
+																			Owing
 																		</p>
 																		<p
 																			className={cn(
@@ -437,6 +533,18 @@ export function TabsClient({
 																			)}
 																		</p>
 																	</div>
+																</div>
+																<div className="mt-2 flex items-center justify-between text-xs">
+																	<span className="text-muted-foreground">
+																		Due:{" "}
+																		{dueDateLabel}
+																	</span>
+																	{customer.isOverdue &&
+																		hasBalance && (
+																			<span className="rounded bg-destructive/10 px-2 py-0.5 font-medium text-destructive">
+																				Overdue
+																			</span>
+																		)}
 																</div>
 															</div>
 														);
@@ -458,7 +566,10 @@ export function TabsClient({
 																Credit Limit
 															</TableHead>
 															<TableHead className="text-right">
-																Balance
+																Owing
+															</TableHead>
+															<TableHead>
+																Due Date
 															</TableHead>
 															<TableHead>
 																Note
@@ -477,6 +588,12 @@ export function TabsClient({
 																const hasBalance =
 																	balanceCents >
 																	0;
+																const dueDateLabel =
+																	customer.dueDate
+																		? formatDateDisplay(
+																				customer.dueDate,
+																		  )
+																		: "-";
 
 																return (
 																	<TableRow
@@ -508,6 +625,21 @@ export function TabsClient({
 																			{formatZAR(
 																				balanceCents,
 																			)}
+																		</TableCell>
+																		<TableCell>
+																			<div className="flex items-center gap-2">
+																				<span className="text-muted-foreground">
+																					{
+																						dueDateLabel
+																					}
+																				</span>
+																				{customer.isOverdue &&
+																					hasBalance && (
+																						<span className="rounded bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
+																							Overdue
+																						</span>
+																					)}
+																			</div>
 																		</TableCell>
 																		<TableCell className="text-muted-foreground max-w-50 truncate">
 																			{customer.note ??
@@ -715,9 +847,40 @@ export function TabsClient({
 
 						<Card className="shadow-md mt-6">
 							<CardHeader>
-								<CardTitle>
-									Transaction History
-								</CardTitle>
+								<div className="flex flex-wrap items-center justify-between gap-2">
+									<CardTitle>
+										Transaction History
+									</CardTitle>
+									<div className="w-full sm:w-56">
+										<Select
+											value={kindFilter}
+											onValueChange={
+												updateKindFilter
+											}
+										>
+											<SelectTrigger>
+												<SelectValue placeholder="Filter transactions" />
+											</SelectTrigger>
+											<SelectContent>
+												<SelectItem value="all">
+													All
+												</SelectItem>
+												<SelectItem value="direct">
+													Direct Sales
+												</SelectItem>
+												<SelectItem value="account">
+													Account Sales
+												</SelectItem>
+												<SelectItem value="payment">
+													Payments
+												</SelectItem>
+												<SelectItem value="reversals">
+													Reversals
+												</SelectItem>
+											</SelectContent>
+										</Select>
+									</div>
+								</div>
 							</CardHeader>
 							<CardContent>
 								{transactionsLoading ? (
@@ -783,6 +946,40 @@ export function TabsClient({
 																	"-"}
 															</span>
 														</div>
+														<div className="mt-3 flex items-center justify-end gap-2">
+															{txn.isReversal && (
+																<span className="rounded px-2 py-1 text-xs bg-muted text-muted-foreground">
+																	Reversal
+																</span>
+															)}
+															{txn.isReversed && (
+																<span className="rounded px-2 py-1 text-xs bg-amber-500/10 text-amber-700">
+																	Reversed
+																</span>
+															)}
+															{!txn.isReversal &&
+																!txn.isReversed &&
+																(txn.type ===
+																	"DIRECT_SALE" ||
+																	txn.type ===
+																		"CHARGE" ||
+																	txn.type ===
+																		"PAYMENT") && (
+																	<Button
+																		type="button"
+																		size="sm"
+																		variant="outline"
+																		onClick={() =>
+																			setReversingTxn(
+																				txn,
+																			)
+																		}
+																	>
+																		<RotateCcw className="mr-2 h-3.5 w-3.5" />
+																		Reverse
+																	</Button>
+																)}
+														</div>
 													</div>
 												),
 											)}
@@ -806,6 +1003,9 @@ export function TabsClient({
 														</TableHead>
 														<TableHead>
 															Details
+														</TableHead>
+														<TableHead className="text-right">
+															Actions
 														</TableHead>
 													</TableRow>
 												</TableHeader>
@@ -850,6 +1050,38 @@ export function TabsClient({
 																		txn.note ??
 																		"-"}
 																</TableCell>
+																<TableCell className="text-right">
+																	{txn.isReversal ? (
+																		<span className="rounded px-2 py-1 text-xs bg-muted text-muted-foreground">
+																			Reversal
+																		</span>
+																	) : txn.isReversed ? (
+																		<span className="rounded px-2 py-1 text-xs bg-amber-500/10 text-amber-700">
+																			Reversed
+																		</span>
+																	) : txn.type ===
+																			"DIRECT_SALE" ||
+																		txn.type ===
+																			"CHARGE" ||
+																		txn.type ===
+																			"PAYMENT" ? (
+																		<Button
+																			type="button"
+																			size="sm"
+																			variant="outline"
+																			onClick={() =>
+																				setReversingTxn(
+																					txn,
+																				)
+																			}
+																		>
+																			<RotateCcw className="mr-2 h-3.5 w-3.5" />
+																			Reverse
+																		</Button>
+																	) : (
+																		"-"
+																	)}
+																</TableCell>
 															</TableRow>
 														),
 													)}
@@ -863,6 +1095,78 @@ export function TabsClient({
 					</TabsContent>
 				)}
 			</Tabs>
+
+			<Dialog
+				open={Boolean(reversingTxn)}
+				onOpenChange={(open) => {
+					if (!open) {
+						setReversingTxn(null);
+						setReverseReason("");
+					}
+				}}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>
+							Reverse Transaction
+						</DialogTitle>
+						<DialogDescription>
+							This creates a new compensating
+							entry and keeps audit history.
+							Provide a reason for the reversal.
+						</DialogDescription>
+					</DialogHeader>
+					<div className="space-y-3">
+						<div className="rounded-md border p-3 text-sm">
+							<p className="font-medium">
+								{reversingTxn?.customerName}
+							</p>
+							<p className="text-muted-foreground">
+								Amount:{" "}
+								{formatZAR(
+									reversingTxn?.amountCents ??
+										0,
+								)}
+							</p>
+						</div>
+						<div className="space-y-2">
+							<Label>Reason</Label>
+							<Textarea
+								value={reverseReason}
+								onChange={(e) =>
+									setReverseReason(
+										e.target.value,
+									)
+								}
+								placeholder="Reason for reversal..."
+								rows={3}
+							/>
+						</div>
+					</div>
+					<DialogFooter>
+						<DialogClose asChild>
+							<Button
+								type="button"
+								variant="outline"
+							>
+								Cancel
+							</Button>
+						</DialogClose>
+						<Button
+							type="button"
+							disabled={
+								reverseLoading ||
+								reverseReason.trim().length < 3
+							}
+							onClick={handleReverseTransaction}
+						>
+							{reverseLoading
+								? "Reversing..."
+								: "Reverse"}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</PageWrapper>
 	);
 }

@@ -16,6 +16,8 @@ export interface SaleTransactionDoc {
 	amountCents: number;
 	items: SaleTxnItem[];
 	note?: string;
+	reversalOfId?: string;
+	reversalReason?: string;
 	createdByUserId: string;
 	createdAt: Date;
 	updatedAt: Date;
@@ -58,6 +60,8 @@ const SaleTransactionSchema =
 				},
 			],
 			note: { type: String },
+			reversalOfId: { type: String },
+			reversalReason: { type: String },
 			createdByUserId: {
 				type: String,
 				required: true,
