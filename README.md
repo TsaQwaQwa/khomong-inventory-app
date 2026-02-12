@@ -1,61 +1,104 @@
-# Tavern Monitor Starter (Stock + Cash + Tabs)
+# Kgomong Monitor
 
-This is a starter **Next.js App Router + Clerk + MongoDB (Mongoose)** project to implement:
-- Products + price history
-- Purchases (stock-in)
-- Business day open/close + stock counts
-- Adjustments (spillage/freebies/breakage/etc)
-- Till close (cash/card/EFT + expenses + deposits + cash counted)
-- Tabs/Credit (customer ledger: charges + payments)
-- Daily variance report: **stock-inferred sales vs collected sales + tab charges**
+Kgomong Monitor helps a tavern team track:
+
+- Products and selling prices
+- Stock received from suppliers
+- Stock adjustments (spillage, breakage, freebies, corrections)
+- Customer credit accounts (sales and payments)
+- Direct sales (cash/card/EFT) with product-level units
+- Daily sales and cash difference report
 
 ## 1) Setup (Windows)
+
 1. Copy `.env.example` to `.env.local`
 2. Fill in:
    - `MONGODB_URI`
    - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
    - `CLERK_SECRET_KEY`
+   - `ALLOWED_USER_EMAILS` (comma-separated whitelist)
 
 3. Install deps:
-```bash
-npm install
-```
+
+   ```bash
+   npm install
+   ```
 
 4. Run:
-```bash
-npm run dev
-```
+
+   ```bash
+   npm run dev
+   ```
 
 Open http://localhost:3000
 
-## 2) Clerk requirements
-This starter expects you to use Clerk Organizations so every record is scoped by `orgId`.
+## 2) Daily workflow (for non-technical users)
+
+Use this order each day:
+
+1. Go to `Products & Prices` and confirm products/prices are correct.
+2. Go to `Stock Purchases` and capture any supplier invoices.
+3. During the day, use:
+   - `Customer Accounts` for credit sales and payments.
+   - `Customer Accounts` > `Add Direct Sale` for cash/card/EFT sales.
+   - `Stock Adjustments` for losses/gains (spillage, breakage, etc.).
+4. Go to `Daily Overview` to review totals, differences, trends, and recommendations.
+
+Stock is tracked automatically from:
+- Purchases (+)
+- Sales from direct sales and customer account charges (-)
+- Adjustments (+/-)
+
+No manual opening/closing stock counts are required.
+
+## 3) Clerk requirements
+
+This app uses Clerk Organizations so every record is scoped by `orgId`.
+
 - Middleware is configured using `clerkMiddleware()`.
 - API routes require an authenticated user + active org.
 - Admin-only actions check `has({ role: 'org:admin' })`.
 
-## 3) What’s implemented (MVP endpoints)
+## 4) Access control (whitelist)
+
+- Set `ALLOWED_USER_EMAILS` in `.env.local`.
+- Only email addresses in that list can access protected pages and API routes.
+- If the list is empty, whitelist checks are disabled.
+- Example:
+  - `ALLOWED_USER_EMAILS=owner@example.com,staff1@example.com`
+
+## 5) Barcode scanning in purchases
+
+- Go to `Stock Purchases`.
+- In `Record Purchase`, use the `Scan Barcode` input.
+- Scan and press Enter (or click `Add`).
+- Each scan adds 1 single unit for that product.
+- Make sure each product has a barcode set in `Products & Prices`.
+
+## 6) API endpoints
+
 All endpoints are under `/app/api`.
+
 - `GET /api/health`
 - `GET/POST /api/products`
 - `POST /api/prices` (set price effective from date; auto-closes previous)
 - `GET/POST /api/suppliers`
 - `GET/POST /api/purchases`
-- `POST /api/business-days/open`
-- `POST /api/business-days/close`
-- `POST /api/stock-counts` (OPEN or CLOSE counts)
 - `POST /api/adjustments`
-- `POST /api/till-closes`
 - `GET/POST /api/customers`
 - `POST /api/tabs/charge`
 - `POST /api/tabs/payment`
+- `POST /api/sales` (direct cash/card/EFT sale with product lines)
 - `GET /api/reports/daily?date=YYYY-MM-DD`
 
-## 4) Suggested next steps
+## 7) Glossary
+
+- `Customer account`: Credit account where sales increase balance and payments reduce balance.
+- `Stock adjustment`: Manual correction for stock gained or lost outside normal sales/purchases.
+- `Direct sale`: Immediate sale paid by cash/card/EFT, captured with product line items.
+
+## 8) Suggested next steps
+
 - Add file uploads for invoices/deposit slips/receipts (Attachments + S3)
 - Add locking rules (auto-lock after close, owner unlock with reason)
-- Add UI forms for staff flows (purchases, close stock, close till, tab charge/payment)
 - Add WhatsApp/Email daily summary (variance + low stock)
-
----
-Generated as a starter scaffold: keep it tiny, then harden the workflows.

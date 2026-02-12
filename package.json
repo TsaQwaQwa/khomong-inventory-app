@@ -7,7 +7,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint --max-warnings=0 .",
+    "fix:lint": "eslint --fix .",
     "seed": "node --loader ts-node/esm scripts/seed.ts"
   },
   "dependencies": {
@@ -41,7 +42,6 @@
     "@radix-ui/react-toggle-group": "1.1.1",
     "@radix-ui/react-tooltip": "1.1.6",
     "@tailwindcss/node": "^4.1.18",
-    "@tailwindcss/postcss": "^4.1.18",
     "@vercel/analytics": "1.3.1",
     "autoprefixer": "^10.4.20",
     "class-variance-authority": "^0.7.1",
@@ -64,19 +64,22 @@
     "sonner": "^1.7.4",
     "swr": "2.4.0",
     "tailwind-merge": "^3.4.0",
-    "tailwindcss": "^4.1.18",
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^1.1.2",
     "zod": "3.25.76"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.3",
+    "@eslint/js": "^9.39.2",
+    "@tailwindcss/postcss": "^4.1.18",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.0",
     "eslint": "^9.0.0",
     "eslint-config-next": "^15.0.0",
-    "postcss": "^8.5",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.18",
     "ts-node": "^10.9.0",
     "tw-animate-css": "1.3.3",
     "typescript": "^5.5.0"

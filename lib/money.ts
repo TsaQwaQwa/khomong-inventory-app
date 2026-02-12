@@ -23,8 +23,12 @@ export function fromCents(cents: number): string {
 /**
  * Format cents as ZAR currency display (e.g., 12345 -> "R 123.45")
  */
-export function formatZAR(cents: number): string {
-	const rands = cents / 100;
+export function formatZAR(cents: number | undefined | null): string {
+	const safeCents =
+		typeof cents === "number" && Number.isFinite(cents)
+			? cents
+			: 0;
+	const rands = safeCents / 100;
 	return new Intl.NumberFormat("en-ZA", {
 		style: "currency",
 		currency: "ZAR",

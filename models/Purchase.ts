@@ -10,7 +10,6 @@ export interface PurchaseItem {
 }
 
 export interface PurchaseDoc {
-  orgId: string;
   supplierId?: string;
   invoiceNo?: string;
   purchaseDate: YMD;
@@ -23,7 +22,6 @@ export interface PurchaseDoc {
 
 const PurchaseSchema = new Schema<PurchaseDoc>(
   {
-    orgId: { type: String, required: true, index: true },
     supplierId: { type: String },
     invoiceNo: { type: String },
     purchaseDate: { type: String, required: true, index: true },
@@ -42,6 +40,6 @@ const PurchaseSchema = new Schema<PurchaseDoc>(
   { timestamps: true }
 );
 
-PurchaseSchema.index({ orgId: 1, purchaseDate: 1 });
+PurchaseSchema.index({  purchaseDate: 1 });
 
 export const Purchase = getModel<PurchaseDoc>('Purchase', PurchaseSchema);

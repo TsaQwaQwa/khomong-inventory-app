@@ -7,7 +7,9 @@ import {
 import { Analytics } from "@vercel/analytics/next";
 import { Toaster } from "sonner";
 import { Header } from "@/components/header";
+import { GlobalQuickActions } from "@/components/global-quick-actions";
 import { ClerkProvider } from "@clerk/nextjs";
+import { SwrProvider } from "@/components/swr-provider";
 
 import "./globals.css";
 
@@ -17,9 +19,9 @@ const _geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-	title: "Tavern Monitor",
+	title: "Kgomong",
 	description:
-		"Stock control and cash management for your tavern",
+		"Simple stock, sales, and customer account tracking for Kgomong",
 	generator: "v0.app",
 	icons: {
 		icon: [
@@ -46,21 +48,27 @@ export default function RootLayout({
 	children: React.ReactNode;
 }) {
 	return (
-		<ClerkProvider>
-			<html lang="en">
-				<body className="font-sans antialiased min-h-screen flex flex-col">
+		<html lang="en" suppressHydrationWarning>
+			<body
+				suppressHydrationWarning
+				className="font-sans antialiased min-h-screen flex flex-col"
+			>
+				<ClerkProvider>
 					<Header />
-					<main className="flex-1">
-						{children}
-					</main>
+					<SwrProvider>
+						<main className="flex-1 w-full">
+							{children}
+						</main>
+						<GlobalQuickActions />
+					</SwrProvider>
 					<Toaster
 						position="top-right"
 						richColors
 						closeButton
 					/>
 					<Analytics />
-				</body>
-			</html>
-		</ClerkProvider>
+				</ClerkProvider>
+			</body>
+		</html>
 	);
 }

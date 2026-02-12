@@ -1,32 +1,27 @@
-import { auth } from "@clerk/nextjs/server";
+import { requireOrgAuth } from "@/lib/authz";
 import { PurchasesClient } from "./purchases-client";
 
 export default async function PurchasesPage() {
-	const { userId, orgId } = await auth();
-
-	if (!userId) {
+	try {
+		await requireOrgAuth();
+	} catch (error) {
+		const message =
+			error instanceof Error
+				? error.message
+				: "";
+		const isBlocked =
+			message === "FORBIDDEN_USER";
 		return (
 			<div className="container px-4 py-12 text-center">
 				<h1 className="text-2xl font-bold mb-2">
-					Please sign in
+					{isBlocked
+						? "Access blocked"
+						: "Please sign in"}
 				</h1>
 				<p className="text-muted-foreground">
-					You need to be signed in to access
-					purchases.
-				</p>
-			</div>
-		);
-	}
-
-	if (!orgId) {
-		return (
-			<div className="container px-4 py-12 text-center">
-				<h1 className="text-2xl font-bold mb-2">
-					No active organization
-				</h1>
-				<p className="text-muted-foreground">
-					Please select or create an organization
-					to continue.
+					{isBlocked
+						? "Your account is not approved for this site."
+						: "You need to be signed in to access purchases."}
 				</p>
 			</div>
 		);

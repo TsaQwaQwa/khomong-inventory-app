@@ -20,7 +20,7 @@ export function EmptyState({
 	return (
 		<div
 			className={cn(
-				"flex flex-col items-center justify-center py-12 text-center",
+				"flex flex-col items-center justify-center py-16 text-center rounded-lg border border-dashed border-border bg-card",
 				className,
 			)}
 		>
@@ -29,16 +29,16 @@ export function EmptyState({
 					<Package className="h-8 w-8 text-muted-foreground" />
 				)}
 			</div>
-			<h3 className="text-lg font-medium">
+			<h3 className="text-lg font-semibold text-foreground">
 				{title}
 			</h3>
 			{description && (
-				<p className="text-muted-foreground mt-1 max-w-sm">
+				<p className="text-muted-foreground mt-2 max-w-md text-sm leading-relaxed">
 					{description}
 				</p>
 			)}
 			{action && (
-				<div className="mt-4">{action}</div>
+				<div className="mt-6">{action}</div>
 			)}
 		</div>
 	);

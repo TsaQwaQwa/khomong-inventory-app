@@ -4,7 +4,6 @@ import { getModel } from './_shared';
 export type ProductCategory = 'Beer' | 'Cider' | 'SoftDrink' | 'Other';
 
 export interface ProductDoc {
-  orgId: string;
   name: string;
   category: ProductCategory;
   barcode?: string;
@@ -17,7 +16,6 @@ export interface ProductDoc {
 
 const ProductSchema = new Schema<ProductDoc>(
   {
-    orgId: { type: String, required: true, index: true },
     name: { type: String, required: true },
     category: { type: String, required: true },
     barcode: { type: String },
@@ -28,6 +26,10 @@ const ProductSchema = new Schema<ProductDoc>(
   { timestamps: true }
 );
 
-ProductSchema.index({ orgId: 1, name: 1 }, { unique: true });
+ProductSchema.index({ name: 1 }, { unique: true });
+ProductSchema.index(
+	{ barcode: 1 },
+	{ unique: true, sparse: true },
+);
 
 export const Product = getModel<ProductDoc>('Product', ProductSchema);

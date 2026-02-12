@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable max-len */
 
 import * as React from "react";
 import useSWR from "swr";
@@ -7,16 +8,26 @@ import {
 	Plus,
 	Trash2,
 	AlertCircle,
-	Check,
+	Pencil,
 } from "lucide-react";
 import { PageWrapper } from "@/components/page-wrapper";
 import { DatePickerYMD } from "@/components/date-picker-ymd";
 import { LoadingForm } from "@/components/loading-state";
+import { EmptyState } from "@/components/empty-state";
 import { ProductSelect } from "@/components/product-select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+	Dialog,
+	DialogClose,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import {
 	Alert,
 	AlertDescription,
@@ -35,6 +46,14 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
 import { getTodayJHB } from "@/lib/date-utils";
 import { cn } from "@/lib/utils";
 import type {
@@ -45,15 +64,49 @@ import type {
 
 const fetcher = async (url: string) => {
 	const res = await fetch(url);
+	const json = await res.json().catch(() => ({}));
 	if (!res.ok) {
-		const error = await res
-			.json()
-			.catch(() => ({ error: "Request failed" }));
-		throw new Error(
-			error.error || "Failed to fetch data",
-		);
+		const message =
+			json?.error?.message ??
+			json?.error ??
+			"Failed to fetch data";
+		throw new Error(message);
 	}
-	return res.json();
+	return json?.data ?? json;
+};
+
+const getApiErrorMessage = (
+	payload: unknown,
+	fallback: string,
+) => {
+	if (!payload || typeof payload !== "object")
+		return fallback;
+
+	const maybePayload = payload as Record<
+		string,
+		unknown
+	>;
+	const maybeError = maybePayload.error;
+
+	if (typeof maybeError === "string")
+		return maybeError;
+
+	if (
+		maybeError &&
+		typeof maybeError === "object"
+	) {
+		const maybeErrorObj = maybeError as Record<
+			string,
+			unknown
+		>;
+		if (
+			typeof maybeErrorObj.message === "string"
+		) {
+			return maybeErrorObj.message;
+		}
+	}
+
+	return fallback;
 };
 
 const ADJUSTMENT_REASONS: {
@@ -80,6 +133,13 @@ interface FormItem {
 	note: string;
 }
 
+interface AdjustmentHistory {
+	id: string;
+	date: string;
+	items: AdjustmentItem[];
+	createdAt?: string;
+}
+
 export function AdjustmentsClient() {
 	const [date, setDate] = React.useState(
 		getTodayJHB(),
@@ -96,20 +156,34 @@ export function AdjustmentsClient() {
 	]);
 	const [loading, setLoading] =
 		React.useState(false);
-	const [submittedItems, setSubmittedItems] =
-		React.useState<
-			(AdjustmentItem & { productName: string })[]
-		>([]);
+	const [isFormOpen, setIsFormOpen] =
+		React.useState(false);
+	const [
+		editingAdjustmentId,
+		setEditingAdjustmentId,
+	] = React.useState<string | null>(null);
 
 	const {
 		data: products,
 		error,
 		isLoading,
+		mutate: mutateProducts,
 	} = useSWR<Product[]>(
 		"/api/products",
 		fetcher,
 		{
 			onError: (err) => toast.error(err.message),
+		},
+	);
+	const {
+		data: adjustmentsHistory,
+		mutate: mutateHistory,
+	} = useSWR<AdjustmentHistory[]>(
+		`/api/adjustments?date=${date}`,
+		fetcher,
+		{
+			onError: (err) =>
+				toast.error(err.message),
 		},
 	);
 
@@ -119,6 +193,18 @@ export function AdjustmentsClient() {
 				products?.map((p) => [p.id, p]) || [],
 			),
 		[products],
+	);
+	const adjustmentReasonOptions = React.useMemo(
+		() =>
+			ADJUSTMENT_REASONS.map((reasonOption) => (
+				<SelectItem
+					key={reasonOption.value}
+					value={reasonOption.value}
+				>
+					{reasonOption.label}
+				</SelectItem>
+			)),
+		[],
 	);
 
 	const addItem = () => {
@@ -132,6 +218,40 @@ export function AdjustmentsClient() {
 			},
 		]);
 	};
+
+	const handleEditHistory = React.useCallback(
+		(history: AdjustmentHistory) => {
+			const loadedItems = history.items.map(
+				(item) => ({
+					productId: item.productId,
+					unitsDelta: String(
+						item.unitsDelta ?? 0,
+					),
+					reason: item.reason,
+					note: item.note ?? "",
+				}),
+			);
+
+			setItems(
+				loadedItems.length > 0
+					? loadedItems
+					: [
+							{
+								productId: "",
+								unitsDelta: "",
+								reason: "",
+								note: "",
+							},
+						],
+			);
+			setEditingAdjustmentId(history.id);
+			setIsFormOpen(true);
+			toast.success(
+				"Adjustment loaded for editing",
+			);
+		},
+		[],
+	);
 
 	const removeItem = (index: number) => {
 		setItems(items.filter((_, i) => i !== index));
@@ -181,43 +301,43 @@ export function AdjustmentsClient() {
 
 		try {
 			const res = await fetch(
-				"/api/adjustments",
+				editingAdjustmentId
+					? `/api/adjustments/${editingAdjustmentId}`
+					: "/api/adjustments",
 				{
-					method: "POST",
+					method: editingAdjustmentId
+						? "PATCH"
+						: "POST",
 					headers: {
 						"Content-Type": "application/json",
 					},
-					body: JSON.stringify({
-						date,
-						items: validItems,
-					}),
+					body: JSON.stringify(
+						editingAdjustmentId
+							? { items: validItems }
+							: {
+									date,
+									items: validItems,
+								},
+					),
 				},
 			);
 
 			if (!res.ok) {
-				const error = await res
+				const errorBody = await res
 					.json()
-					.catch(() => ({
-						error: "Request failed",
-					}));
+					.catch(() => ({}));
 				throw new Error(
-					error.error ||
+					getApiErrorMessage(
+						errorBody,
 						"Failed to submit adjustments",
+					),
 				);
 			}
 
 			toast.success(
-				"Adjustments submitted successfully",
-			);
-
-			// Store submitted items for confirmation display
-			setSubmittedItems(
-				validItems.map((item) => ({
-					...item,
-					productName:
-						productMap.get(item.productId)
-							?.name || item.productId,
-				})),
+				editingAdjustmentId
+					? "Adjustment updated successfully"
+					: "Adjustments submitted successfully",
 			);
 
 			// Reset form
@@ -229,6 +349,10 @@ export function AdjustmentsClient() {
 					note: "",
 				},
 			]);
+			setEditingAdjustmentId(null);
+			setIsFormOpen(false);
+			mutateHistory();
+			mutateProducts();
 		} catch (err) {
 			toast.error(
 				err instanceof Error
@@ -242,13 +366,32 @@ export function AdjustmentsClient() {
 
 	return (
 		<PageWrapper
-			title="Adjustments"
-			description="Record stock adjustments for spillage, breakage, freebies, etc."
+			title="Stock Adjustments"
+			description="Record stock losses, gains, or corrections."
 			actions={
-				<DatePickerYMD
-					value={date}
-					onChange={setDate}
-				/>
+				<div className="flex items-center gap-2">
+					<DatePickerYMD
+						value={date}
+						onChange={setDate}
+					/>
+					<Button
+						type="button"
+						onClick={() => {
+							setItems([
+								{
+									productId: "",
+									unitsDelta: "",
+									reason: "",
+									note: "",
+								},
+							]);
+							setEditingAdjustmentId(null);
+							setIsFormOpen(true);
+						}}
+					>
+						Add Adjustment
+					</Button>
+				</div>
 			}
 		>
 			{isLoading ? (
@@ -262,180 +405,395 @@ export function AdjustmentsClient() {
 					</AlertDescription>
 				</Alert>
 			) : (
-				<div className="space-y-6 max-w-3xl mx-auto">
-					{/* Submitted Confirmation */}
-					{submittedItems.length > 0 && (
-						<Alert className="border-primary/50 bg-primary/5">
-							<Check className="h-4 w-4 text-primary" />
-							<AlertTitle>
-								Adjustments Submitted
-							</AlertTitle>
-							<AlertDescription>
-								<ul className="mt-2 space-y-1 text-sm">
-									{submittedItems.map(
-										(item, i) => (
-											<li key={i}>
-												<strong>
-													{item.productName}
-												</strong>
-												:{" "}
-												{item.unitsDelta > 0
-													? "+"
-													: ""}
-												{item.unitsDelta} units (
-												{item.reason
-													.replace("_", " ")
-													.toLowerCase()}
-												)
-												{item.note &&
-													` - ${item.note}`}
-											</li>
-										),
-									)}
-								</ul>
-							</AlertDescription>
-						</Alert>
-					)}
+				<div className="space-y-6">
+					<Dialog
+						open={isFormOpen}
+						onOpenChange={setIsFormOpen}
+					>
+						<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
+							<DialogHeader>
+								<DialogTitle>
+									{editingAdjustmentId
+										? "Edit Stock Adjustment"
+										: "Stock Adjustments"}
+								</DialogTitle>
+								<DialogDescription>
+									{editingAdjustmentId
+										? "Update the saved adjustment items."
+										: `Add one or more stock adjustments for ${date}.`}
+								</DialogDescription>
+							</DialogHeader>
 
-					<form onSubmit={handleSubmit}>
-						<Card className="shadow-lg">
-							<CardHeader>
-								<CardTitle>
-									Adjustment Items
-								</CardTitle>
-							</CardHeader>
-							<CardContent className="space-y-4">
-								{items.map((item, index) => (
-									<div
-										key={index}
-										className="p-4 rounded-lg border bg-muted/30 space-y-4"
+							<form
+								onSubmit={handleSubmit}
+								className="space-y-6"
+							>
+								<Card className="shadow-lg">
+									<CardHeader>
+										<CardTitle>
+											Adjustment Items
+										</CardTitle>
+									</CardHeader>
+									<CardContent className="space-y-4">
+										{items.map((item, index) => (
+											<div
+												key={index}
+												className="p-4 rounded-lg border bg-muted/30 space-y-4"
+											>
+												<div className="flex justify-between items-start gap-2">
+													<span className="text-sm font-medium text-muted-foreground">
+														Item {index + 1}
+													</span>
+													{items.length > 1 && (
+														<Button
+															type="button"
+															variant="ghost"
+															size="sm"
+															onClick={() =>
+																removeItem(
+																	index,
+																)
+															}
+														>
+															<Trash2 className="h-4 w-4" />
+														</Button>
+													)}
+												</div>
+
+												<div className="grid gap-4 sm:grid-cols-2">
+													<ProductSelect
+														products={products || []}
+														value={item.productId}
+														onChange={(v) =>
+															updateItem(index, {
+																productId: v,
+															})
+														}
+														label="Product"
+													/>
+
+													<div className="space-y-2">
+														<Label>Reason</Label>
+														<Select
+															value={item.reason}
+															onValueChange={(
+																v:
+																	| AdjustmentReason
+																	| "",
+															) =>
+																updateItem(index, {
+																	reason: v,
+																})
+															}
+														>
+															<SelectTrigger>
+																<SelectValue
+																	placeholder="Select reason"
+																/>
+															</SelectTrigger>
+															<SelectContent>
+																{
+																	adjustmentReasonOptions
+																}
+															</SelectContent>
+														</Select>
+													</div>
+												</div>
+
+												<div className="grid gap-4 sm:grid-cols-2">
+													<div className="space-y-2">
+														<Label>
+															Stock Change
+															(Units)
+														</Label>
+														<Input
+															type="number"
+															value={item.unitsDelta}
+															onChange={(e) =>
+																updateItem(index, {
+																	unitsDelta:
+																		e.target
+																			.value,
+																})
+															}
+															placeholder="-5 for loss, +3 for gain"
+														/>
+														<p className="text-xs text-muted-foreground">
+															Use a minus for losses
+															and a plus for gains.
+														</p>
+													</div>
+
+													<div className="space-y-2">
+														<Label>
+															Note (optional)
+														</Label>
+														<Textarea
+															value={item.note}
+															onChange={(e) =>
+																updateItem(index, {
+																	note: e.target
+																		.value,
+																})
+															}
+															placeholder="Additional details..."
+															rows={2}
+														/>
+													</div>
+												</div>
+											</div>
+										))}
+
+										<Button
+											type="button"
+											variant="outline"
+											onClick={addItem}
+										>
+											<Plus className="mr-2 h-4 w-4" />
+											Add Item
+										</Button>
+									</CardContent>
+								</Card>
+								<DialogFooter>
+									<DialogClose asChild>
+										<Button
+											type="button"
+											variant="outline"
+										>
+											Cancel
+										</Button>
+									</DialogClose>
+									<Button
+										type="submit"
+										disabled={loading}
 									>
-										<div className="flex justify-between items-start gap-2">
-											<span className="text-sm font-medium text-muted-foreground">
-												Item {index + 1}
-											</span>
-											{items.length > 1 && (
-												<Button
-													type="button"
-													variant="ghost"
-													size="sm"
-													onClick={() =>
-														removeItem(index)
-													}
-												>
-													<Trash2 className="h-4 w-4" />
-												</Button>
-											)}
-										</div>
+										{loading
+											? "Saving..."
+											: editingAdjustmentId
+												? "Save"
+												: "Save"}
+									</Button>
+								</DialogFooter>
+							</form>
+						</DialogContent>
+					</Dialog>
 
-										<div className="grid gap-4 sm:grid-cols-2">
-											<ProductSelect
-												products={products || []}
-												value={item.productId}
-												onChange={(v) =>
-													updateItem(index, {
-														productId: v,
-													})
-												}
-												label="Product"
-											/>
-
-											<div className="space-y-2">
-												<Label>Reason</Label>
-												<Select
-													value={item.reason}
-													onValueChange={(
-														v:
-															| AdjustmentReason
-															| "",
-													) =>
-														updateItem(index, {
-															reason: v,
-														})
-													}
-												>
-													<SelectTrigger>
-														<SelectValue placeholder="Select reason" />
-													</SelectTrigger>
-													<SelectContent>
-														{ADJUSTMENT_REASONS.map(
-															(r) => (
-																<SelectItem
-																	key={r.value}
-																	value={r.value}
-																>
-																	{r.label}
-																</SelectItem>
-															),
-														)}
-													</SelectContent>
-												</Select>
-											</div>
-										</div>
-
-										<div className="grid gap-4 sm:grid-cols-2">
-											<div className="space-y-2">
-												<Label>Units Delta</Label>
-												<Input
-													type="number"
-													value={item.unitsDelta}
-													onChange={(e) =>
-														updateItem(index, {
-															unitsDelta:
-																e.target.value,
-														})
-													}
-													placeholder="-5 for loss, +3 for gain"
-												/>
-												<p className="text-xs text-muted-foreground">
-													Use negative numbers for
-													losses (e.g., -5)
-												</p>
-											</div>
-
-											<div className="space-y-2">
-												<Label>
-													Note (optional)
-												</Label>
-												<Textarea
-													value={item.note}
-													onChange={(e) =>
-														updateItem(index, {
-															note: e.target
-																.value,
-														})
-													}
-													placeholder="Additional details..."
-													rows={2}
-												/>
-											</div>
-										</div>
-									</div>
-								))}
-
+					{!adjustmentsHistory?.length ? (
+						<EmptyState
+							title="No adjustments for this date"
+							description="Add an adjustment to track stock losses or corrections."
+							action={
 								<Button
-									type="button"
-									variant="outline"
-									onClick={addItem}
+									onClick={() =>
+										setIsFormOpen(true)
+									}
 								>
 									<Plus className="mr-2 h-4 w-4" />
-									Add Item
+									Add Adjustment
 								</Button>
-							</CardContent>
-						</Card>
+							}
+						/>
+					) : (
+					<Card className="shadow-md">
+						<CardHeader>
+							<CardTitle>
+								Adjustment History
+							</CardTitle>
+						</CardHeader>
+						<CardContent>
+								<>
+									<div className="space-y-3 md:hidden">
+										{adjustmentsHistory.map(
+											(history) => {
+												const netUnits =
+													history.items.reduce(
+														(sum, item) =>
+															sum +
+															item.unitsDelta,
+														0,
+													);
 
-						<div className="mt-6 flex justify-end">
-							<Button
-								type="submit"
-								size="lg"
-								disabled={loading}
-							>
-								{loading
-									? "Submitting..."
-									: "Submit Adjustments"}
-							</Button>
-						</div>
-					</form>
+												return (
+													<div
+														key={history.id}
+														className="rounded-lg border p-3"
+													>
+														<div className="flex items-start justify-between gap-2">
+															<div>
+																<p className="font-medium">
+																	{history.createdAt
+																		? new Date(
+																				history.createdAt,
+																		  ).toLocaleTimeString()
+																		: "-"}
+																</p>
+																<p className="text-xs text-muted-foreground">
+																	{history.items.length} items
+																</p>
+															</div>
+															<p
+																className={cn(
+																	"font-semibold",
+																	netUnits < 0 &&
+																		"text-destructive",
+																)}
+															>
+																{netUnits > 0
+																	? `+${netUnits}`
+																	: netUnits}{" "}
+																net
+															</p>
+														</div>
+														<div className="mt-2 space-y-1 text-sm text-muted-foreground">
+															{history.items.map(
+																(item, index) => {
+																	const productName =
+																		productMap.get(
+																			item.productId,
+																		)?.name ??
+																		item.productId;
+																	const signedUnits =
+																		item.unitsDelta > 0
+																			? `+${item.unitsDelta}`
+																			: String(
+																					item.unitsDelta,
+																			  );
+																	return (
+																		<p
+																			key={`${history.id}-${index}`}
+																		>
+																			{productName}:{" "}
+																			{signedUnits} (
+																			{item.reason
+																				.replaceAll(
+																					"_",
+																					" ",
+																				)
+																				.toLowerCase()}
+																			)
+																		</p>
+																	);
+																},
+															)}
+														</div>
+														<div className="mt-3 flex justify-end">
+															<Button
+																type="button"
+																size="sm"
+																variant="outline"
+																onClick={() =>
+																	handleEditHistory(
+																		history,
+																	)
+																}
+															>
+																<Pencil className="mr-2 h-3.5 w-3.5" />
+																Edit
+															</Button>
+														</div>
+													</div>
+												);
+											},
+										)}
+									</div>
+
+									<div className="hidden md:block">
+										<Table>
+									<TableHeader>
+										<TableRow>
+											<TableHead>Time</TableHead>
+											<TableHead>Items</TableHead>
+											<TableHead className="text-right">
+												Net Units
+											</TableHead>
+											<TableHead>Details</TableHead>
+											<TableHead className="text-right">
+												Actions
+											</TableHead>
+										</TableRow>
+									</TableHeader>
+									<TableBody>
+										{adjustmentsHistory.map(
+											(history) => {
+												const netUnits =
+													history.items.reduce(
+														(sum, item) =>
+															sum +
+															item.unitsDelta,
+														0,
+													);
+												const details =
+													history.items
+														.map((item) => {
+															const productName =
+																productMap.get(
+																	item.productId,
+																)?.name ??
+																item.productId;
+															const signedUnits =
+																item.unitsDelta > 0
+																	? `+${item.unitsDelta}`
+																	: String(
+																			item.unitsDelta,
+																	  );
+															return `${productName}: ${signedUnits}`;
+														})
+														.join(", ");
+
+												return (
+													<TableRow
+														key={history.id}
+													>
+														<TableCell className="text-muted-foreground">
+															{history.createdAt
+																? new Date(
+																		history.createdAt,
+																  ).toLocaleTimeString()
+																: "-"}
+														</TableCell>
+														<TableCell>
+															{history.items.length}
+														</TableCell>
+														<TableCell
+															className={cn(
+																"text-right",
+																netUnits < 0 &&
+																	"text-destructive",
+															)}
+														>
+															{netUnits > 0
+																? `+${netUnits}`
+																: netUnits}
+														</TableCell>
+														<TableCell className="text-muted-foreground max-w-[420px] truncate">
+															{details || "-"}
+														</TableCell>
+														<TableCell className="text-right">
+															<Button
+																type="button"
+																size="sm"
+																variant="outline"
+																onClick={() =>
+																	handleEditHistory(
+																		history,
+																	)
+																}
+															>
+																<Pencil className="mr-2 h-3.5 w-3.5" />
+																Edit
+															</Button>
+														</TableCell>
+													</TableRow>
+												);
+											},
+										)}
+									</TableBody>
+										</Table>
+									</div>
+								</>
+						</CardContent>
+					</Card>
+					)}
 				</div>
 			)}
 		</PageWrapper>

@@ -2,7 +2,6 @@ import { Schema } from 'mongoose';
 import { getModel } from './_shared';
 
 export interface SupplierDoc {
-  orgId: string;
   name: string;
   phone?: string;
   notes?: string;
@@ -12,7 +11,6 @@ export interface SupplierDoc {
 
 const SupplierSchema = new Schema<SupplierDoc>(
   {
-    orgId: { type: String, required: true, index: true },
     name: { type: String, required: true },
     phone: { type: String },
     notes: { type: String },
@@ -20,6 +18,6 @@ const SupplierSchema = new Schema<SupplierDoc>(
   { timestamps: true }
 );
 
-SupplierSchema.index({ orgId: 1, name: 1 }, { unique: true });
+SupplierSchema.index({ name: 1 }, { unique: true });
 
 export const Supplier = getModel<SupplierDoc>('Supplier', SupplierSchema);

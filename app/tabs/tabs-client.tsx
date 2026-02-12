@@ -1,6 +1,8 @@
 "use client";
+/* eslint-disable max-len */
 
 import * as React from "react";
+import { useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import { toast } from "sonner";
 import {
@@ -9,6 +11,7 @@ import {
 	AlertCircle,
 	Users,
 	Receipt,
+	Pencil,
 } from "lucide-react";
 import { PageWrapper } from "@/components/page-wrapper";
 import { DatePickerYMD } from "@/components/date-picker-ymd";
@@ -43,6 +46,7 @@ import {
 } from "@/components/ui/tabs";
 import {
 	Dialog,
+	DialogClose,
 	DialogContent,
 	DialogDescription,
 	DialogFooter,
@@ -75,26 +79,89 @@ import type {
 	Product,
 	Customer,
 	PaymentMethod,
-	TabChargeItem,
 } from "@/lib/types";
 
 const fetcher = async (url: string) => {
 	const res = await fetch(url);
+	const json = await res.json().catch(() => ({}));
 	if (!res.ok) {
-		const error = await res
-			.json()
-			.catch(() => ({ error: "Request failed" }));
-		throw new Error(
-			error.error || "Failed to fetch data",
-		);
+		const message =
+			json?.error?.message ??
+			json?.error ??
+			"Failed to fetch data";
+		throw new Error(message);
 	}
-	return res.json();
+	return json?.data ?? json;
 };
 
-export function TabsClient() {
+const getApiErrorMessage = (
+	payload: unknown,
+	fallback: string,
+) => {
+	if (!payload || typeof payload !== "object")
+		return fallback;
+
+	const maybePayload = payload as Record<
+		string,
+		unknown
+	>;
+	const maybeError = maybePayload.error;
+	if (typeof maybeError === "string")
+		return maybeError;
+
+	if (
+		maybeError &&
+		typeof maybeError === "object"
+	) {
+		const maybeErrorObj = maybeError as Record<
+			string,
+			unknown
+		>;
+		if (
+			typeof maybeErrorObj.message === "string"
+		) {
+			return maybeErrorObj.message;
+		}
+	}
+
+	return fallback;
+};
+
+interface TabTransactionHistory {
+	id: string;
+	date: string | null;
+	customerId: string | null;
+	customerName: string;
+	type:
+		| "CHARGE"
+		| "PAYMENT"
+		| "ADJUSTMENT"
+		| "DIRECT_SALE";
+	amountCents: number;
+	paymentMethod?: PaymentMethod;
+	note?: string;
+	reference?: string;
+	createdAt?: string;
+	items?: {
+		productId: string;
+		units: number;
+	}[];
+}
+
+interface TabsClientProps {
+	view?: "both" | "accounts" | "transactions";
+}
+
+export function TabsClient({
+	view = "both",
+}: TabsClientProps) {
+	const searchParams = useSearchParams();
 	const [date, setDate] = React.useState(
 		getTodayJHB(),
 	);
+	const isAccountsOnly = view === "accounts";
+	const isTransactionsOnly =
+		view === "transactions";
 
 	const {
 		data: customers,
@@ -114,195 +181,697 @@ export function TabsClient() {
 		error: productsError,
 		isLoading: productsLoading,
 	} = useSWR<Product[]>("/api/products", fetcher);
-
+	const {
+		data: transactionsHistory,
+		isLoading: transactionsLoading,
+		mutate: mutateTransactions,
+	} = useSWR<TabTransactionHistory[]>(
+		`/api/transactions?date=${date}&limit=200`,
+		fetcher,
+		{
+			onError: (err) => toast.error(err.message),
+		},
+	);
+	const normalizedProducts = React.useMemo(
+		() =>
+			Array.isArray(products) ? products : [],
+		[products],
+	);
+	const normalizedCustomers = React.useMemo(
+		() =>
+			Array.isArray(customers) ? customers : [],
+		[customers],
+	);
 	const [addCustomerOpen, setAddCustomerOpen] =
 		React.useState(false);
+	const [editingCustomer, setEditingCustomer] =
+		React.useState<Customer | null>(null);
+	const [saleDialogOpen, setSaleDialogOpen] =
+		React.useState(false);
+	const [
+		paymentDialogOpen,
+		setPaymentDialogOpen,
+	] = React.useState(false);
+	const [
+		directSaleDialogOpen,
+		setDirectSaleDialogOpen,
+	] = React.useState(false);
+	const kindFilter =
+		searchParams.get("kind") ?? "all";
+	const productFilter =
+		searchParams.get("productId");
+	const action = searchParams.get("action");
+
+	React.useEffect(() => {
+		const qsDate = searchParams.get("date");
+		if (qsDate) setDate(qsDate);
+	}, [searchParams]);
+
+	React.useEffect(() => {
+		if (!isTransactionsOnly) return;
+		if (action === "direct-sale") {
+			setDirectSaleDialogOpen(true);
+			setSaleDialogOpen(false);
+			setPaymentDialogOpen(false);
+			return;
+		}
+		if (action === "account-sale") {
+			setSaleDialogOpen(true);
+			setDirectSaleDialogOpen(false);
+			setPaymentDialogOpen(false);
+			return;
+		}
+		if (action === "account-payment") {
+			setPaymentDialogOpen(true);
+			setSaleDialogOpen(false);
+			setDirectSaleDialogOpen(false);
+		}
+	}, [action, isTransactionsOnly]);
+
+	const filteredTransactions = React.useMemo(
+		() =>
+			(transactionsHistory ?? []).filter(
+				(txn) => {
+					const kindMatch =
+						kindFilter === "direct"
+							? txn.type === "DIRECT_SALE"
+							: kindFilter === "account"
+								? txn.type === "CHARGE"
+								: kindFilter === "payment"
+									? txn.type === "PAYMENT"
+									: true;
+					if (!kindMatch) return false;
+					if (!productFilter) return true;
+					return (txn.items ?? []).some(
+						(item) =>
+							item.productId === productFilter,
+					);
+				},
+			),
+		[
+			transactionsHistory,
+			kindFilter,
+			productFilter,
+		],
+	);
 
 	return (
 		<PageWrapper
-			title="Tabs"
-			description="Manage customer credit tabs"
+			title={
+				isTransactionsOnly
+					? "Transactions"
+					: "Customer Accounts"
+			}
+			description={
+				isTransactionsOnly
+					? "Record direct sales, account sales, and payments."
+					: "Track customer credit balances and account settings."
+			}
 			actions={
-				<DatePickerYMD
-					value={date}
-					onChange={setDate}
-				/>
+				isAccountsOnly ? undefined : (
+					<DatePickerYMD
+						value={date}
+						onChange={setDate}
+					/>
+				)
 			}
 		>
 			<Tabs
-				defaultValue="customers"
+				defaultValue={
+					isTransactionsOnly
+						? "transactions"
+						: "customers"
+				}
 				className="space-y-6"
 			>
-				<TabsList className="grid w-full max-w-md grid-cols-2">
-					<TabsTrigger
-						value="customers"
-						className="flex items-center gap-2"
-					>
-						<Users className="h-4 w-4" />
-						Customers
-					</TabsTrigger>
-					<TabsTrigger
-						value="transactions"
-						className="flex items-center gap-2"
-					>
-						<Receipt className="h-4 w-4" />
-						Transactions
-					</TabsTrigger>
-				</TabsList>
+				{view === "both" && (
+					<TabsList className="grid w-full max-w-md grid-cols-2">
+						<TabsTrigger
+							value="customers"
+							className="flex items-center gap-2"
+						>
+							<Users className="h-4 w-4" />
+							Accounts
+						</TabsTrigger>
+						<TabsTrigger
+							value="transactions"
+							className="flex items-center gap-2"
+						>
+							<Receipt className="h-4 w-4" />
+							Transactions
+						</TabsTrigger>
+					</TabsList>
+				)}
 
 				{/* Customers Panel */}
-				<TabsContent value="customers">
-					{customersLoading ? (
-						<LoadingTable />
-					) : customersError ? (
-						<Alert variant="destructive">
-							<AlertCircle className="h-4 w-4" />
-							<AlertTitle>Error</AlertTitle>
-							<AlertDescription>
-								{customersError.message}
-							</AlertDescription>
-						</Alert>
-					) : (
-						<>
-							<div className="flex justify-end mb-4">
-								<Dialog
-									open={addCustomerOpen}
-									onOpenChange={
-										setAddCustomerOpen
-									}
-								>
-									<DialogTrigger asChild>
-										<Button>
-											<Plus className="mr-2 h-4 w-4" />
-											Add Customer
-										</Button>
-									</DialogTrigger>
-									<AddCustomerDialog
-										onSuccess={() => {
-											setAddCustomerOpen(false);
-											mutateCustomers();
-										}}
-									/>
-								</Dialog>
-							</div>
+				{!isTransactionsOnly && (
+					<TabsContent value="customers">
+						{customersLoading ? (
+							<LoadingTable />
+						) : customersError ? (
+							<Alert variant="destructive">
+								<AlertCircle className="h-4 w-4" />
+								<AlertTitle>Error</AlertTitle>
+								<AlertDescription>
+									{customersError.message}
+								</AlertDescription>
+							</Alert>
+						) : (
+							<>
+								<div className="flex justify-end mb-4">
+									<Dialog
+										open={addCustomerOpen}
+										onOpenChange={
+											setAddCustomerOpen
+										}
+									>
+										<DialogTrigger asChild>
+											<Button>
+												<Plus className="mr-2 h-4 w-4" />
+												Add Customer
+											</Button>
+										</DialogTrigger>
+										<AddCustomerDialog
+											onSuccess={() => {
+												setAddCustomerOpen(false);
+												mutateCustomers();
+											}}
+										/>
+									</Dialog>
+								</div>
 
-							{!customers?.length ? (
-								<EmptyState
-									icon={
-										<Users className="h-8 w-8 text-muted-foreground" />
-									}
-									title="No customers"
-									description="Add your first customer to start managing tabs."
-									action={
-										<Button
-											onClick={() =>
-												setAddCustomerOpen(true)
-											}
-										>
-											<Plus className="mr-2 h-4 w-4" />
-											Add Customer
-										</Button>
-									}
-								/>
-							) : (
-								<Card className="shadow-lg">
-									<CardContent className="pt-6">
-										<Table>
-											<TableHeader>
-												<TableRow>
-													<TableHead>
-														Name
-													</TableHead>
-													<TableHead>
-														Phone
-													</TableHead>
-													<TableHead className="text-right">
-														Credit Limit
-													</TableHead>
-													<TableHead className="text-right">
-														Balance
-													</TableHead>
-													<TableHead>
-														Note
-													</TableHead>
-												</TableRow>
-											</TableHeader>
-											<TableBody>
+								{!customers?.length ? (
+									<EmptyState
+										icon={
+											<Users className="h-8 w-8 text-muted-foreground" />
+										}
+										title="No customer accounts yet"
+										description="Add your first customer to start tracking credit balances."
+										action={
+											<Button
+												onClick={() =>
+													setAddCustomerOpen(true)
+												}
+											>
+												<Plus className="mr-2 h-4 w-4" />
+												Add Customer
+											</Button>
+										}
+									/>
+								) : (
+									<Card className="shadow-lg">
+										<CardContent className="pt-6">
+											<div className="space-y-3 md:hidden">
 												{customers.map(
-													(customer) => (
-														<TableRow
-															key={customer.id}
-														>
-															<TableCell className="font-medium">
-																{customer.name}
-															</TableCell>
-															<TableCell>
-																{customer.phone ||
-																	"-"}
-															</TableCell>
-															<TableCell className="text-right">
-																{formatZAR(
-																	customer.creditLimitCents,
-																)}
-															</TableCell>
-															<TableCell
-																className={cn(
-																	"text-right font-medium",
-																	(customer.balanceCents ||
-																		0) > 0 &&
-																		"text-destructive",
-																)}
+													(customer) => {
+														const balanceCents =
+															customer.balanceCents ??
+															0;
+														const hasBalance =
+															balanceCents > 0;
+
+														return (
+															<div
+																key={customer.id}
+																className="rounded-lg border p-3"
 															>
-																{formatZAR(
-																	customer.balanceCents ||
-																		0,
-																)}
-															</TableCell>
-															<TableCell className="text-muted-foreground max-w-[200px] truncate">
-																{customer.note ||
-																	"-"}
-															</TableCell>
-														</TableRow>
-													),
+																<div className="flex items-start justify-between gap-2">
+																	<div>
+																		<p className="font-medium">
+																			{
+																				customer.name
+																			}
+																		</p>
+																		<p className="text-xs text-muted-foreground">
+																			{customer.phone ??
+																				"No phone"}
+																		</p>
+																	</div>
+																	<Button
+																		type="button"
+																		size="sm"
+																		variant="outline"
+																		onClick={() =>
+																			setEditingCustomer(
+																				customer,
+																			)
+																		}
+																	>
+																		<Pencil className="mr-2 h-3.5 w-3.5" />
+																		Edit
+																	</Button>
+																</div>
+																<div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+																	<div>
+																		<p className="text-muted-foreground">
+																			Limit
+																		</p>
+																		<p>
+																			{formatZAR(
+																				customer.creditLimitCents,
+																			)}
+																		</p>
+																	</div>
+																	<div className="text-right">
+																		<p className="text-muted-foreground">
+																			Balance
+																		</p>
+																		<p
+																			className={cn(
+																				hasBalance &&
+																					"text-destructive font-medium",
+																			)}
+																		>
+																			{formatZAR(
+																				balanceCents,
+																			)}
+																		</p>
+																	</div>
+																</div>
+															</div>
+														);
+													},
 												)}
-											</TableBody>
-										</Table>
-									</CardContent>
-								</Card>
+											</div>
+
+											<div className="hidden md:block">
+												<Table>
+													<TableHeader>
+														<TableRow>
+															<TableHead>
+																Name
+															</TableHead>
+															<TableHead>
+																Phone
+															</TableHead>
+															<TableHead className="text-right">
+																Credit Limit
+															</TableHead>
+															<TableHead className="text-right">
+																Balance
+															</TableHead>
+															<TableHead>
+																Note
+															</TableHead>
+															<TableHead className="text-right">
+																Actions
+															</TableHead>
+														</TableRow>
+													</TableHeader>
+													<TableBody>
+														{customers.map(
+															(customer) => {
+																const balanceCents =
+																	customer.balanceCents ??
+																	0;
+																const hasBalance =
+																	balanceCents >
+																	0;
+
+																return (
+																	<TableRow
+																		key={
+																			customer.id
+																		}
+																	>
+																		<TableCell className="font-medium">
+																			{
+																				customer.name
+																			}
+																		</TableCell>
+																		<TableCell>
+																			{customer.phone ??
+																				"-"}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{formatZAR(
+																				customer.creditLimitCents,
+																			)}
+																		</TableCell>
+																		<TableCell
+																			className={cn(
+																				"text-right font-medium",
+																				hasBalance &&
+																					"text-destructive",
+																			)}
+																		>
+																			{formatZAR(
+																				balanceCents,
+																			)}
+																		</TableCell>
+																		<TableCell className="text-muted-foreground max-w-50 truncate">
+																			{customer.note ??
+																				"-"}
+																		</TableCell>
+																		<TableCell className="text-right">
+																			<Button
+																				type="button"
+																				size="sm"
+																				variant="outline"
+																				onClick={() =>
+																					setEditingCustomer(
+																						customer,
+																					)
+																				}
+																			>
+																				<Pencil className="mr-2 h-3.5 w-3.5" />
+																				Edit
+																			</Button>
+																		</TableCell>
+																	</TableRow>
+																);
+															},
+														)}
+													</TableBody>
+												</Table>
+											</div>
+										</CardContent>
+									</Card>
+								)}
+							</>
+						)}
+
+						<Dialog
+							open={Boolean(editingCustomer)}
+							onOpenChange={(open) => {
+								if (!open)
+									setEditingCustomer(null);
+							}}
+						>
+							{editingCustomer && (
+								<EditCustomerDialog
+									customer={editingCustomer}
+									onSuccess={() => {
+										setEditingCustomer(null);
+										mutateCustomers();
+									}}
+								/>
 							)}
-						</>
-					)}
-				</TabsContent>
+						</Dialog>
+					</TabsContent>
+				)}
 
 				{/* Transactions Panel */}
-				<TabsContent value="transactions">
-					{productsLoading || customersLoading ? (
-						<LoadingForm />
-					) : productsError || customersError ? (
-						<Alert variant="destructive">
-							<AlertCircle className="h-4 w-4" />
-							<AlertTitle>Error</AlertTitle>
-							<AlertDescription>
-								Failed to load data
-							</AlertDescription>
-						</Alert>
-					) : (
-						<div className="grid gap-6 lg:grid-cols-2">
-							<TabChargeForm
-								customers={customers || []}
-								products={products || []}
-								date={date}
-							/>
-							<TabPaymentForm
-								customers={customers || []}
-								date={date}
-								onSuccess={() =>
-									mutateCustomers()
-								}
-							/>
-						</div>
-					)}
-				</TabsContent>
+				{!isAccountsOnly && (
+					<TabsContent value="transactions">
+						{productsLoading ||
+						customersLoading ? (
+							<LoadingForm />
+						) : productsError ||
+						  customersError ? (
+							<Alert variant="destructive">
+								<AlertCircle className="h-4 w-4" />
+								<AlertTitle>Error</AlertTitle>
+								<AlertDescription>
+									Failed to load data
+								</AlertDescription>
+							</Alert>
+						) : (
+							<>
+								<div className="mb-4 flex flex-wrap justify-end gap-2">
+									<Dialog
+										open={directSaleDialogOpen}
+										onOpenChange={
+											setDirectSaleDialogOpen
+										}
+									>
+										<DialogTrigger asChild>
+											<Button
+												type="button"
+												variant="secondary"
+											>
+												Add Direct Sale
+											</Button>
+										</DialogTrigger>
+										<DialogContent className="h-[70vh] w-[90vw] max-w-[90vw] overflow-hidden p-0 sm:max-w-[90vw]">
+											<DialogHeader className="shrink-0 space-y-0.5 border-b px-4 py-1.5 h-16">
+												<DialogTitle>
+													Add Direct Sale
+												</DialogTitle>
+												<DialogDescription className="text-xs leading-tight">
+													Record an immediate paid
+													sale for{" "}
+													{formatDateDisplay(
+														date,
+													)}
+													.
+												</DialogDescription>
+											</DialogHeader>
+											<DirectSaleForm
+												products={
+													normalizedProducts
+												}
+												date={date}
+												onSuccess={() => {
+													mutateTransactions();
+													setDirectSaleDialogOpen(
+														false,
+													);
+												}}
+											/>
+										</DialogContent>
+									</Dialog>
+
+									<Dialog
+										open={saleDialogOpen}
+										onOpenChange={
+											setSaleDialogOpen
+										}
+									>
+										<DialogTrigger asChild>
+											<Button type="button">
+												Add Sale
+											</Button>
+										</DialogTrigger>
+										<DialogContent className="h-[70vh] w-[90vw] max-w-[90vw] overflow-hidden p-0 sm:max-w-[90vw]">
+											<DialogHeader className="shrink-0 space-y-0.5 border-b px-4 py-1.5 h-16">
+												<DialogTitle>
+													Add Sale to Account
+												</DialogTitle>
+												<DialogDescription className="text-xs leading-tight">
+													Record a customer
+													account sale for{" "}
+													{formatDateDisplay(
+														date,
+													)}
+													.
+												</DialogDescription>
+											</DialogHeader>
+											<TabChargeForm
+												customers={
+													normalizedCustomers
+												}
+												products={
+													normalizedProducts
+												}
+												date={date}
+												onSuccess={() => {
+													mutateCustomers();
+													mutateTransactions();
+													setSaleDialogOpen(
+														false,
+													);
+												}}
+											/>
+										</DialogContent>
+									</Dialog>
+
+									<Dialog
+										open={paymentDialogOpen}
+										onOpenChange={
+											setPaymentDialogOpen
+										}
+									>
+										<DialogTrigger asChild>
+											<Button
+												type="button"
+												variant="outline"
+											>
+												Add Payment
+											</Button>
+										</DialogTrigger>
+										<DialogContent className="h-[70vh] w-[90vw] max-w-[90vw] overflow-hidden p-0 sm:max-w-[90vw]">
+											<DialogHeader className="shrink-0 space-y-0.5 border-b px-4 py-1.5 h-16">
+												<DialogTitle>
+													Record Account Payment
+												</DialogTitle>
+												<DialogDescription className="text-xs leading-tight">
+													Save a customer payment
+													for{" "}
+													{formatDateDisplay(
+														date,
+													)}
+													.
+												</DialogDescription>
+											</DialogHeader>
+											<TabPaymentForm
+												customers={
+													normalizedCustomers
+												}
+												date={date}
+												onSuccess={() => {
+													mutateCustomers();
+													mutateTransactions();
+													setPaymentDialogOpen(
+														false,
+													);
+												}}
+											/>
+										</DialogContent>
+									</Dialog>
+								</div>
+							</>
+						)}
+
+						<Card className="shadow-md mt-6">
+							<CardHeader>
+								<CardTitle>
+									Transaction History
+								</CardTitle>
+							</CardHeader>
+							<CardContent>
+								{transactionsLoading ? (
+									<LoadingTable />
+								) : !filteredTransactions.length ? (
+									<p className="text-sm text-muted-foreground">
+										No transactions saved for this
+										date yet.
+									</p>
+								) : (
+									<>
+										{(kindFilter !== "all" ||
+											productFilter) && (
+											<p className="mb-3 text-xs text-muted-foreground">
+												Showing filtered
+												transactions for this
+												view.
+											</p>
+										)}
+										<div className="space-y-3 md:hidden">
+											{filteredTransactions.map(
+												(txn) => (
+													<div
+														key={txn.id}
+														className="rounded-lg border p-3"
+													>
+														<div className="flex items-start justify-between gap-2">
+															<div>
+																<p className="font-medium">
+																	{
+																		txn.customerName
+																	}
+																</p>
+																<p className="text-xs text-muted-foreground">
+																	{txn.createdAt
+																		? new Date(
+																				txn.createdAt,
+																			).toLocaleTimeString()
+																		: "-"}
+																</p>
+															</div>
+															<p className="font-semibold">
+																{formatZAR(
+																	txn.amountCents,
+																)}
+															</p>
+														</div>
+														<div className="mt-2 flex items-center justify-between text-sm">
+															<span className="text-muted-foreground">
+																{txn.type ===
+																"DIRECT_SALE"
+																	? "Direct Sale"
+																	: txn.type ===
+																		  "CHARGE"
+																		? "Sale"
+																		: txn.type ===
+																			  "PAYMENT"
+																			? "Payment"
+																			: "Adjustment"}
+															</span>
+															<span className="text-muted-foreground">
+																{txn.paymentMethod ??
+																	"-"}
+															</span>
+														</div>
+													</div>
+												),
+											)}
+										</div>
+
+										<div className="hidden md:block">
+											<Table>
+												<TableHeader>
+													<TableRow>
+														<TableHead>
+															Time
+														</TableHead>
+														<TableHead>
+															Customer
+														</TableHead>
+														<TableHead>
+															Type
+														</TableHead>
+														<TableHead className="text-right">
+															Amount
+														</TableHead>
+														<TableHead>
+															Details
+														</TableHead>
+													</TableRow>
+												</TableHeader>
+												<TableBody>
+													{filteredTransactions.map(
+														(txn) => (
+															<TableRow
+																key={txn.id}
+															>
+																<TableCell className="text-muted-foreground">
+																	{txn.createdAt
+																		? new Date(
+																				txn.createdAt,
+																			).toLocaleTimeString()
+																		: "-"}
+																</TableCell>
+																<TableCell>
+																	{
+																		txn.customerName
+																	}
+																</TableCell>
+																<TableCell>
+																	{txn.type ===
+																	"DIRECT_SALE"
+																		? "Direct Sale"
+																		: txn.type ===
+																			  "CHARGE"
+																			? "Sale"
+																			: txn.type ===
+																				  "PAYMENT"
+																				? "Payment"
+																				: "Adjustment"}
+																</TableCell>
+																<TableCell className="text-right">
+																	{formatZAR(
+																		txn.amountCents,
+																	)}
+																</TableCell>
+																<TableCell className="text-muted-foreground">
+																	{txn.paymentMethod ??
+																		txn.reference ??
+																		txn.note ??
+																		"-"}
+																</TableCell>
+															</TableRow>
+														),
+													)}
+												</TableBody>
+											</Table>
+										</div>
+									</>
+								)}
+							</CardContent>
+						</Card>
+					</TabsContent>
+				)}
 			</Tabs>
 		</PageWrapper>
 	);
@@ -348,19 +917,18 @@ function AddCustomerDialog({
 			});
 
 			if (!res.ok) {
-				const error = await res
+				const errorBody = await res
 					.json()
-					.catch(() => ({
-						error: "Request failed",
-					}));
+					.catch(() => ({}));
 				throw new Error(
-					error.error || "Failed to add customer",
+					getApiErrorMessage(
+						errorBody,
+						"Failed to add customer",
+					),
 				);
 			}
 
-			toast.success(
-				"Customer added successfully",
-			);
+			toast.success("Customer account added");
 			onSuccess();
 		} catch (err) {
 			toast.error(
@@ -378,7 +946,8 @@ function AddCustomerDialog({
 			<DialogHeader>
 				<DialogTitle>Add Customer</DialogTitle>
 				<DialogDescription>
-					Add a new customer for tab management.
+					Create a customer account for credit
+					purchases and payments.
 				</DialogDescription>
 			</DialogHeader>
 			<form onSubmit={handleSubmit}>
@@ -462,13 +1031,210 @@ function AddCustomerDialog({
 					</div>
 				</div>
 				<DialogFooter>
+					<DialogClose asChild>
+						<Button
+							type="button"
+							variant="outline"
+						>
+							Cancel
+						</Button>
+					</DialogClose>
 					<Button
 						type="submit"
 						disabled={loading}
 					>
-						{loading
-							? "Adding..."
-							: "Add Customer"}
+						{loading ? "Saving..." : "Save"}
+					</Button>
+				</DialogFooter>
+			</form>
+		</DialogContent>
+	);
+}
+
+function EditCustomerDialog({
+	customer,
+	onSuccess,
+}: {
+	customer: Customer;
+	onSuccess: () => void;
+}) {
+	const [loading, setLoading] =
+		React.useState(false);
+	const [formData, setFormData] = React.useState({
+		name: customer.name ?? "",
+		phone: customer.phone ?? "",
+		note: customer.note ?? "",
+		creditLimitCents:
+			customer.creditLimitCents ?? 0,
+		dueDays: customer.dueDays
+			? String(customer.dueDays)
+			: "",
+	});
+
+	React.useEffect(() => {
+		setFormData({
+			name: customer.name ?? "",
+			phone: customer.phone ?? "",
+			note: customer.note ?? "",
+			creditLimitCents:
+				customer.creditLimitCents ?? 0,
+			dueDays: customer.dueDays
+				? String(customer.dueDays)
+				: "",
+		});
+	}, [customer]);
+
+	const handleSubmit = async (
+		e: React.FormEvent,
+	) => {
+		e.preventDefault();
+		setLoading(true);
+
+		try {
+			const res = await fetch(
+				`/api/customers/${customer.id}`,
+				{
+					method: "PATCH",
+					headers: {
+						"Content-Type": "application/json",
+					},
+					body: JSON.stringify({
+						name: formData.name,
+						phone: formData.phone || undefined,
+						note: formData.note || undefined,
+						creditLimitCents:
+							formData.creditLimitCents,
+						dueDays: formData.dueDays
+							? parseInt(formData.dueDays, 10)
+							: undefined,
+					}),
+				},
+			);
+
+			if (!res.ok) {
+				const errorBody = await res
+					.json()
+					.catch(() => ({}));
+				throw new Error(
+					getApiErrorMessage(
+						errorBody,
+						"Failed to update customer",
+					),
+				);
+			}
+
+			toast.success("Customer updated");
+			onSuccess();
+		} catch (err) {
+			toast.error(
+				err instanceof Error
+					? err.message
+					: "Failed to update customer",
+			);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	return (
+		<DialogContent>
+			<DialogHeader>
+				<DialogTitle>Edit Customer</DialogTitle>
+				<DialogDescription>
+					Update account details and credit limit.
+				</DialogDescription>
+			</DialogHeader>
+			<form onSubmit={handleSubmit}>
+				<div className="grid gap-4 py-4">
+					<div className="space-y-2">
+						<Label htmlFor="edit-name">
+							Name
+						</Label>
+						<Input
+							id="edit-name"
+							value={formData.name}
+							onChange={(e) =>
+								setFormData((prev) => ({
+									...prev,
+									name: e.target.value,
+								}))
+							}
+							required
+						/>
+					</div>
+					<div className="space-y-2">
+						<Label htmlFor="edit-phone">
+							Phone (optional)
+						</Label>
+						<Input
+							id="edit-phone"
+							value={formData.phone}
+							onChange={(e) =>
+								setFormData((prev) => ({
+									...prev,
+									phone: e.target.value,
+								}))
+							}
+						/>
+					</div>
+					<MoneyInput
+						label="Credit Limit"
+						value={formData.creditLimitCents}
+						onChange={(value) =>
+							setFormData((prev) => ({
+								...prev,
+								creditLimitCents: value,
+							}))
+						}
+					/>
+					<div className="space-y-2">
+						<Label htmlFor="edit-dueDays">
+							Payment Due Days (optional)
+						</Label>
+						<Input
+							id="edit-dueDays"
+							type="number"
+							min="1"
+							value={formData.dueDays}
+							onChange={(e) =>
+								setFormData((prev) => ({
+									...prev,
+									dueDays: e.target.value,
+								}))
+							}
+						/>
+					</div>
+					<div className="space-y-2">
+						<Label htmlFor="edit-note">
+							Note (optional)
+						</Label>
+						<Textarea
+							id="edit-note"
+							value={formData.note}
+							onChange={(e) =>
+								setFormData((prev) => ({
+									...prev,
+									note: e.target.value,
+								}))
+							}
+							rows={2}
+						/>
+					</div>
+				</div>
+				<DialogFooter>
+					<DialogClose asChild>
+						<Button
+							type="button"
+							variant="outline"
+						>
+							Cancel
+						</Button>
+					</DialogClose>
+					<Button
+						type="submit"
+						disabled={loading}
+					>
+						{loading ? "Saving..." : "Save"}
 					</Button>
 				</DialogFooter>
 			</form>
@@ -485,10 +1251,12 @@ function TabChargeForm({
 	customers,
 	products,
 	date,
+	onSuccess,
 }: {
 	customers: Customer[];
 	products: Product[];
 	date: string;
+	onSuccess?: () => void;
 }) {
 	const [loading, setLoading] =
 		React.useState(false);
@@ -498,19 +1266,8 @@ function TabChargeForm({
 		ChargeItem[]
 	>([{ productId: "", units: "" }]);
 	const [note, setNote] = React.useState("");
-	const [receipt, setReceipt] = React.useState<{
-		amount: number;
-		items: {
-			productName: string;
-			units: number;
-		}[];
-		createdAt: string;
-	} | null>(null);
-
-	const productMap = React.useMemo(
-		() => new Map(products.map((p) => [p.id, p])),
-		[products],
-	);
+	const [showNote, setShowNote] =
+		React.useState(false);
 
 	const addItem = () => {
 		setItems([
@@ -569,56 +1326,30 @@ function TabChargeForm({
 						date,
 						customerId,
 						items: validItems,
-						note: note || undefined,
+						note:
+							showNote && note ? note : undefined,
 					}),
 				},
 			);
 
 			if (!res.ok) {
-				const error = await res
+				const errorBody = await res
 					.json()
-					.catch(() => ({
-						error: "Request failed",
-					}));
+					.catch(() => ({}));
 				throw new Error(
-					error.error || "Failed to charge tab",
+					getApiErrorMessage(
+						errorBody,
+						"Failed to add sale to account",
+					),
 				);
 			}
 
 			const data = await res.json();
-			toast.success("Tab charged successfully");
-
-			// Calculate receipt data
-			const receiptItems = validItems.map(
-				(item) => ({
-					productName:
-						productMap.get(item.productId)
-							?.name || item.productId,
-					units: item.units,
-				}),
+			toast.success(
+				"Sale added to customer account",
 			);
 
-			const totalAmount = validItems.reduce(
-				(sum, item) => {
-					const product = productMap.get(
-						item.productId,
-					);
-					return (
-						sum +
-						(product?.currentPriceCents || 0) *
-							item.units
-					);
-				},
-				0,
-			);
-
-			setReceipt({
-				amount: data.amountCents || totalAmount,
-				items: receiptItems,
-				createdAt:
-					data.createdAt ||
-					new Date().toISOString(),
-			});
+			onSuccess?.();
 
 			// Reset form
 			setCustomerId("");
@@ -628,7 +1359,7 @@ function TabChargeForm({
 			toast.error(
 				err instanceof Error
 					? err.message
-					: "Failed to charge tab",
+					: "Failed to add sale to account",
 			);
 		} finally {
 			setLoading(false);
@@ -636,144 +1367,118 @@ function TabChargeForm({
 	};
 
 	return (
-		<Card className="shadow-md">
-			<CardHeader>
-				<CardTitle>Charge Tab</CardTitle>
-			</CardHeader>
-			<CardContent>
-				{receipt ? (
-					<div className="space-y-4">
-						<Alert className="border-primary/50 bg-primary/5">
-							<Receipt className="h-4 w-4 text-primary" />
-							<AlertTitle>Tab Charged</AlertTitle>
-							<AlertDescription className="mt-2">
-								<div className="space-y-2 text-sm">
-									<p>
-										<strong>Amount:</strong>{" "}
-										{formatZAR(receipt.amount)}
-									</p>
-									<p>
-										<strong>Date:</strong>{" "}
-										{formatDateDisplay(date)}
-									</p>
-									<div>
-										<strong>Items:</strong>
-										<ul className="list-disc list-inside mt-1">
-											{receipt.items.map(
-												(item, i) => (
-													<li key={i}>
-														{item.productName} x{" "}
-														{item.units}
-													</li>
-												),
-											)}
-										</ul>
-									</div>
+		<form
+			onSubmit={handleSubmit}
+			className="flex flex-col h-[60vh]"
+		>
+			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
+				<div className="flex min-h-0 flex-1 flex-col space-y-2 h-[50vh]">
+					<Label>Items Sold</Label>
+					<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+						{items.map((item, index) => (
+							<div
+								key={index}
+								className="flex gap-2 items-end"
+							>
+								<div className="flex-1">
+									<ProductSelect
+										products={products}
+										value={item.productId}
+										onChange={(v) =>
+											updateItem(index, {
+												productId: v,
+											})
+										}
+										placeholder="Product"
+									/>
 								</div>
-							</AlertDescription>
-						</Alert>
+								<div className="w-20">
+									<Input
+										type="number"
+										min="1"
+										value={item.units}
+										onChange={(e) =>
+											updateItem(index, {
+												units: e.target.value,
+											})
+										}
+										placeholder="Qty"
+									/>
+								</div>
+								{items.length > 1 && (
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon"
+										onClick={() =>
+											removeItem(index)
+										}
+									>
+										<Trash2 className="h-4 w-4" />
+									</Button>
+								)}
+							</div>
+						))}
+					</div>
+				</div>
+
+				<div className="space-y-3">
+					<CustomerSelect
+						customers={customers}
+						value={customerId}
+						onChange={setCustomerId}
+						label="Customer Account"
+					/>
+				</div>
+
+				<div className="space-y-2">
+					<div className="grid grid-cols-2 gap-2">
 						<Button
+							type="button"
 							variant="outline"
-							className="w-full bg-transparent"
-							onClick={() => setReceipt(null)}
+							size="sm"
+							className="w-full"
+							onClick={addItem}
 						>
-							New Charge
+							<Plus className="mr-2 h-4 w-4" />
+							Add Item
+						</Button>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="w-full"
+							onClick={() =>
+								setShowNote((prev) => !prev)
+							}
+						>
+							{showNote
+								? "Hide Note"
+								: "Add Note"}
 						</Button>
 					</div>
-				) : (
-					<form
-						onSubmit={handleSubmit}
-						className="space-y-4"
-					>
-						<CustomerSelect
-							customers={customers}
-							value={customerId}
-							onChange={setCustomerId}
-							label="Customer"
+					{showNote && (
+						<Textarea
+							value={note}
+							onChange={(e) =>
+								setNote(e.target.value)
+							}
+							placeholder="Optional note for this account sale"
+							rows={2}
 						/>
-
-						<div className="space-y-3">
-							<Label>Items</Label>
-							{items.map((item, index) => (
-								<div
-									key={index}
-									className="flex gap-2 items-end"
-								>
-									<div className="flex-1">
-										<ProductSelect
-											products={products}
-											value={item.productId}
-											onChange={(v) =>
-												updateItem(index, {
-													productId: v,
-												})
-											}
-											placeholder="Product"
-										/>
-									</div>
-									<div className="w-20">
-										<Input
-											type="number"
-											min="1"
-											value={item.units}
-											onChange={(e) =>
-												updateItem(index, {
-													units: e.target.value,
-												})
-											}
-											placeholder="Qty"
-										/>
-									</div>
-									{items.length > 1 && (
-										<Button
-											type="button"
-											variant="ghost"
-											size="icon"
-											onClick={() =>
-												removeItem(index)
-											}
-										>
-											<Trash2 className="h-4 w-4" />
-										</Button>
-									)}
-								</div>
-							))}
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								onClick={addItem}
-							>
-								<Plus className="mr-2 h-4 w-4" />
-								Add Item
-							</Button>
-						</div>
-
-						<div className="space-y-2">
-							<Label>Note (optional)</Label>
-							<Textarea
-								value={note}
-								onChange={(e) =>
-									setNote(e.target.value)
-								}
-								placeholder="Any notes..."
-								rows={2}
-							/>
-						</div>
-
-						<Button
-							type="submit"
-							className="w-full"
-							disabled={loading || !customerId}
-						>
-							{loading
-								? "Charging..."
-								: "Charge Tab"}
-						</Button>
-					</form>
-				)}
-			</CardContent>
-		</Card>
+					)}
+				</div>
+			</div>
+			<div className="shrink-0 border-t px-4 py-3">
+				<Button
+					type="submit"
+					className="w-full"
+					disabled={loading || !customerId}
+				>
+					{loading ? "Saving..." : "Save"}
+				</Button>
+			</div>
+		</form>
 	);
 }
 
@@ -796,12 +1501,11 @@ function TabPaymentForm({
 		React.useState<PaymentMethod | "">("");
 	const [reference, setReference] =
 		React.useState("");
+	const [showReference, setShowReference] =
+		React.useState(false);
 	const [note, setNote] = React.useState("");
-	const [receipt, setReceipt] = React.useState<{
-		amount: number;
-		method: string;
-		createdAt: string;
-	} | null>(null);
+	const [showNote, setShowNote] =
+		React.useState(false);
 
 	const handleSubmit = async (
 		e: React.FormEvent,
@@ -822,43 +1526,41 @@ function TabPaymentForm({
 						customerId,
 						amountCents,
 						paymentMethod,
-						reference: reference || undefined,
-						note: note || undefined,
+						reference:
+							showReference && reference
+								? reference
+								: undefined,
+						note:
+							showNote && note ? note : undefined,
 					}),
 				},
 			);
 
 			if (!res.ok) {
-				const error = await res
+				const errorBody = await res
 					.json()
-					.catch(() => ({
-						error: "Request failed",
-					}));
+					.catch(() => ({}));
 				throw new Error(
-					error.error ||
+					getApiErrorMessage(
+						errorBody,
 						"Failed to record payment",
+					),
 				);
 			}
 
-			const data = await res.json();
+			await res.json();
 			toast.success(
 				"Payment recorded successfully",
 			);
-
-			setReceipt({
-				amount: amountCents,
-				method: paymentMethod,
-				createdAt:
-					data.createdAt ||
-					new Date().toISOString(),
-			});
 
 			// Reset form
 			setCustomerId("");
 			setAmountCents(0);
 			setPaymentMethod("");
 			setReference("");
+			setShowReference(false);
 			setNote("");
+			setShowNote(false);
 
 			onSuccess();
 		} catch (err) {
@@ -873,101 +1575,100 @@ function TabPaymentForm({
 	};
 
 	return (
-		<Card className="shadow-md">
-			<CardHeader>
-				<CardTitle>Record Payment</CardTitle>
-			</CardHeader>
-			<CardContent>
-				{receipt ? (
-					<div className="space-y-4">
-						<Alert className="border-primary/50 bg-primary/5">
-							<Receipt className="h-4 w-4 text-primary" />
-							<AlertTitle>
-								Payment Recorded
-							</AlertTitle>
-							<AlertDescription className="mt-2">
-								<div className="space-y-1 text-sm">
-									<p>
-										<strong>Amount:</strong>{" "}
-										{formatZAR(receipt.amount)}
-									</p>
-									<p>
-										<strong>Method:</strong>{" "}
-										{receipt.method}
-									</p>
-									<p>
-										<strong>Date:</strong>{" "}
-										{formatDateDisplay(date)}
-									</p>
-								</div>
-							</AlertDescription>
-						</Alert>
-						<Button
-							variant="outline"
-							className="w-full bg-transparent"
-							onClick={() => setReceipt(null)}
-						>
-							New Payment
-						</Button>
-					</div>
-				) : (
-					<form
-						onSubmit={handleSubmit}
-						className="space-y-4"
+		<form
+			onSubmit={handleSubmit}
+			className="flex flex-col h-[60vh]"
+		>
+			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
+				<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+					<CustomerSelect
+						customers={customers}
+						value={customerId}
+						onChange={setCustomerId}
+						label="Customer Account"
+					/>
+
+					<MoneyInput
+						label="Amount"
+						value={amountCents}
+						onChange={setAmountCents}
+					/>
+				</div>
+
+				<div className="space-y-3">
+					<Label>Payment Method</Label>
+					<Select
+						value={paymentMethod}
+						onValueChange={(v) =>
+							setPaymentMethod(v as PaymentMethod)
+						}
 					>
-						<CustomerSelect
-							customers={customers}
-							value={customerId}
-							onChange={setCustomerId}
-							label="Customer"
-						/>
+						<SelectTrigger>
+							<SelectValue placeholder="Select method" />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="CASH">
+								Cash
+							</SelectItem>
+							<SelectItem value="CARD">
+								Card
+							</SelectItem>
+							<SelectItem value="EFT">
+								EFT
+							</SelectItem>
+						</SelectContent>
+					</Select>
+				</div>
 
-						<MoneyInput
-							label="Amount"
-							value={amountCents}
-							onChange={setAmountCents}
-						/>
-
-						<div className="space-y-2">
-							<Label>Payment Method</Label>
-							<Select
-								value={paymentMethod}
-								onValueChange={(v) =>
-									setPaymentMethod(
-										v as PaymentMethod,
+				<div className="space-y-3">
+					<div className="space-y-2">
+						<div className="grid grid-cols-2 gap-2">
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="w-full"
+								onClick={() =>
+									setShowReference(
+										(prev) => !prev,
 									)
 								}
 							>
-								<SelectTrigger>
-									<SelectValue placeholder="Select method" />
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="CASH">
-										Cash
-									</SelectItem>
-									<SelectItem value="CARD">
-										Card
-									</SelectItem>
-									<SelectItem value="EFT">
-										EFT
-									</SelectItem>
-								</SelectContent>
-							</Select>
-						</div>
-
-						<div className="space-y-2">
-							<Label>Reference (optional)</Label>
-							<Input
-								value={reference}
-								onChange={(e) =>
-									setReference(e.target.value)
+								{showReference
+									? "Hide Ref"
+									: "Add Ref"}
+							</Button>
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="w-full"
+								onClick={() =>
+									setShowNote((prev) => !prev)
 								}
-								placeholder="e.g. Receipt #123"
-							/>
+							>
+								{showNote
+									? "Hide Note"
+									: "Add Note"}
+							</Button>
 						</div>
-
-						<div className="space-y-2">
-							<Label>Note (optional)</Label>
+						{showReference && (
+							<div className="space-y-2">
+								<Label>
+									Reference (optional)
+								</Label>
+								<Input
+									value={reference}
+									onChange={(e) =>
+										setReference(
+											e.target.value,
+										)
+									}
+									placeholder="e.g. Receipt #123"
+								/>
+							</div>
+						)}
+						{showNote && (
 							<Textarea
 								value={note}
 								onChange={(e) =>
@@ -976,25 +1677,265 @@ function TabPaymentForm({
 								placeholder="Any notes..."
 								rows={2}
 							/>
-						</div>
+						)}
+					</div>
+				</div>
+			</div>
+			<div className="shrink-0 border-t px-4 py-3">
+				<Button
+					type="submit"
+					className="w-full"
+					disabled={
+						loading ||
+						!customerId ||
+						!paymentMethod ||
+						amountCents <= 0
+					}
+				>
+					{loading ? "Saving..." : "Save"}
+				</Button>
+			</div>
+		</form>
+	);
+}
 
+function DirectSaleForm({
+	products,
+	date,
+	onSuccess,
+}: {
+	products: Product[];
+	date: string;
+	onSuccess: () => void;
+}) {
+	const [loading, setLoading] =
+		React.useState(false);
+	const [items, setItems] = React.useState<
+		ChargeItem[]
+	>([{ productId: "", units: "" }]);
+	const [paymentMethod, setPaymentMethod] =
+		React.useState<PaymentMethod | "">("");
+	const [note, setNote] = React.useState("");
+	const [showNote, setShowNote] =
+		React.useState(false);
+
+	const addItem = () => {
+		setItems([
+			...items,
+			{ productId: "", units: "" },
+		]);
+	};
+
+	const removeItem = (index: number) => {
+		setItems(items.filter((_, i) => i !== index));
+	};
+
+	const updateItem = (
+		index: number,
+		updates: Partial<ChargeItem>,
+	) => {
+		setItems(
+			items.map((item, i) =>
+				i === index
+					? { ...item, ...updates }
+					: item,
+			),
+		);
+	};
+
+	const handleSubmit = async (
+		e: React.FormEvent,
+	) => {
+		e.preventDefault();
+		setLoading(true);
+
+		const validItems = items
+			.filter(
+				(item) => item.productId && item.units,
+			)
+			.map((item) => ({
+				productId: item.productId,
+				units: parseInt(item.units) || 0,
+			}))
+			.filter((item) => item.units > 0);
+
+		if (validItems.length === 0) {
+			toast.error("Please add at least one item");
+			setLoading(false);
+			return;
+		}
+
+		try {
+			const res = await fetch("/api/sales", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					date,
+					paymentMethod,
+					items: validItems,
+					note:
+						showNote && note ? note : undefined,
+				}),
+			});
+
+			if (!res.ok) {
+				const errorBody = await res
+					.json()
+					.catch(() => ({}));
+				throw new Error(
+					getApiErrorMessage(
+						errorBody,
+						"Failed to save direct sale",
+					),
+				);
+			}
+
+			toast.success("Direct sale saved");
+			setItems([{ productId: "", units: "" }]);
+			setPaymentMethod("");
+			setNote("");
+			onSuccess();
+		} catch (err) {
+			toast.error(
+				err instanceof Error
+					? err.message
+					: "Failed to save direct sale",
+			);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	return (
+		<form
+			onSubmit={handleSubmit}
+			className="flex flex-col h-[60vh]"
+		>
+			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
+				<div className="flex min-h-0 flex-1 flex-col space-y-2 h-[50vh]">
+					<Label>Items Sold</Label>
+					<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+						{items.map((item, index) => (
+							<div
+								key={index}
+								className="flex gap-2 items-end"
+							>
+								<div className="flex-1">
+									<ProductSelect
+										products={products}
+										value={item.productId}
+										onChange={(v) =>
+											updateItem(index, {
+												productId: v,
+											})
+										}
+										placeholder="Product"
+									/>
+								</div>
+								<div className="w-20">
+									<Input
+										type="number"
+										min="1"
+										value={item.units}
+										onChange={(e) =>
+											updateItem(index, {
+												units: e.target.value,
+											})
+										}
+										placeholder="Qty"
+									/>
+								</div>
+								{items.length > 1 && (
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon"
+										onClick={() =>
+											removeItem(index)
+										}
+									>
+										<Trash2 className="h-4 w-4" />
+									</Button>
+								)}
+							</div>
+						))}
+					</div>
+				</div>
+
+				<div className="space-y-3">
+					<Label>Payment Method</Label>
+					<Select
+						value={paymentMethod}
+						onValueChange={(v) =>
+							setPaymentMethod(v as PaymentMethod)
+						}
+					>
+						<SelectTrigger>
+							<SelectValue placeholder="Select method" />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="CASH">
+								Cash
+							</SelectItem>
+							<SelectItem value="CARD">
+								Card
+							</SelectItem>
+							<SelectItem value="EFT">
+								EFT
+							</SelectItem>
+						</SelectContent>
+					</Select>
+				</div>
+
+				<div className="space-y-2">
+					<div className="grid grid-cols-2 gap-2">
 						<Button
-							type="submit"
+							type="button"
+							variant="outline"
+							size="sm"
 							className="w-full"
-							disabled={
-								loading ||
-								!customerId ||
-								!paymentMethod ||
-								amountCents <= 0
+							onClick={addItem}
+						>
+							<Plus className="mr-2 h-4 w-4" />
+							Add Item
+						</Button>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="w-full"
+							onClick={() =>
+								setShowNote((prev) => !prev)
 							}
 						>
-							{loading
-								? "Recording..."
-								: "Record Payment"}
+							{showNote
+								? "Hide Note"
+								: "Add Note"}
 						</Button>
-					</form>
-				)}
-			</CardContent>
-		</Card>
+					</div>
+					{showNote && (
+						<Textarea
+							value={note}
+							onChange={(e) =>
+								setNote(e.target.value)
+							}
+							placeholder="Any notes..."
+							rows={2}
+						/>
+					)}
+				</div>
+			</div>
+			<div className="shrink-0 border-t px-4 py-3">
+				<Button
+					type="submit"
+					className="w-full"
+					disabled={loading || !paymentMethod}
+				>
+					{loading ? "Saving..." : "Save"}
+				</Button>
+			</div>
+		</form>
 	);
 }

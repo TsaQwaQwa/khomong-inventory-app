@@ -15,9 +15,8 @@ import {
 	BarChart3,
 	Package,
 	ShoppingCart,
-	ClipboardCheck,
-	Calculator,
 	AlertTriangle,
+	Receipt,
 	CreditCard,
 	Menu,
 } from "lucide-react";
@@ -25,37 +24,32 @@ import {
 const navItems = [
 	{
 		href: "/dashboard",
-		label: "Dashboard",
+		label: "Daily Overview",
 		icon: BarChart3,
 	},
 	{
 		href: "/products",
-		label: "Products",
+		label: "Products & Prices",
 		icon: Package,
 	},
 	{
 		href: "/purchases",
-		label: "Purchases",
+		label: "Stock Purchases",
 		icon: ShoppingCart,
 	},
 	{
-		href: "/close-stock",
-		label: "Close Stock",
-		icon: ClipboardCheck,
-	},
-	{
-		href: "/close-till",
-		label: "Close Till",
-		icon: Calculator,
-	},
-	{
 		href: "/adjustments",
-		label: "Adjustments",
+		label: "Stock Adjustments",
 		icon: AlertTriangle,
 	},
 	{
+		href: "/transactions",
+		label: "Transactions",
+		icon: Receipt,
+	},
+	{
 		href: "/tabs",
-		label: "Tabs",
+		label: "Customer Accounts",
 		icon: CreditCard,
 	},
 ];
@@ -72,7 +66,7 @@ export function Header() {
 					className="mr-6 flex items-center space-x-2"
 				>
 					<span className="font-bold text-lg">
-						Tavern Monitor
+						Kgomong
 					</span>
 				</Link>
 
@@ -108,16 +102,16 @@ export function Header() {
 						<Button variant="ghost" size="icon">
 							<Menu className="h-5 w-5" />
 							<span className="sr-only">
-								Toggle menu
+								Open navigation menu
 							</span>
 						</Button>
 					</SheetTrigger>
 					<SheetContent
 						side="left"
-						className="w-[280px]"
+						className="w-70"
 					>
 						<SheetTitle className="text-left mb-6">
-							Tavern Monitor
+							Kgomong
 						</SheetTitle>
 						<nav className="flex flex-col space-y-1">
 							{navItems.map((item) => {

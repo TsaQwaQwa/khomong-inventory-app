@@ -7,6 +7,7 @@ import {
 	Plus,
 	Trash2,
 	AlertCircle,
+	Edit,
 } from "lucide-react";
 import { PageWrapper } from "@/components/page-wrapper";
 import { DatePickerYMD } from "@/components/date-picker-ymd";
@@ -30,6 +31,7 @@ import {
 } from "@/components/ui/card";
 import {
 	Dialog,
+	DialogClose,
 	DialogContent,
 	DialogDescription,
 	DialogFooter,
@@ -52,26 +54,28 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import Image from "next/image";
 import { getTodayJHB } from "@/lib/date-utils";
-import { formatZAR, toCents } from "@/lib/money";
+import { formatZAR } from "@/lib/money";
 import type {
 	Product,
 	Supplier,
 	Purchase,
 	PurchaseItem,
 } from "@/lib/types";
+import { jsonFetcher } from "@/lib/swr";
 
 const fetcher = async (url: string) => {
 	const res = await fetch(url);
+	const json = await res.json().catch(() => ({}));
 	if (!res.ok) {
-		const error = await res
-			.json()
-			.catch(() => ({ error: "Request failed" }));
-		throw new Error(
-			error.error || "Failed to fetch data",
-		);
+		const message =
+			json?.error?.message ??
+			json?.error ??
+			"Failed to fetch data";
+		throw new Error(message);
 	}
-	return res.json();
+	return json?.data ?? json;
 };
 
 export function PurchasesClient() {
@@ -80,6 +84,8 @@ export function PurchasesClient() {
 	);
 	const [recordDialogOpen, setRecordDialogOpen] =
 		React.useState(false);
+	const [editingPurchase, setEditingPurchase] =
+		React.useState<Purchase | null>(null);
 
 	const {
 		data: purchases,
@@ -106,10 +112,16 @@ export function PurchasesClient() {
 		fetcher,
 	);
 
+	const normalizedProducts = React.useMemo(
+		() =>
+			Array.isArray(products) ? products : [],
+		[products],
+	);
+
 	return (
 		<PageWrapper
-			title="Purchases"
-			description="Record stock purchases from suppliers"
+			title="Stock Purchases"
+			description="Record stock received from suppliers."
 			actions={
 				<div className="flex items-center gap-2">
 					<DatePickerYMD
@@ -123,11 +135,11 @@ export function PurchasesClient() {
 						<DialogTrigger asChild>
 							<Button>
 								<Plus className="mr-2 h-4 w-4" />
-								Record Purchase
+								Add Purchase
 							</Button>
 						</DialogTrigger>
 						<RecordPurchaseDialog
-							products={products || []}
+							products={normalizedProducts}
 							suppliers={suppliers || []}
 							date={date}
 							onSuccess={() => {
@@ -163,7 +175,7 @@ export function PurchasesClient() {
 							}
 						>
 							<Plus className="mr-2 h-4 w-4" />
-							Record Purchase
+							Add Purchase
 						</Button>
 					}
 				/>
@@ -173,11 +185,32 @@ export function PurchasesClient() {
 						<PurchaseCard
 							key={purchase.id}
 							purchase={purchase}
-							products={products || []}
+							products={normalizedProducts}
+							onEditInvoice={() =>
+								setEditingPurchase(purchase)
+							}
 						/>
 					))}
 				</div>
 			)}
+
+			<Dialog
+				open={Boolean(editingPurchase)}
+				onOpenChange={(open) => {
+					if (!open) setEditingPurchase(null);
+				}}
+			>
+				{editingPurchase && (
+					<EditInvoiceDialog
+						purchase={editingPurchase}
+						products={normalizedProducts}
+						onSuccess={() => {
+							setEditingPurchase(null);
+							mutate();
+						}}
+					/>
+				)}
+			</Dialog>
 		</PageWrapper>
 	);
 }
@@ -185,10 +218,14 @@ export function PurchasesClient() {
 function PurchaseCard({
 	purchase,
 	products,
+	onEditInvoice,
 }: {
 	purchase: Purchase;
 	products: Product[];
+	onEditInvoice?: () => void;
 }) {
+	const attachments =
+		purchase.attachmentIds?.filter(Boolean) ?? [];
 	const productMap = React.useMemo(
 		() => new Map(products.map((p) => [p.id, p])),
 		[products],
@@ -214,85 +251,206 @@ function PurchaseCard({
 							"Unknown Supplier"}
 					</span>
 					{purchase.invoiceNo && (
-						<span className="text-sm font-normal text-muted-foreground">
-							Invoice: {purchase.invoiceNo}
-						</span>
+						<div className="flex items-center gap-2 text-sm font-normal text-muted-foreground">
+							<span>
+								Invoice: {purchase.invoiceNo}
+							</span>
+							{onEditInvoice && (
+								<Button
+									variant="ghost"
+									size="icon"
+									onClick={onEditInvoice}
+								>
+									<Edit className="h-4 w-4" />
+								</Button>
+							)}
+						</div>
 					)}
 				</CardTitle>
 			</CardHeader>
 			<CardContent>
-				<Table>
-					<TableHeader>
-						<TableRow>
-							<TableHead>Product</TableHead>
-							<TableHead className="text-right">
-								Cases
-							</TableHead>
-							<TableHead className="text-right">
-								Singles
-							</TableHead>
-							<TableHead className="text-right">
+				<div className="space-y-3 md:hidden">
+					<div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-3 text-sm">
+						<div>
+							<p className="text-muted-foreground">
+								Items
+							</p>
+							<p className="font-medium">
+								{purchase.items.length}
+							</p>
+						</div>
+						<div className="text-right">
+							<p className="text-muted-foreground">
 								Units
-							</TableHead>
-							<TableHead className="text-right">
-								Unit Cost
-							</TableHead>
-							<TableHead className="text-right">
+							</p>
+							<p className="font-medium">
+								{totalUnits}
+							</p>
+						</div>
+						<div>
+							<p className="text-muted-foreground">
+								Invoice
+							</p>
+							<p className="font-medium truncate">
+								{purchase.invoiceNo ?? "-"}
+							</p>
+						</div>
+						<div className="text-right">
+							<p className="text-muted-foreground">
 								Total
-							</TableHead>
-						</TableRow>
-					</TableHeader>
-					<TableBody>
-						{purchase.items.map((item, i) => {
-							const product = productMap.get(
-								item.productId,
-							);
-							return (
-								<TableRow key={i}>
-									<TableCell>
-										{product?.name ||
-											item.productId}
-									</TableCell>
-									<TableCell className="text-right">
-										{item.cases}
-									</TableCell>
-									<TableCell className="text-right">
-										{item.singles}
-									</TableCell>
-									<TableCell className="text-right">
-										{item.units}
-									</TableCell>
-									<TableCell className="text-right">
-										{item.unitCostCents
-											? formatZAR(
-													item.unitCostCents,
-												)
-											: "-"}
-									</TableCell>
-									<TableCell className="text-right">
-										{item.unitCostCents
-											? formatZAR(
-													item.unitCostCents *
-														item.units,
-												)
-											: "-"}
-									</TableCell>
-								</TableRow>
-							);
-						})}
-					</TableBody>
-				</Table>
-				<div className="mt-4 flex justify-end gap-6 text-sm">
-					<span>
-						<strong>Total Units:</strong>{" "}
-						{totalUnits}
-					</span>
-					<span>
-						<strong>Total Cost:</strong>{" "}
-						{formatZAR(totalCost)}
-					</span>
+							</p>
+							<p className="font-semibold">
+								{formatZAR(totalCost)}
+							</p>
+						</div>
+					</div>
+					<div className="space-y-2">
+						{purchase.items.slice(0, 3).map(
+							(item, i) => {
+								const product =
+									productMap.get(
+										item.productId,
+									);
+								return (
+									<div
+										key={i}
+										className="flex items-start justify-between gap-2 rounded border p-2 text-sm"
+									>
+										<div className="min-w-0">
+											<p className="font-medium truncate">
+												{product?.name ??
+													item.productId}
+											</p>
+											<p className="text-xs text-muted-foreground">
+												{item.units} units
+											</p>
+										</div>
+										<p className="font-medium">
+											{item.unitCostCents
+												? formatZAR(
+														item.unitCostCents *
+															item.units,
+													)
+												: "-"}
+										</p>
+									</div>
+								);
+							},
+						)}
+						{purchase.items.length > 3 && (
+							<p className="text-xs text-muted-foreground">
+								+{purchase.items.length - 3} more
+								items
+							</p>
+						)}
+					</div>
+				</div>
+
+				<div className="hidden md:block">
+					<Table>
+						<TableHeader>
+							<TableRow>
+								<TableHead>Product</TableHead>
+								<TableHead className="text-right">
+									Cases
+								</TableHead>
+								<TableHead className="text-right">
+									Singles
+								</TableHead>
+								<TableHead className="text-right">
+									Units
+								</TableHead>
+								<TableHead className="text-right">
+									Unit Cost
+								</TableHead>
+								<TableHead className="text-right">
+									Total
+								</TableHead>
+							</TableRow>
+						</TableHeader>
+						<TableBody>
+							{purchase.items.map((item, i) => {
+								const product = productMap.get(
+									item.productId,
+								);
+								return (
+									<TableRow key={i}>
+										<TableCell>
+											{product?.name ||
+												item.productId}
+										</TableCell>
+										<TableCell className="text-right">
+											{item.cases}
+										</TableCell>
+										<TableCell className="text-right">
+											{item.singles}
+										</TableCell>
+										<TableCell className="text-right">
+											{item.units}
+										</TableCell>
+										<TableCell className="text-right">
+											{item.unitCostCents
+												? formatZAR(
+														item.unitCostCents,
+													)
+												: "-"}
+										</TableCell>
+										<TableCell className="text-right">
+											{item.unitCostCents
+												? formatZAR(
+														item.unitCostCents *
+															item.units,
+													)
+												: "-"}
+										</TableCell>
+									</TableRow>
+								);
+							})}
+						</TableBody>
+					</Table>
+					<div className="mt-4 flex justify-end gap-6 text-sm">
+						<span>
+							<strong>Total Units:</strong>{" "}
+							{totalUnits}
+						</span>
+						<span>
+							<strong>Total Cost:</strong>{" "}
+							{formatZAR(totalCost)}
+						</span>
+					</div>
 				</div>
 			</CardContent>
+			{attachments.length > 0 && (
+				<div className="px-6 pb-6 pt-2">
+					<div className="flex flex-col gap-2">
+						<span className="text-sm font-semibold text-muted-foreground">
+							Attachments
+						</span>
+						<div className="flex flex-wrap gap-2">
+							{attachments.map((attachment) => (
+								<a
+									key={attachment}
+									href={`/${attachment}`}
+									target="_blank"
+									rel="noreferrer"
+									className="block overflow-hidden rounded border border-input bg-card transition hover:opacity-90"
+								>
+									<div className="relative h-24 w-32">
+										<Image
+											src={`/${attachment}`}
+											alt="Invoice attachment"
+											fill
+											sizes="140px"
+											className="object-cover"
+											priority={false}
+										/>
+									</div>
+								</a>
+							))}
+						</div>
+					</div>
+				</div>
+			)}
 		</Card>
 	);
 }
@@ -323,6 +481,8 @@ function RecordPurchaseDialog({
 		React.useState("");
 	const [invoiceNo, setInvoiceNo] =
 		React.useState("");
+	const [scanBarcode, setScanBarcode] =
+		React.useState("");
 	const [items, setItems] = React.useState<
 		LineItem[]
 	>([
@@ -336,10 +496,35 @@ function RecordPurchaseDialog({
 	const [addSupplierOpen, setAddSupplierOpen] =
 		React.useState(false);
 
-	const productMap = React.useMemo(
-		() => new Map(products.map((p) => [p.id, p])),
+	const normalizedProducts = React.useMemo(
+		() =>
+			Array.isArray(products) ? products : [],
 		[products],
 	);
+
+	const productMap = React.useMemo(
+		() =>
+			new Map(
+				normalizedProducts.map((p) => [p.id, p]),
+			),
+		[normalizedProducts],
+	);
+
+	const productByBarcode = React.useMemo(() => {
+		return new Map(
+			normalizedProducts
+				.filter(
+					(product) =>
+						Boolean(product.barcode),
+				)
+				.map((product) => [
+					String(product.barcode)
+						.trim()
+						.toLowerCase(),
+					product,
+				]),
+		);
+	}, [normalizedProducts]);
 
 	const addItem = () => {
 		setItems([
@@ -357,18 +542,18 @@ function RecordPurchaseDialog({
 		setItems(items.filter((_, i) => i !== index));
 	};
 
-	const updateItem = (
-		index: number,
-		updates: Partial<LineItem>,
-	) => {
-		setItems(
-			items.map((item, i) =>
-				i === index
-					? { ...item, ...updates }
-					: item,
-			),
-		);
-	};
+	const updateItem = React.useCallback(
+		(index: number, updates: Partial<LineItem>) => {
+			setItems((prevItems) =>
+				prevItems.map((item, i) =>
+					i === index
+						? { ...item, ...updates }
+						: item,
+				),
+			);
+		},
+		[],
+	);
 
 	const calculateUnits = (
 		item: LineItem,
@@ -381,6 +566,72 @@ function RecordPurchaseDialog({
 		const singles = parseInt(item.singles) || 0;
 		return cases * packSize + singles;
 	};
+
+	const addProductByBarcode = React.useCallback(
+		(rawBarcode: string) => {
+			const normalizedBarcode = rawBarcode
+				.trim()
+				.toLowerCase();
+
+			if (!normalizedBarcode) return;
+
+			const matchedProduct =
+				productByBarcode.get(
+					normalizedBarcode,
+				);
+
+			if (!matchedProduct) {
+				toast.error(
+					`No product found for barcode "${rawBarcode.trim()}"`,
+				);
+				return;
+			}
+
+			const existingIndex = items.findIndex(
+				(item) =>
+					item.productId === matchedProduct.id,
+			);
+
+			if (existingIndex >= 0) {
+				const existingItem = items[existingIndex];
+				const currentSingles =
+					parseInt(existingItem.singles) || 0;
+				updateItem(existingIndex, {
+					singles: String(
+						currentSingles + 1,
+					),
+				});
+			} else {
+				const emptyIndex = items.findIndex(
+					(item) =>
+						!item.productId &&
+						!item.cases &&
+						!item.singles,
+				);
+
+				if (emptyIndex >= 0) {
+					updateItem(emptyIndex, {
+						productId: matchedProduct.id,
+						cases: "0",
+						singles: "1",
+					});
+				} else {
+					setItems([
+						...items,
+						{
+							productId: matchedProduct.id,
+							cases: "0",
+							singles: "1",
+							unitCostCents: 0,
+						},
+					]);
+				}
+			}
+
+			setScanBarcode("");
+		},
+		[items, productByBarcode, updateItem],
+	);
 
 	const handleSubmit = async (
 		e: React.FormEvent,
@@ -453,7 +704,7 @@ function RecordPurchaseDialog({
 	return (
 		<DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
 			<DialogHeader>
-				<DialogTitle>Record Purchase</DialogTitle>
+				<DialogTitle>Add Purchase</DialogTitle>
 				<DialogDescription>
 					Record a stock purchase for {date}.
 				</DialogDescription>
@@ -521,6 +772,47 @@ function RecordPurchaseDialog({
 						/>
 					</div>
 
+					<div className="space-y-2">
+						<Label htmlFor="scanBarcode">
+							Scan Barcode
+						</Label>
+						<div className="flex gap-2">
+							<Input
+								id="scanBarcode"
+								value={scanBarcode}
+								onChange={(e) =>
+									setScanBarcode(
+										e.target.value,
+									)
+								}
+								onKeyDown={(e) => {
+									if (e.key !== "Enter")
+										return;
+									e.preventDefault();
+									addProductByBarcode(
+										scanBarcode,
+									);
+								}}
+								placeholder="Scan or type barcode, then press Enter"
+							/>
+							<Button
+								type="button"
+								variant="outline"
+								onClick={() =>
+									addProductByBarcode(
+										scanBarcode,
+									)
+								}
+							>
+								Add
+							</Button>
+						</div>
+						<p className="text-xs text-muted-foreground">
+							Each scan adds one single unit to the
+							purchase items.
+						</p>
+					</div>
+
 					{/* Line Items */}
 					<div className="space-y-2">
 						<Label>Items</Label>
@@ -532,7 +824,9 @@ function RecordPurchaseDialog({
 								>
 									<div className="col-span-12 sm:col-span-4">
 										<ProductSelect
-											products={products}
+											products={
+												normalizedProducts
+											}
 											value={item.productId}
 											onChange={(v) =>
 												updateItem(index, {
@@ -624,13 +918,218 @@ function RecordPurchaseDialog({
 					</div>
 				</div>
 				<DialogFooter>
+					<DialogClose asChild>
+						<Button
+							type="button"
+							variant="outline"
+						>
+							Cancel
+						</Button>
+					</DialogClose>
 					<Button
 						type="submit"
 						disabled={loading}
 					>
 						{loading
-							? "Recording..."
-							: "Record Purchase"}
+							? "Saving..."
+							: "Save"}
+					</Button>
+				</DialogFooter>
+			</form>
+		</DialogContent>
+	);
+}
+
+function EditInvoiceDialog({
+	purchase,
+	products,
+	onSuccess,
+}: {
+	purchase: Purchase;
+	products: Product[];
+	onSuccess: () => void;
+}) {
+	const [invoiceNo, setInvoiceNo] =
+		React.useState(purchase.invoiceNo ?? "");
+	const [loading, setLoading] =
+		React.useState(false);
+	const [itemCosts, setItemCosts] =
+		React.useState(
+			purchase.items.map((item) => ({
+				productId: item.productId,
+				unitCostCents: item.unitCostCents ?? 0,
+			})),
+		);
+	const [attachmentFile, setAttachmentFile] =
+		React.useState<File | null>(null);
+
+	React.useEffect(() => {
+		setInvoiceNo(purchase.invoiceNo ?? "");
+		setItemCosts(
+			purchase.items.map((item) => ({
+				productId: item.productId,
+				unitCostCents: item.unitCostCents ?? 0,
+			})),
+		);
+		setAttachmentFile(null);
+	}, [purchase]);
+
+	const productMap = React.useMemo(
+		() => new Map(products.map((p) => [p.id, p])),
+		[products],
+	);
+
+	const handleCostChange = (
+		productId: string,
+		cents: number,
+	) => {
+		setItemCosts((prev) =>
+			prev.map((item) =>
+				item.productId === productId
+					? { ...item, unitCostCents: cents }
+					: item,
+			),
+		);
+	};
+
+	const handleFileChange = (
+		file?: File | null,
+	) => {
+		setAttachmentFile(file ?? null);
+	};
+
+	const handleSubmit = async (
+		e: React.FormEvent,
+	) => {
+		e.preventDefault();
+		setLoading(true);
+
+		try {
+			const attachments = attachmentFile
+				? [
+						await readFileAsDataURL(
+							attachmentFile,
+						),
+					]
+				: undefined;
+
+			await jsonFetcher<Purchase>(
+				`/api/purchases/${purchase.id}`,
+				{
+					method: "PATCH",
+					headers: {
+						"Content-Type": "application/json",
+					},
+					body: JSON.stringify({
+						invoiceNo:
+							invoiceNo.trim() || undefined,
+						items: itemCosts,
+						attachments,
+					}),
+				},
+			);
+
+			toast.success(
+				"Invoice updated successfully",
+			);
+			onSuccess();
+		} catch (err) {
+			toast.error(
+				err instanceof Error
+					? err.message
+					: "Failed to update invoice",
+			);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	return (
+		<DialogContent>
+			<DialogHeader>
+				<DialogTitle>Edit Invoice</DialogTitle>
+				<DialogDescription>
+					Update the invoice details for this
+					purchase.
+				</DialogDescription>
+			</DialogHeader>
+			<form onSubmit={handleSubmit}>
+				<div className="space-y-4 py-4">
+					<div className="space-y-2">
+						<Label htmlFor="editInvoiceNo">
+							Invoice Number
+						</Label>
+						<Input
+							id="editInvoiceNo"
+							value={invoiceNo}
+							onChange={(e) =>
+								setInvoiceNo(e.target.value)
+							}
+							placeholder="Enter invoice number"
+						/>
+					</div>
+					<div className="space-y-2">
+						<Label>Unit Costs</Label>
+						<div className="space-y-3">
+							{purchase.items.map((item) => {
+								const productName =
+									productMap.get(item.productId)
+										?.name ?? item.productId;
+								return (
+									<div
+										key={item.productId}
+										className="flex items-center gap-3"
+									>
+										<span className="flex-1 text-sm text-muted-foreground">
+											{productName}
+										</span>
+										<MoneyInput
+											value={
+												itemCosts.find(
+													(cost) =>
+														cost.productId ===
+														item.productId,
+												)?.unitCostCents ?? 0
+											}
+											onChange={(cents) =>
+												handleCostChange(
+													item.productId,
+													cents,
+												)
+											}
+										/>
+									</div>
+								);
+							})}
+						</div>
+					</div>
+					<div className="space-y-2">
+						<Label>Upload Invoice Image</Label>
+						<Input
+							type="file"
+							accept="image/*"
+							onChange={(e) =>
+								handleFileChange(
+									e.target.files?.[0] ?? null,
+								)
+							}
+						/>
+					</div>
+				</div>
+				<DialogFooter>
+					<DialogClose asChild>
+						<Button
+							type="button"
+							variant="outline"
+						>
+							Cancel
+						</Button>
+					</DialogClose>
+					<Button
+						type="submit"
+						disabled={loading}
+					>
+						{loading ? "Saving..." : "Save"}
 					</Button>
 				</DialogFooter>
 			</form>
@@ -713,16 +1212,44 @@ function AddSupplierDialog({
 					/>
 				</div>
 				<DialogFooter>
+					<DialogClose asChild>
+						<Button
+							type="button"
+							variant="outline"
+						>
+							Cancel
+						</Button>
+					</DialogClose>
 					<Button
 						type="submit"
 						disabled={loading}
 					>
 						{loading
-							? "Adding..."
-							: "Add Supplier"}
+							? "Saving..."
+							: "Save"}
 					</Button>
 				</DialogFooter>
 			</form>
 		</DialogContent>
+	);
+}
+
+function readFileAsDataURL(file: File) {
+	return new Promise<string>(
+		(resolve, reject) => {
+			const reader = new FileReader();
+			reader.onload = () => {
+				if (typeof reader.result === "string")
+					resolve(reader.result);
+				else
+					reject(
+						new Error("Unexpected file result"),
+					);
+			};
+			reader.onerror = () => {
+				reject(new Error("Failed to read file"));
+			};
+			reader.readAsDataURL(file);
+		},
 	);
 }

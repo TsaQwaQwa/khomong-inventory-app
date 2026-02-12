@@ -24,6 +24,7 @@ export interface Customer {
 	creditLimitCents: number;
 	dueDays?: number;
 	balanceCents?: number;
+	tabStatus?: string;
 }
 
 // Purchase types
@@ -44,12 +45,7 @@ export interface Purchase {
 	items: PurchaseItem[];
 	totalUnits?: number;
 	totalCostCents?: number;
-}
-
-// Stock count types
-export interface StockCount {
-	productId: string;
-	units: number;
+	attachmentIds?: string[];
 }
 
 // Adjustment types
@@ -67,17 +63,6 @@ export interface AdjustmentItem {
 	note?: string;
 }
 
-// Till close types
-export interface CashExpense {
-	amountCents: number;
-	reason: string;
-}
-
-export interface Deposit {
-	amountCents: number;
-	reference?: string;
-}
-
 // Tab types
 export interface TabChargeItem {
 	productId: string;
@@ -89,17 +74,14 @@ export type PaymentMethod =
 	| "CARD"
 	| "EFT";
 
-// Daily report types
 export interface DailyReportProduct {
 	productId: string;
 	productName: string;
 	unitsSold: number;
 	unitPriceCents: number;
 	expectedRevenueCents: number;
-	openingUnits: number;
 	purchasedUnits: number;
 	adjustments: number;
-	closingUnits: number;
 }
 
 export interface DailyReport {
@@ -109,9 +91,44 @@ export interface DailyReport {
 	tabChargesCents: number;
 	accountedSalesCents: number;
 	revenueVarianceCents: number;
-	cashExpectedCents: number;
-	cashCountedCents: number;
-	cashVarianceCents: number;
+	tabPaymentsByMethodCents: {
+		CASH: number;
+		CARD: number;
+		EFT: number;
+	};
+	dayChecklist: {
+		hasSalesEntries: boolean;
+		hasPurchases: boolean;
+		hasTabActivity: boolean;
+		hasAdjustments: boolean;
+	};
 	warnings: string[];
 	byProduct: DailyReportProduct[];
+	trends: {
+		sales: {
+			currentCents: number;
+			previousCents: number | null;
+			changeCents: number | null;
+			changePct: number | null;
+		};
+		topProducts: {
+			productId: string;
+			productName: string;
+			unitsSold: number;
+			revenueCents: number;
+		}[];
+	};
+	recommendations: {
+		priority: "HIGH" | "MEDIUM" | "LOW";
+		title: string;
+		detail: string;
+	}[];
+	stockRecommendations: {
+		productId: string;
+		productName: string;
+		currentUnits: number;
+		reorderLevelUnits: number;
+		recommendedOrderUnits: number;
+		priority: "HIGH" | "MEDIUM";
+	}[];
 }

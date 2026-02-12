@@ -1,26 +1,61 @@
-import 'dotenv/config';
-import { connectDB } from '@/lib/db';
-import { Product } from '@/models/Product';
+import "dotenv/config";
+import { connectDB } from "@/lib/db";
+import { Product } from "@/models/Product";
 
 async function main() {
-  await connectDB();
-  const orgId = process.env.SEED_ORG_ID;
-  if (!orgId) throw new Error('Set SEED_ORG_ID in env to seed products.');
+	await connectDB();
 
-  const sample = [
-    { name: 'Castle Lite 330ml', category: 'Beer', packSize: 24, reorderLevelUnits: 48 },
-    { name: 'Black Label 330ml', category: 'Beer', packSize: 24, reorderLevelUnits: 48 },
-    { name: 'Savanna Dry 330ml', category: 'Cider', packSize: 24, reorderLevelUnits: 24 },
-  ] as const;
+	const sample = [
+		{
+			name: "Castle Lite 330ml",
+			category: "Beer",
+			packSize: 24,
+			reorderLevelUnits: 48,
+		},
+		{
+			name: "Black Label 330ml",
+			category: "Beer",
+			packSize: 24,
+			reorderLevelUnits: 48,
+		},
+		{
+			name: "Savanna Dry 330ml",
+			category: "Cider",
+			packSize: 24,
+			reorderLevelUnits: 24,
+		},
+		{
+			name: "Sierra Weisse 330ml",
+			category: "Cider",
+			packSize: 24,
+			reorderLevelUnits: 24,
+		},
+		{
+			name: "Coca-Cola 300ml",
+			category: "SoftDrink",
+			packSize: 24,
+			reorderLevelUnits: 12,
+		},
+		{
+			name: "Stoney Ginger Beer 330ml",
+			category: "SoftDrink",
+			packSize: 12,
+			reorderLevelUnits: 12,
+		},
+	] as const;
 
-  for (const p of sample) {
-    await Product.updateOne({ orgId, name: p.name }, { $setOnInsert: { orgId, ...p, isActive: true } }, { upsert: true });
-  }
+	for (const p of sample) {
+		await Product.updateOne(
+			{ name: p.name },
+			{ $setOnInsert: { ...p, isActive: true } },
+			{ upsert: true },
+		);
+	}
 
-  console.log('Seeded sample products.');
+	console.log("Seeded sample products.");
 }
 
 main().catch((e) => {
-  console.error(e);
-  process.exit(1);
+	console.error(e);
+	process.exit(1);
 });

@@ -4,7 +4,6 @@ import { getModel, type YMD } from './_shared';
 export type BusinessDayStatus = 'OPEN' | 'CLOSED' | 'LOCKED';
 
 export interface BusinessDayDoc {
-  orgId: string;
   date: YMD;
   status: BusinessDayStatus;
   openedByUserId: string;
@@ -18,8 +17,7 @@ export interface BusinessDayDoc {
 
 const BusinessDaySchema = new Schema<BusinessDayDoc>(
   {
-    orgId: { type: String, required: true, index: true },
-    date: { type: String, required: true, index: true },
+    date: { type: String, required: true },
     status: { type: String, required: true, default: 'OPEN' },
     openedByUserId: { type: String, required: true },
     openedAt: { type: Date, required: true },
@@ -30,6 +28,6 @@ const BusinessDaySchema = new Schema<BusinessDayDoc>(
   { timestamps: true }
 );
 
-BusinessDaySchema.index({ orgId: 1, date: 1 }, { unique: true });
+BusinessDaySchema.index({  date: 1 }, { unique: true });
 
 export const BusinessDay = getModel<BusinessDayDoc>('BusinessDay', BusinessDaySchema);

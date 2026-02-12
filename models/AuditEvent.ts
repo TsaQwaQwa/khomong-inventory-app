@@ -2,7 +2,6 @@ import { Schema } from 'mongoose';
 import { getModel } from './_shared';
 
 export interface AuditEventDoc {
-  orgId: string;
   actorUserId: string;
   entityType: string;
   entityId: string;
@@ -14,7 +13,6 @@ export interface AuditEventDoc {
 
 const AuditEventSchema = new Schema<AuditEventDoc>(
   {
-    orgId: { type: String, required: true, index: true },
     actorUserId: { type: String, required: true },
     entityType: { type: String, required: true },
     entityId: { type: String, required: true },
@@ -25,6 +23,6 @@ const AuditEventSchema = new Schema<AuditEventDoc>(
   { timestamps: { createdAt: true, updatedAt: false } }
 );
 
-AuditEventSchema.index({ orgId: 1, createdAt: -1 });
+AuditEventSchema.index({  createdAt: -1 });
 
 export const AuditEvent = getModel<AuditEventDoc>('AuditEvent', AuditEventSchema);

@@ -12,7 +12,6 @@ export interface TabTxnItem {
 }
 
 export interface TabTransactionDoc {
-  orgId: string;
   customerId: string;
   businessDayId: string;
   type: TabTxnType;
@@ -32,7 +31,6 @@ export interface TabTransactionDoc {
 
 const TabTransactionSchema = new Schema<TabTransactionDoc>(
   {
-    orgId: { type: String, required: true, index: true },
     customerId: { type: String, required: true, index: true },
     businessDayId: { type: String, required: true, index: true },
     type: { type: String, required: true },
@@ -57,6 +55,6 @@ const TabTransactionSchema = new Schema<TabTransactionDoc>(
   { timestamps: true }
 );
 
-TabTransactionSchema.index({ orgId: 1, customerId: 1, createdAt: -1 });
+TabTransactionSchema.index({ customerId: 1, createdAt: -1 });
 
 export const TabTransaction = getModel<TabTransactionDoc>('TabTransaction', TabTransactionSchema);

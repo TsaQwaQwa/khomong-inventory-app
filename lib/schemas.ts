@@ -39,14 +39,15 @@ export const purchaseCreateSchema = z.object({
   attachmentIds: z.array(z.string()).optional(),
 });
 
-export const businessDaySchema = z.object({
-  date: ymdSchema.optional(),
-});
-
 export const stockCountSchema = z.object({
   date: ymdSchema.optional(),
   type: z.enum(['OPEN', 'CLOSE']),
-  counts: z.array(z.object({ productId: z.string().min(1), units: z.number().int().min(0) })).min(1),
+  counts: z.array(
+    z.object({
+      productId: z.string().min(1),
+      units: z.number().int().min(0),
+    })
+  ).min(1),
 });
 
 export const adjustmentSchema = z.object({
@@ -62,21 +63,19 @@ export const adjustmentSchema = z.object({
   ).min(1),
 });
 
-export const tillCloseSchema = z.object({
-  date: ymdSchema.optional(),
-  cashSalesCents: z.number().int().min(0),
-  cardSalesCents: z.number().int().min(0),
-  eftSalesCents: z.number().int().min(0),
-  cashExpenses: z.array(z.object({ amountCents: z.number().int().min(0), reason: z.string().min(2), attachmentId: z.string().optional() })).optional(),
-  deposits: z.array(z.object({ amountCents: z.number().int().min(0), reference: z.string().optional(), attachmentId: z.string().optional() })).optional(),
-  cashCountedCents: z.number().int().min(0),
-});
-
 export const customerCreateSchema = z.object({
   name: z.string().min(2),
   phone: z.string().min(7),
   note: z.string().optional(),
   creditLimitCents: z.number().int().min(0).default(0),
+  dueDays: z.number().int().min(1).max(365).optional(),
+});
+
+export const customerUpdateSchema = z.object({
+  name: z.string().min(2).optional(),
+  phone: z.string().min(7).optional(),
+  note: z.string().optional(),
+  creditLimitCents: z.number().int().min(0).optional(),
   dueDays: z.number().int().min(1).max(365).optional(),
 });
 
@@ -96,5 +95,15 @@ export const tabPaymentSchema = z.object({
   amountCents: z.number().int().min(1),
   paymentMethod: z.enum(['CASH', 'CARD', 'EFT']),
   reference: z.string().optional(),
+  note: z.string().optional(),
+});
+
+export const directSaleSchema = z.object({
+  date: ymdSchema.optional(),
+  paymentMethod: z.enum(['CASH', 'CARD', 'EFT']),
+  items: z.array(z.object({
+    productId: z.string().min(1),
+    units: z.number().int().min(1),
+  })).min(1),
   note: z.string().optional(),
 });
