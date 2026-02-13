@@ -2,10 +2,16 @@ interface WhatsAppResult {
 	ok: boolean;
 	messageId?: string;
 	messageIds?: string[];
+	recipientResults?: Array<{
+		to: string;
+		ok: boolean;
+		messageId?: string;
+		error?: string;
+	}>;
 	error?: string;
 }
 
-function parseRecipients() {
+export function getConfiguredWhatsAppRecipients() {
 	const many = (
 		process.env.WHATSAPP_TO_PHONES ?? ""
 	)
@@ -19,29 +25,45 @@ function parseRecipients() {
 	return Array.from(recipients);
 }
 
-function isEnabled() {
+function isEnabled(recipientsCount: number) {
 	return Boolean(
 		process.env.WHATSAPP_ACCESS_TOKEN &&
 			process.env.WHATSAPP_PHONE_NUMBER_ID &&
-			parseRecipients().length > 0,
+			recipientsCount > 0,
 	);
 }
 
 export async function sendWhatsAppText(
 	message: string,
+	recipientsOverride?: string[],
 ): Promise<WhatsAppResult> {
-	if (!isEnabled()) {
+	const recipients =
+		recipientsOverride && recipientsOverride.length > 0
+			? Array.from(
+					new Set(
+						recipientsOverride
+							.map((value) => value.trim())
+							.filter(Boolean),
+					),
+			  )
+			: getConfiguredWhatsAppRecipients();
+	if (!isEnabled(recipients.length)) {
 		return {
 			ok: false,
 			error:
-				"WhatsApp env missing: set WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_TO_PHONE",
+				"WhatsApp env missing: set WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID, and recipient(s) in WHATSAPP_TO_PHONE or WHATSAPP_TO_PHONES",
+			recipientResults: recipients.map((to) => ({
+				to,
+				ok: false,
+				error:
+					"WhatsApp env missing: set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID",
+			})),
 		};
 	}
 
 	const token = process.env.WHATSAPP_ACCESS_TOKEN!;
 	const phoneNumberId =
 		process.env.WHATSAPP_PHONE_NUMBER_ID!;
-	const recipients = parseRecipients();
 	const version =
 		process.env.WHATSAPP_API_VERSION ?? "v20.0";
 	const endpoint = `https://graph.facebook.com/${version}/${phoneNumberId}/messages`;
@@ -49,6 +71,12 @@ export async function sendWhatsAppText(
 	try {
 		const messageIds: string[] = [];
 		const failures: string[] = [];
+		const recipientResults: Array<{
+			to: string;
+			ok: boolean;
+			messageId?: string;
+			error?: string;
+		}> = [];
 		for (const to of recipients) {
 			const res = await fetch(endpoint, {
 				method: "POST",
@@ -67,9 +95,17 @@ export async function sendWhatsAppText(
 				const body = await res
 					.json()
 					.catch(() => ({}));
+				const error =
+					body?.error?.message ??
+					"WhatsApp API error";
 				failures.push(
-					`${to}: ${body?.error?.message ?? "WhatsApp API error"}`,
+					`${to}: ${error}`,
 				);
+				recipientResults.push({
+					to,
+					ok: false,
+					error,
+				});
 				continue;
 			}
 			const body = await res
@@ -78,6 +114,11 @@ export async function sendWhatsAppText(
 			const messageId =
 				body?.messages?.[0]?.id;
 			if (messageId) messageIds.push(messageId);
+			recipientResults.push({
+				to,
+				ok: true,
+				messageId,
+			});
 		}
 
 		if (messageIds.length === 0) {
@@ -86,24 +127,32 @@ export async function sendWhatsAppText(
 				error:
 					failures.join(" | ") ||
 					"No WhatsApp messages were sent",
+				recipientResults,
 			};
 		}
 		return {
 			ok: failures.length === 0,
 			messageId: messageIds[0],
 			messageIds,
+			recipientResults,
 			error:
 				failures.length > 0
 					? failures.join(" | ")
 					: undefined,
 		};
 	} catch (error) {
+		const errorMessage =
+			error instanceof Error
+				? error.message
+				: "Unknown WhatsApp error";
 		return {
 			ok: false,
-			error:
-				error instanceof Error
-					? error.message
-					: "Unknown WhatsApp error",
+			error: errorMessage,
+			recipientResults: recipients.map((to) => ({
+				to,
+				ok: false,
+				error: errorMessage,
+			})),
 		};
 	}
 }

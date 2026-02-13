@@ -7,6 +7,11 @@ import { parseJson } from "@/lib/validate";
 import { supplierCreateSchema } from "@/lib/schemas";
 import { Supplier } from "@/models/Supplier";
 import { serializeDoc, serializeDocs } from "@/lib/serialize";
+import {
+	getScopeIdFromAuth,
+	toAuditObject,
+	writeAuditLog,
+} from "@/lib/audit";
 
 export async function GET() {
 	const a = await requireOrgAuth().catch(
@@ -39,6 +44,15 @@ export async function POST(req: Request) {
 		);
 		const created = await Supplier.create({
 			...input,
+		});
+		await writeAuditLog({
+			scopeId: getScopeIdFromAuth(a),
+			actorUserId: a.userId ?? undefined,
+			action: "CREATE",
+			entityType: "Supplier",
+			entityId: String(created._id),
+			oldValues: null,
+			newValues: toAuditObject(created.toObject()),
 		});
 		return ok(serializeDoc(created.toObject()), {
 			status: 201,

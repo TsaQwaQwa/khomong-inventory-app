@@ -22,6 +22,16 @@ export interface AlertDoc {
 	status: AlertStatus;
 	whatsappMessageId?: string;
 	whatsappMessageIds?: string[];
+	whatsappSendLockedAt?: Date;
+	whatsappRecipients?: {
+		to: string;
+		sendStatus: "SENT" | "FAILED";
+		sendError?: string;
+		messageId?: string;
+		deliveryStatus?: string;
+		deliveryError?: string;
+		lastStatusAt?: Date;
+	}[];
 	whatsappDeliveryStatus?: string;
 	whatsappStatusAt?: Date;
 	whatsappSentAt?: Date;
@@ -54,6 +64,21 @@ const AlertSchema = new Schema<AlertDoc>(
 		},
 		whatsappMessageId: { type: String },
 		whatsappMessageIds: [{ type: String }],
+		whatsappSendLockedAt: { type: Date },
+		whatsappRecipients: [
+			{
+				to: { type: String, required: true },
+				sendStatus: {
+					type: String,
+					required: true,
+				},
+				sendError: { type: String },
+				messageId: { type: String },
+				deliveryStatus: { type: String },
+				deliveryError: { type: String },
+				lastStatusAt: { type: Date },
+			},
+		],
 		whatsappDeliveryStatus: { type: String },
 		whatsappStatusAt: { type: Date },
 		whatsappSentAt: { type: Date },

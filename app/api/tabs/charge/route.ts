@@ -13,6 +13,11 @@ import { Price } from "@/models/Price";
 import { todayYMD } from "@/lib/dates";
 import { serializeDoc } from "@/lib/serialize";
 import { calculateSaleTotals } from "@/lib/sales-pricing";
+import {
+	getScopeIdFromAuth,
+	toAuditObject,
+	writeAuditLog,
+} from "@/lib/audit";
 
 async function getPrice(
 	productId: string,
@@ -187,6 +192,15 @@ export async function POST(req: Request) {
 			items: itemsWithPrice,
 			note: input.note,
 			createdByUserId: a.userId!,
+		});
+		await writeAuditLog({
+			scopeId: getScopeIdFromAuth(a),
+			actorUserId: a.userId ?? undefined,
+			action: "CREATE",
+			entityType: "TabTransaction",
+			entityId: String(created._id),
+			oldValues: null,
+			newValues: toAuditObject(created.toObject()),
 		});
 
 		return ok(serializeDoc(created.toObject()), {

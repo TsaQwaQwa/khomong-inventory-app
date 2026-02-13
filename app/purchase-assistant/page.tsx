@@ -1,19 +1,18 @@
-import { requireAdminEmail } from "@/lib/authz";
-import { ReportsClient } from "./reports-client";
+import { requireOrgAuth } from "@/lib/authz";
+import { PurchaseAssistantClient } from "./purchase-assistant-client";
 
 export const dynamic = "force-dynamic";
 
-export default async function ReportsPage() {
+export default async function PurchaseAssistantPage() {
 	try {
-		await requireAdminEmail();
+		await requireOrgAuth();
 	} catch (error) {
 		const message =
 			error instanceof Error
 				? error.message
 				: "";
 		const isBlocked =
-			message === "FORBIDDEN_USER" ||
-			message === "FORBIDDEN_ADMIN";
+			message === "FORBIDDEN_USER";
 		return (
 			<div className="container px-4 py-12 text-center">
 				<h1 className="text-2xl font-bold mb-2">
@@ -23,12 +22,13 @@ export default async function ReportsPage() {
 				</h1>
 				<p className="text-muted-foreground">
 					{isBlocked
-						? "You do not have admin access for reports."
-						: "You need to be signed in to access reports."}
+						? "Your account is not approved for this site."
+						: "You need to be signed in to access purchase assistant."}
 				</p>
 			</div>
 		);
 	}
 
-	return <ReportsClient />;
+	return <PurchaseAssistantClient />;
 }
+

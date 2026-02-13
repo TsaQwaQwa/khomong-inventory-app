@@ -8,6 +8,11 @@ import { productCreateSchema } from "@/lib/schemas";
 import { Product } from "@/models/Product";
 import { Price } from "@/models/Price";
 import { serializeDoc, serializeDocs } from "@/lib/serialize";
+import {
+	getScopeIdFromAuth,
+	toAuditObject,
+	writeAuditLog,
+} from "@/lib/audit";
 
 export async function GET() {
 	await requireOrgAuth().catch(() => null);
@@ -62,6 +67,15 @@ export async function POST(req: Request) {
 		);
 		const created = await Product.create({
 			...input,
+		});
+		await writeAuditLog({
+			scopeId: getScopeIdFromAuth(a),
+			actorUserId: a.userId ?? undefined,
+			action: "CREATE",
+			entityType: "Product",
+			entityId: String(created._id),
+			oldValues: null,
+			newValues: toAuditObject(created.toObject()),
 		});
 		return ok(serializeDoc(created.toObject()), {
 			status: 201,

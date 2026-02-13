@@ -1,9 +1,9 @@
 import { requireAdminEmail } from "@/lib/authz";
-import { ReportsClient } from "./reports-client";
+import { AuditClient } from "./audit-client";
 
 export const dynamic = "force-dynamic";
 
-export default async function ReportsPage() {
+export default async function AuditPage() {
 	try {
 		await requireAdminEmail();
 	} catch (error) {
@@ -23,12 +23,12 @@ export default async function ReportsPage() {
 				</h1>
 				<p className="text-muted-foreground">
 					{isBlocked
-						? "You do not have admin access for reports."
-						: "You need to be signed in to access reports."}
+						? "You do not have admin access for this page."
+						: "You need to be signed in to access audit trail."}
 				</p>
 			</div>
 		);
 	}
 
-	return <ReportsClient />;
+	return <AuditClient />;
 }

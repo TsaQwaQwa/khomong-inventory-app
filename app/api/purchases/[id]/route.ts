@@ -6,9 +6,15 @@ import { ok, fail } from "@/lib/http";
 import { Purchase } from "@/models/Purchase";
 import { serializeDoc } from "@/lib/serialize";
 import { calculatePurchaseTotals } from "@/lib/purchase-pricing";
+import { learnSupplierPricesFromPurchase } from "@/lib/supplier-price-learning";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import {
+	getScopeIdFromAuth,
+	toAuditObject,
+	writeAuditLog,
+} from "@/lib/audit";
 
 export async function PATCH(
 	req: Request,
@@ -159,6 +165,22 @@ export async function PATCH(
 			status: 404,
 			code: "NOT_FOUND",
 		});
+	if (existing) {
+		await writeAuditLog({
+			scopeId: getScopeIdFromAuth(a),
+			actorUserId: a.userId ?? undefined,
+			action: "UPDATE",
+			entityType: "Purchase",
+			entityId: id,
+			oldValues: toAuditObject(existing),
+			newValues: toAuditObject(updated),
+		});
+	}
+	await learnSupplierPricesFromPurchase({
+		purchase: updated,
+		scopeId: getScopeIdFromAuth(a),
+		actorUserId: a.userId ?? undefined,
+	});
 
 	return ok(serializeDoc(updated));
 }

@@ -98,6 +98,7 @@ All endpoints are under `/app/api`.
 - `POST /api/sales` (direct cash/card/EFT sale with product lines)
 - `GET /api/reports/daily?date=YYYY-MM-DD`
 - `GET/PATCH /api/alerts`
+- `POST /api/alerts/resend-failed`
 - `GET /api/whatsapp/activity`
 - `GET/POST /api/whatsapp/webhook` (Meta WhatsApp callback endpoint)
 

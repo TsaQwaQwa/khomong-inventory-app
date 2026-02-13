@@ -8,6 +8,11 @@ import { supplierProductPriceSchema } from "@/lib/schemas";
 import { todayYMD, addDays } from "@/lib/dates";
 import { serializeDoc, serializeDocs } from "@/lib/serialize";
 import { SupplierProductPrice } from "@/models/SupplierProductPrice";
+import {
+	getScopeIdFromAuth,
+	toAuditObject,
+	writeAuditLog,
+} from "@/lib/audit";
 
 export async function GET(req: Request) {
 	await requireOrgAuth().catch(() => null);
@@ -61,6 +66,15 @@ export async function POST(req: Request) {
 		);
 		const effectiveFrom =
 			input.effectiveFrom ?? todayYMD();
+		const previousOpenPrices =
+			await SupplierProductPrice.find({
+				supplierId: input.supplierId,
+				productId: input.productId,
+				$or: [
+					{ effectiveTo: { $exists: false } },
+					{ effectiveTo: null },
+				],
+			}).lean();
 
 		await SupplierProductPrice.updateMany(
 			{
@@ -87,6 +101,22 @@ export async function POST(req: Request) {
 			leadTimeDays: input.leadTimeDays,
 			note: input.note,
 			changedByUserId: a.userId!,
+		});
+		await writeAuditLog({
+			scopeId: getScopeIdFromAuth(a),
+			actorUserId: a.userId ?? undefined,
+			action: "SET_SUPPLIER_PRICE",
+			entityType: "SupplierProductPrice",
+			entityId: String(created._id),
+			oldValues: toAuditObject({
+				previousOpenPrices,
+			}),
+			newValues: toAuditObject(created.toObject()),
+			meta: {
+				supplierId: input.supplierId,
+				productId: input.productId,
+				effectiveFrom,
+			},
 		});
 
 		return ok(serializeDoc(created.toObject()), {

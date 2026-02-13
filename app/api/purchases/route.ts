@@ -10,6 +10,12 @@ import { Purchase } from "@/models/Purchase";
 import { Supplier } from "@/models/Supplier";
 import { serializeDoc, serializeDocs } from "@/lib/serialize";
 import { calculatePurchaseTotals } from "@/lib/purchase-pricing";
+import { learnSupplierPricesFromPurchase } from "@/lib/supplier-price-learning";
+import {
+	getScopeIdFromAuth,
+	toAuditObject,
+	writeAuditLog,
+} from "@/lib/audit";
 
 export async function GET(req: Request) {
 	const a = await requireOrgAuth().catch(
@@ -113,6 +119,20 @@ export async function POST(req: Request) {
 			totalCostCents: purchaseTotals.totalCostCents,
 			attachmentIds: input.attachmentIds ?? [],
 			createdByUserId: a.userId!,
+		});
+		await writeAuditLog({
+			scopeId: getScopeIdFromAuth(a),
+			actorUserId: a.userId ?? undefined,
+			action: "CREATE",
+			entityType: "Purchase",
+			entityId: String(created._id),
+			oldValues: null,
+			newValues: toAuditObject(created.toObject()),
+		});
+		await learnSupplierPricesFromPurchase({
+			purchase: created.toObject(),
+			scopeId: getScopeIdFromAuth(a),
+			actorUserId: a.userId ?? undefined,
 		});
 		return ok(serializeDoc(created.toObject()), {
 			status: 201,

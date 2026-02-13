@@ -33,12 +33,15 @@ import { CustomerSelect } from "@/components/customer-select";
 import { MoneyInput } from "@/components/money-input";
 import {
 	Box,
+	ChevronDown,
+	ChevronUp,
 	CreditCard,
 	DollarSign,
 	PackageMinus,
 	Plus,
 	Receipt,
 	ShoppingCart,
+	Star,
 	Trash2,
 	Truck,
 	Users,
@@ -48,6 +51,7 @@ import {
 	getTodayJHB,
 } from "@/lib/date-utils";
 import { formatZAR } from "@/lib/money";
+import { postSaleWithOfflineQueue } from "@/lib/offline-sales-queue";
 import type {
 	AdjustmentReason,
 	Customer,
@@ -62,6 +66,7 @@ const ENABLED_PATHS = [
 	"/products",
 	"/purchases",
 	"/suppliers",
+	"/purchase-assistant",
 	"/adjustments",
 	"/tabs",
 	"/transactions",
@@ -72,6 +77,8 @@ const MODAL_CONTENT_CLASS =
 
 type QuickAction =
 	| "quick-checkout"
+	| "quick-top-sellers"
+	| "quick-fast-repeat"
 	| "direct-sale"
 	| "account-sale"
 	| "account-payment"
@@ -83,10 +90,34 @@ type QuickAction =
 	| "purchase"
 	| "adjustment";
 
+const QUICK_ACTION_STORAGE_KEY =
+	"kgomong.quickActions.favorites";
+const QUICK_ACTION_ALL: QuickAction[] = [
+	"quick-checkout",
+	"quick-top-sellers",
+	"quick-fast-repeat",
+	"direct-sale",
+	"account-sale",
+	"account-payment",
+	"restock",
+	"customer",
+	"supplier",
+	"supplier-price",
+	"product",
+	"purchase",
+	"adjustment",
+];
+const QUICK_ACTION_DEFAULT_FAVORITES: QuickAction[] = [
+	"quick-checkout",
+	"quick-fast-repeat",
+	"direct-sale",
+	"account-sale",
+	"purchase",
+];
+
 interface ChargeItem {
 	productId: string;
 	units: string;
-	discountCents: number;
 }
 
 interface PurchaseItemForm {
@@ -220,6 +251,68 @@ const getApiErrorMessage = (
 	return fallback;
 };
 
+const getQuickActionLabel = (
+	action: QuickAction,
+	restockCount: number,
+) => {
+	switch (action) {
+		case "quick-checkout":
+			return "Quick Checkout";
+		case "quick-top-sellers":
+			return "Top Sellers Sale";
+		case "quick-fast-repeat":
+			return "Fast Repeat Sale";
+		case "direct-sale":
+			return "Add Direct Sale";
+		case "account-sale":
+			return "Add Sale to Account";
+		case "account-payment":
+			return "Add Account Payment";
+		case "restock":
+			return `Restock Low Stock (${restockCount})`;
+		case "customer":
+			return "Add Customer";
+		case "supplier":
+			return "Add Supplier";
+		case "supplier-price":
+			return "Set Supplier Cost";
+		case "product":
+			return "Add Product";
+		case "purchase":
+			return "Add Purchase";
+		case "adjustment":
+			return "Add Adjustment";
+	}
+};
+
+const getQuickActionIcon = (
+	action: QuickAction,
+) => {
+	switch (action) {
+		case "quick-checkout":
+		case "quick-top-sellers":
+		case "quick-fast-repeat":
+		case "direct-sale":
+		case "account-sale":
+			return <Receipt className="mr-2 h-4 w-4" />;
+		case "account-payment":
+			return <CreditCard className="mr-2 h-4 w-4" />;
+		case "restock":
+		case "purchase":
+			return <ShoppingCart className="mr-2 h-4 w-4" />;
+		case "customer":
+			return <Users className="mr-2 h-4 w-4" />;
+		case "supplier":
+			return <Truck className="mr-2 h-4 w-4" />;
+		case "supplier-price":
+			return <DollarSign className="mr-2 h-4 w-4" />;
+		case "product":
+			return <Box className="mr-2 h-4 w-4" />;
+		case "adjustment":
+			return <PackageMinus className="mr-2 h-4 w-4" />;
+	}
+};
+
 export function GlobalQuickActions() {
 	const pathname = usePathname();
 	const show = ENABLED_PATHS.some((path) =>
@@ -228,6 +321,14 @@ export function GlobalQuickActions() {
 	const [open, setOpen] = React.useState(false);
 	const [activeAction, setActiveAction] =
 		React.useState<QuickAction | null>(null);
+	const [showMoreActions, setShowMoreActions] =
+		React.useState(false);
+	const [showPinShortcuts, setShowPinShortcuts] =
+		React.useState(false);
+	const [favoriteActions, setFavoriteActions] =
+		React.useState<QuickAction[]>(
+			QUICK_ACTION_DEFAULT_FAVORITES,
+		);
 	const date = React.useMemo(() => getTodayJHB(), []);
 	const { mutate } = useSWRConfig();
 
@@ -396,7 +497,43 @@ export function GlobalQuickActions() {
 		[report, purchaseHistory, products, supplierPrices],
 	);
 
-	if (!show) return null;
+	React.useEffect(() => {
+		try {
+			const raw = localStorage.getItem(
+				QUICK_ACTION_STORAGE_KEY,
+			);
+			if (!raw) return;
+			const parsed = JSON.parse(raw);
+			if (!Array.isArray(parsed)) return;
+			const next = parsed
+				.filter((value): value is QuickAction =>
+					QUICK_ACTION_ALL.includes(
+						value as QuickAction,
+					),
+				)
+				.slice(0, 5);
+			if (next.length > 0) {
+				setFavoriteActions(next);
+			}
+		} catch {
+			// Ignore invalid local preference payloads.
+		}
+	}, []);
+
+	const persistFavorites = React.useCallback(
+		(next: QuickAction[]) => {
+			setFavoriteActions(next);
+			try {
+				localStorage.setItem(
+					QUICK_ACTION_STORAGE_KEY,
+					JSON.stringify(next),
+				);
+			} catch {
+				// Ignore localStorage write failures.
+			}
+		},
+		[],
+	);
 
 	const onSaved = async () => {
 		await Promise.all([
@@ -444,12 +581,69 @@ export function GlobalQuickActions() {
 		setActiveAction(null);
 	};
 
+	const openAction = React.useCallback(
+		(action: QuickAction) => {
+			setActiveAction(action);
+			setOpen(false);
+		},
+		[],
+	);
+
+	const toggleFavoriteAction = React.useCallback(
+		(action: QuickAction) => {
+			const isFavorite =
+				favoriteActions.includes(action);
+			if (isFavorite) {
+				const next = favoriteActions.filter(
+					(value) => value !== action,
+				);
+				persistFavorites(next);
+				return;
+			}
+			if (favoriteActions.length >= 5) {
+				toast.error(
+					"You can pin up to 5 quick actions.",
+				);
+				return;
+			}
+			persistFavorites([...favoriteActions, action]);
+		},
+		[favoriteActions, persistFavorites],
+	);
+
+	const renderQuickActionButton = (
+		action: QuickAction,
+		variant?: "outline" | "secondary",
+	) => (
+		<ActionBtn
+			label={getQuickActionLabel(
+				action,
+				restockSeed.items.length,
+			)}
+			icon={getQuickActionIcon(action)}
+			variant={variant}
+			onClick={() => openAction(action)}
+			disabled={
+				action === "restock" &&
+				restockSeed.items.length === 0
+			}
+		/>
+	);
+
+	if (!show) return null;
+
 	return (
 		<>
 			<div className="fixed bottom-4 right-4 z-40">
 				<Popover
 					open={open}
-					onOpenChange={setOpen}
+					onOpenChange={(isOpen) => {
+						setOpen(isOpen);
+						if (!isOpen) {
+							setShowMoreActions(false);
+							setShowPinShortcuts(false);
+						}
+					}}
 				>
 					<PopoverTrigger asChild>
 						<Button
@@ -465,128 +659,169 @@ export function GlobalQuickActions() {
 					<PopoverContent
 						side="top"
 						align="end"
-						className="w-64 p-2"
+						className="w-[calc(100vw-2rem)] max-w-sm p-2 md:w-80"
 					>
-						<div className="flex max-h-[50vh] flex-col gap-2 overflow-y-auto">
-							<ActionBtn
-								label="Quick Checkout"
-								icon={
-									<Receipt className="mr-2 h-4 w-4" />
+						<div className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
+							<p className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+								Pinned
+							</p>
+							{favoriteActions.length === 0 ? (
+								<p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+									No pinned actions. Use Pin Shortcuts to manage pins.
+								</p>
+							) : (
+								favoriteActions.map((action) => (
+									<React.Fragment key={action}>
+										{renderQuickActionButton(
+											action,
+											action === "quick-checkout"
+												? "secondary"
+												: "outline",
+										)}
+									</React.Fragment>
+								))
+							)}
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								className="justify-between px-2"
+								onClick={() =>
+									setShowPinShortcuts((prev) => !prev)
 								}
-								variant="secondary"
-								onClick={() => {
-									setActiveAction(
-										"quick-checkout",
-									);
-									setOpen(false);
-								}}
-							/>
-							<ActionBtn
-								label="Add Direct Sale"
-								icon={
-									<Receipt className="mr-2 h-4 w-4" />
+							>
+								<span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+									Pin Shortcuts
+								</span>
+								{showPinShortcuts ? (
+									<ChevronUp className="h-4 w-4 text-muted-foreground" />
+								) : (
+									<ChevronDown className="h-4 w-4 text-muted-foreground" />
+								)}
+							</Button>
+							{showPinShortcuts && (
+								<div className="rounded-md border p-2">
+									<div className="grid grid-cols-1 gap-1">
+										{QUICK_ACTION_ALL.map((action) => {
+											const pinned =
+												favoriteActions.includes(
+													action,
+												);
+											return (
+												<Button
+													key={action}
+													type="button"
+													variant="ghost"
+													size="sm"
+													className="justify-between"
+													onClick={() =>
+														toggleFavoriteAction(
+															action,
+														)
+													}
+												>
+													<span className="truncate text-sm">
+														{getQuickActionLabel(
+															action,
+															restockSeed.items.length,
+														)}
+													</span>
+													<Star
+														className={`h-4 w-4 ${
+															pinned
+																? "fill-current text-amber-500"
+																: "text-muted-foreground"
+														}`}
+													/>
+												</Button>
+											);
+										})}
+									</div>
+								</div>
+							)}
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								className="justify-between px-2"
+								onClick={() =>
+									setShowMoreActions((prev) => !prev)
 								}
-								variant="outline"
-								onClick={() => {
-									setActiveAction("direct-sale");
-									setOpen(false);
-								}}
-							/>
-							<ActionBtn
-								label="Add Sale to Account"
-								icon={
-									<Receipt className="mr-2 h-4 w-4" />
-								}
-								onClick={() => {
-									setActiveAction("account-sale");
-									setOpen(false);
-								}}
-							/>
-							<ActionBtn
-								label="Add Account Payment"
-								icon={
-									<CreditCard className="mr-2 h-4 w-4" />
-								}
-								onClick={() => {
-									setActiveAction(
-										"account-payment",
-									);
-									setOpen(false);
-								}}
-							/>
-							<ActionBtn
-								label={`Restock Low Stock (${restockSeed.items.length})`}
-								icon={
-									<ShoppingCart className="mr-2 h-4 w-4" />
-								}
-								onClick={() => {
-									setActiveAction("restock");
-									setOpen(false);
-								}}
-								disabled={
-									restockSeed.items.length === 0
-								}
-							/>
-							<ActionBtn
-								label="Add Customer"
-								icon={
-									<Users className="mr-2 h-4 w-4" />
-								}
-								onClick={() => {
-									setActiveAction("customer");
-									setOpen(false);
-								}}
-							/>
-							<ActionBtn
-								label="Add Supplier"
-								icon={
-									<Truck className="mr-2 h-4 w-4" />
-								}
-								onClick={() => {
-									setActiveAction("supplier");
-									setOpen(false);
-								}}
-							/>
-							<ActionBtn
-								label="Set Supplier Cost"
-								icon={
-									<DollarSign className="mr-2 h-4 w-4" />
-								}
-								onClick={() => {
-									setActiveAction("supplier-price");
-									setOpen(false);
-								}}
-							/>
-							<ActionBtn
-								label="Add Product"
-								icon={
-									<Box className="mr-2 h-4 w-4" />
-								}
-								onClick={() => {
-									setActiveAction("product");
-									setOpen(false);
-								}}
-							/>
-							<ActionBtn
-								label="Add Purchase"
-								icon={
-									<ShoppingCart className="mr-2 h-4 w-4" />
-								}
-								onClick={() => {
-									setActiveAction("purchase");
-									setOpen(false);
-								}}
-							/>
-							<ActionBtn
-								label="Add Adjustment"
-								icon={
-									<PackageMinus className="mr-2 h-4 w-4" />
-								}
-								onClick={() => {
-									setActiveAction("adjustment");
-									setOpen(false);
-								}}
-							/>
+							>
+								<span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+									More Actions
+								</span>
+								{showMoreActions ? (
+									<ChevronUp className="h-4 w-4 text-muted-foreground" />
+								) : (
+									<ChevronDown className="h-4 w-4 text-muted-foreground" />
+								)}
+							</Button>
+							{showMoreActions && (
+								<div className="space-y-2 rounded-md border p-2">
+									<div className="space-y-2 pt-1">
+										<p className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+											Sales
+										</p>
+										<div className="space-y-2">
+											{renderQuickActionButton(
+												"quick-checkout",
+											)}
+											{renderQuickActionButton(
+												"quick-top-sellers",
+											)}
+											{renderQuickActionButton(
+												"quick-fast-repeat",
+											)}
+											{renderQuickActionButton(
+												"direct-sale",
+											)}
+											{renderQuickActionButton(
+												"account-sale",
+											)}
+										</div>
+									</div>
+									<div className="space-y-2">
+										<p className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+											Customers
+										</p>
+										<div className="space-y-2">
+											{renderQuickActionButton(
+												"customer",
+											)}
+											{renderQuickActionButton(
+												"account-payment",
+											)}
+										</div>
+									</div>
+									<div className="space-y-2 pt-1">
+										<p className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+											Suppliers
+										</p>
+										<div className="space-y-2">
+											{renderQuickActionButton(
+												"supplier",
+											)}
+											{renderQuickActionButton(
+												"supplier-price",
+											)}
+										</div>
+									</div>
+									<div className="space-y-2 pt-1">
+										<p className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+											Inventory
+										</p>
+										<div className="space-y-2">
+											{renderQuickActionButton(
+												"product",
+											)}
+											{renderQuickActionButton(
+												"adjustment",
+											)}
+										</div>
+									</div>
+								</div>
+							)}
 						</div>
 					</PopoverContent>
 				</Popover>
@@ -601,7 +836,7 @@ export function GlobalQuickActions() {
 				{activeAction === "quick-checkout" && (
 					<ActionDialog
 						title="Quick Checkout"
-						description={`Scan barcode, set quantity, and save paid sale for ${formatDateDisplay(date)}.`}
+						description={`Search, select, or scan and save paid sale for ${formatDateDisplay(date)}.`}
 					>
 						<QuickCheckoutForm
 							products={products}
@@ -630,6 +865,81 @@ export function GlobalQuickActions() {
 									}))
 							}
 							date={date}
+							mode="default"
+							onSuccess={onSaved}
+						/>
+					</ActionDialog>
+				)}
+				{activeAction === "quick-top-sellers" && (
+					<ActionDialog
+						title="Top Sellers Sale"
+						description={`Quick add from top sellers for ${formatDateDisplay(date)}.`}
+					>
+						<QuickCheckoutForm
+							products={products}
+							quickProducts={
+								(report?.trends
+									?.topProducts ?? []
+								)
+									.map((item) =>
+										products.find(
+											(product) =>
+												product.id ===
+												item.productId,
+										),
+									)
+									.filter(
+										(
+											product,
+										): product is Product =>
+											Boolean(
+												product,
+											),
+									)
+									.map((product) => ({
+										id: product.id,
+										name: product.name,
+									}))
+							}
+							date={date}
+							mode="top-sellers"
+							onSuccess={onSaved}
+						/>
+					</ActionDialog>
+				)}
+				{activeAction === "quick-fast-repeat" && (
+					<ActionDialog
+						title="Fast Repeat Sale"
+						description={`Repeat recent sales quickly for ${formatDateDisplay(date)}.`}
+					>
+						<QuickCheckoutForm
+							products={products}
+							quickProducts={
+								(report?.trends
+									?.topProducts ?? []
+								)
+									.map((item) =>
+										products.find(
+											(product) =>
+												product.id ===
+												item.productId,
+										),
+									)
+									.filter(
+										(
+											product,
+										): product is Product =>
+											Boolean(
+												product,
+											),
+									)
+									.map((product) => ({
+										id: product.id,
+										name: product.name,
+									}))
+							}
+							date={date}
+							mode="fast-repeat"
 							onSuccess={onSaved}
 						/>
 					</ActionDialog>
@@ -829,180 +1139,16 @@ function SaveFooter({
 	);
 }
 
-function ItemsSection({
-	items,
-	products,
-	onRemove,
-	onChange,
-}: {
-	items: ChargeItem[];
-	products: Product[];
-	onRemove: (index: number) => void;
-	onChange: (
-		index: number,
-		updates: Partial<ChargeItem>,
-	) => void;
-}) {
-	const productPriceById = React.useMemo(
-		() =>
-			new Map(
-				products.map((product) => [
-					product.id,
-					product.currentPriceCents ?? 0,
-				]),
-			),
-		[products],
-	);
-
-	return (
-		<div className="flex h-[50vh] min-h-0 flex-1 flex-col space-y-2">
-			<Label>Items Sold</Label>
-			<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-				{items.map((item, index) => {
-					const units =
-						parseInt(item.units, 10) || 0;
-					const unitPrice =
-						productPriceById.get(item.productId) ??
-						0;
-					const subtotalCents = unitPrice * units;
-					const netCents = Math.max(
-						0,
-						subtotalCents - item.discountCents,
-					);
-					return (
-						<div key={index} className="space-y-1">
-							<div className="flex items-end gap-2">
-								<div className="flex-1">
-									<ProductSelect
-										products={products}
-										value={item.productId}
-										onChange={(v) =>
-											onChange(index, {
-												productId: v,
-											})
-										}
-										placeholder="Product"
-									/>
-								</div>
-								<div className="w-20">
-									<Input
-										type="number"
-										min="1"
-										value={item.units}
-										onChange={(e) =>
-											onChange(index, {
-												units: e.target.value,
-											})
-										}
-										placeholder="Qty"
-									/>
-								</div>
-								<div className="w-32 space-y-1">
-									<Label className="text-xs">
-										Item Discount
-									</Label>
-									<MoneyInput
-										className="space-y-0"
-										value={item.discountCents}
-										onChange={(v) =>
-											onChange(index, {
-												discountCents: v,
-											})
-										}
-										placeholder="0.00"
-									/>
-								</div>
-								{items.length > 1 && (
-									<Button
-										type="button"
-										variant="ghost"
-										size="icon"
-										onClick={() =>
-											onRemove(index)
-										}
-									>
-										<Trash2 className="h-4 w-4" />
-									</Button>
-								)}
-							</div>
-							<p className="text-[11px] text-muted-foreground">
-								Subtotal {formatZAR(subtotalCents)} | Net{" "}
-								{formatZAR(netCents)}
-							</p>
-						</div>
-					);
-				})}
-			</div>
-		</div>
-	);
-}
-
-function BottomItemButtons({
-	onAddItem,
-	showNote,
-	setShowNote,
-	note,
-	setNote,
-	notePlaceholder,
-}: {
-	onAddItem: () => void;
-	showNote: boolean;
-	setShowNote: React.Dispatch<
-		React.SetStateAction<boolean>
-	>;
-	note: string;
-	setNote: React.Dispatch<
-		React.SetStateAction<string>
-	>;
-	notePlaceholder: string;
-}) {
-	return (
-		<div className="space-y-2">
-			<div className="grid grid-cols-2 gap-2">
-				<Button
-					type="button"
-					variant="outline"
-					size="sm"
-					className="w-full"
-					onClick={onAddItem}
-				>
-					<Plus className="mr-2 h-4 w-4" />
-					Add Item
-				</Button>
-				<Button
-					type="button"
-					variant="outline"
-					size="sm"
-					className="w-full"
-					onClick={() =>
-						setShowNote((prev) => !prev)
-					}
-				>
-					{showNote ? "Hide Note" : "Add Note"}
-				</Button>
-			</div>
-			{showNote && (
-				<Textarea
-					value={note}
-					onChange={(e) =>
-						setNote(e.target.value)
-					}
-					placeholder={notePlaceholder}
-					rows={2}
-				/>
-			)}
-		</div>
-	);
-}
-
 function QuickCheckoutForm({
 	products,
 	quickProducts,
+	mode = "default",
 	date,
 	onSuccess,
 }: {
 	products: Product[];
 	quickProducts: QuickProductLite[];
+	mode?: "default" | "top-sellers" | "fast-repeat";
 	date: string;
 	onSuccess: () => void;
 }) {
@@ -1015,18 +1161,6 @@ function QuickCheckoutForm({
 	>([]);
 	const [paymentMethod, setPaymentMethod] =
 		React.useState<PaymentMethod>("CASH");
-	const [discountCents, setDiscountCents] =
-		React.useState(0);
-	const [manualProductId, setManualProductId] =
-		React.useState("");
-	const [manualUnits, setManualUnits] =
-		React.useState("1");
-	const [showManualAdd, setShowManualAdd] =
-		React.useState(false);
-	const [showTopSellers, setShowTopSellers] =
-		React.useState(false);
-	const [showFastRepeat, setShowFastRepeat] =
-		React.useState(false);
 	const scanInputRef =
 		React.useRef<HTMLInputElement | null>(null);
 	const lastScanKeyTsRef = React.useRef(0);
@@ -1054,7 +1188,7 @@ function QuickCheckoutForm({
 						String(p.barcode)
 							.trim()
 							.toLowerCase(),
-						p,
+						p.id,
 					]),
 			),
 		[products],
@@ -1080,14 +1214,9 @@ function QuickCheckoutForm({
 			if (!validItems.length) continue;
 			const signature = [
 				txn.paymentMethod ?? "CASH",
-				txn.discountCents ?? 0,
 				...validItems
 					.map((item) =>
-						[
-							item.productId,
-							item.units,
-							item.discountCents ?? 0,
-						].join(":"),
+						[item.productId, item.units].join(":"),
 					)
 					.sort(),
 			].join("|");
@@ -1098,6 +1227,17 @@ function QuickCheckoutForm({
 		}
 		return Array.from(unique.values());
 	}, [txnHistory]);
+	const isJourneyMode = mode !== "default";
+	const [journeyStep, setJourneyStep] =
+		React.useState<1 | 2>(
+			isJourneyMode ? 1 : 2,
+		);
+	const [
+		selectedTopSellerIds,
+		setSelectedTopSellerIds,
+	] = React.useState<string[]>([]);
+	const [selectedTemplateId, setSelectedTemplateId] =
+		React.useState<string | null>(null);
 
 	const applyFastRepeat = React.useCallback(
 		(template: DirectSaleHistoryLite) => {
@@ -1110,8 +1250,6 @@ function QuickCheckoutForm({
 				.map((item) => ({
 					productId: item.productId,
 					units: String(item.units),
-					discountCents:
-						item.discountCents ?? 0,
 				}));
 			if (!nextItems.length) {
 				toast.error(
@@ -1123,13 +1261,22 @@ function QuickCheckoutForm({
 			setPaymentMethod(
 				template.paymentMethod ?? "CASH",
 			);
-			setDiscountCents(template.discountCents ?? 0);
 			requestAnimationFrame(() =>
 				scanInputRef.current?.focus(),
 			);
 		},
 		[],
 	);
+
+	React.useEffect(() => {
+		if (mode === "default") {
+			setJourneyStep(2);
+			return;
+		}
+		setJourneyStep(1);
+		setSelectedTopSellerIds([]);
+		setSelectedTemplateId(null);
+	}, [mode]);
 
 	React.useEffect(() => {
 		if (!scanInputRef.current) return;
@@ -1144,25 +1291,57 @@ function QuickCheckoutForm({
 		};
 	}, []);
 
-	const addByBarcode = React.useCallback(
-		(rawCode: string) => {
-			const normalizedCode = rawCode
-				.trim()
-				.toLowerCase();
-			if (!normalizedCode) return;
-			const matchedProduct =
-				productByBarcode.get(normalizedCode);
-			if (!matchedProduct) {
+	const resolveProductIdFromInput = React.useCallback(
+		(rawInput: string) => {
+			const query = rawInput.trim().toLowerCase();
+			if (!query) return null;
+			const barcodeMatch = productByBarcode.get(query);
+			if (barcodeMatch) return barcodeMatch;
+			const exactNameMatch = products.find(
+				(product) =>
+					product.name.trim().toLowerCase() ===
+						query ||
+					product.id.toLowerCase() === query,
+			);
+			if (exactNameMatch) return exactNameMatch.id;
+			const startsWithMatch = products.find((product) =>
+				product.name.toLowerCase().startsWith(query),
+			);
+			if (startsWithMatch) return startsWithMatch.id;
+			const includesMatch = products.find((product) =>
+				product.name.toLowerCase().includes(query),
+			);
+			return includesMatch?.id ?? null;
+		},
+		[products, productByBarcode],
+	);
+	const matchedProductId = React.useMemo(
+		() => resolveProductIdFromInput(scanInput),
+		[resolveProductIdFromInput, scanInput],
+	);
+	const matchedProductName = matchedProductId
+		? productMap.get(matchedProductId)?.name ??
+			matchedProductId
+		: "";
+
+	const addByInput = React.useCallback(
+		(rawInput: string, unitsToAdd?: number) => {
+			const productId =
+				resolveProductIdFromInput(rawInput);
+			if (!productId) {
 				toast.error(
-					`No product for barcode "${rawCode.trim()}"`,
+					`No product match for "${rawInput.trim()}"`,
 				);
 				return;
 			}
-
+			const qty =
+				Math.max(
+					1,
+					unitsToAdd ?? 1,
+				) || 1;
 			setItems((prev) => {
 				const existingIndex = prev.findIndex(
-					(item) =>
-						item.productId === matchedProduct.id,
+					(item) => item.productId === productId,
 				);
 				if (existingIndex >= 0) {
 					return prev.map((item, index) =>
@@ -1173,7 +1352,7 @@ function QuickCheckoutForm({
 										(parseInt(
 											item.units,
 											10,
-										) || 0) + 1,
+										) || 0) + qty,
 									),
 							  }
 							: item,
@@ -1182,9 +1361,8 @@ function QuickCheckoutForm({
 				return [
 					...prev,
 					{
-						productId: matchedProduct.id,
-						units: "1",
-						discountCents: 0,
+						productId,
+						units: String(qty),
 					},
 				];
 			});
@@ -1193,7 +1371,7 @@ function QuickCheckoutForm({
 				scanInputRef.current?.focus(),
 			);
 		},
-		[productByBarcode],
+		[resolveProductIdFromInput],
 	);
 
 	const adjustUnits = (
@@ -1248,50 +1426,6 @@ function QuickCheckoutForm({
 		);
 	};
 
-	const addManualItem = React.useCallback(() => {
-		const units =
-			parseInt(manualUnits, 10) || 0;
-		if (!manualProductId || units <= 0) {
-			toast.error(
-				"Select product and quantity first",
-			);
-			return;
-		}
-		setItems((prev) => {
-			const existingIndex = prev.findIndex(
-				(item) => item.productId === manualProductId,
-			);
-			if (existingIndex >= 0) {
-				return prev.map((item, index) =>
-					index === existingIndex
-						? {
-								...item,
-								units: String(
-									(parseInt(
-										item.units,
-										10,
-									) || 0) + units,
-							  ),
-						  }
-						: item,
-				);
-			}
-			return [
-				...prev,
-				{
-					productId: manualProductId,
-					units: String(units),
-					discountCents: 0,
-				},
-			];
-		});
-		setManualProductId("");
-		setManualUnits("1");
-		requestAnimationFrame(() =>
-			scanInputRef.current?.focus(),
-		);
-	}, [manualProductId, manualUnits]);
-
 	const addProductUnits = React.useCallback(
 		(productId: string, unitsToAdd: number) => {
 			if (!productId || unitsToAdd <= 0) return;
@@ -1319,7 +1453,6 @@ function QuickCheckoutForm({
 					{
 						productId,
 						units: String(unitsToAdd),
-						discountCents: 0,
 					},
 				];
 			});
@@ -1329,6 +1462,39 @@ function QuickCheckoutForm({
 		},
 		[],
 	);
+	const toggleTopSellerSelection = React.useCallback(
+		(productId: string) => {
+			setSelectedTopSellerIds((prev) =>
+				prev.includes(productId)
+					? prev.filter((id) => id !== productId)
+					: [...prev, productId],
+			);
+		},
+		[],
+	);
+	const continueTopSellersJourney = () => {
+		if (selectedTopSellerIds.length === 0) {
+			toast.error("Select at least one top seller");
+			return;
+		}
+		setItems(
+			selectedTopSellerIds.map((productId) => ({
+				productId,
+				units: "1",
+			})),
+		);
+		setJourneyStep(2);
+		requestAnimationFrame(() =>
+			scanInputRef.current?.focus(),
+		);
+	};
+	const startFastRepeatJourney = (
+		template: DirectSaleHistoryLite,
+	) => {
+		applyFastRepeat(template);
+		setSelectedTemplateId(template.id);
+		setJourneyStep(2);
+	};
 
 	const scheduleAutoAdd = React.useCallback(
 		(rawCode: string) => {
@@ -1336,10 +1502,10 @@ function QuickCheckoutForm({
 				clearTimeout(autoAddTimerRef.current);
 			}
 			autoAddTimerRef.current = setTimeout(() => {
-				addByBarcode(rawCode);
+				addByInput(rawCode);
 			}, 80);
 		},
-		[addByBarcode],
+		[addByInput],
 	);
 
 	const totalCents = React.useMemo(
@@ -1364,10 +1530,6 @@ function QuickCheckoutForm({
 			.map((item) => ({
 				productId: item.productId,
 				units: parseInt(item.units, 10) || 0,
-				discountCents:
-					item.discountCents > 0
-						? item.discountCents
-						: undefined,
 			}))
 			.filter((item) => item.units > 0);
 
@@ -1378,21 +1540,29 @@ function QuickCheckoutForm({
 		}
 
 		try {
-			const res = await fetch("/api/sales", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					date,
-					paymentMethod,
-					discountCents:
-						discountCents > 0
-							? discountCents
-							: undefined,
-					items: validItems,
-				}),
-			});
+			const payload = {
+				date,
+				paymentMethod,
+				items: validItems,
+			};
+			const queueResult = await postSaleWithOfflineQueue(
+				"/api/sales",
+				payload,
+			);
+			if (queueResult.queued) {
+				toast.success(
+					"Offline: checkout queued and will sync automatically.",
+				);
+				setItems([]);
+				setScanInput("");
+				fastKeyStreakRef.current = 0;
+				requestAnimationFrame(() =>
+					scanInputRef.current?.focus(),
+				);
+				onSuccess();
+				return;
+			}
+			const res = queueResult.response;
 			if (!res.ok) {
 				const errorBody = await res
 					.json()
@@ -1407,7 +1577,6 @@ function QuickCheckoutForm({
 			toast.success("Checkout saved");
 			setItems([]);
 			setScanInput("");
-			setDiscountCents(0);
 			fastKeyStreakRef.current = 0;
 			requestAnimationFrame(() =>
 				scanInputRef.current?.focus(),
@@ -1430,12 +1599,123 @@ function QuickCheckoutForm({
 			className="flex flex-col h-[60vh]"
 		>
 			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
+				{isJourneyMode && journeyStep === 1 ? (
+					<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+						<div className="rounded-md border p-3">
+							<p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+								Step 1 of 2
+							</p>
+							<p className="text-sm font-medium">
+								{mode === "fast-repeat"
+									? "Choose a recent sale"
+									: "Choose top-seller items"}
+							</p>
+							<p className="text-xs text-muted-foreground">
+								{mode === "fast-repeat"
+									? "Select one sale template, then review and adjust items."
+									: "Pick items to start from, then review and adjust quantities."}
+							</p>
+						</div>
+
+						{mode === "fast-repeat" ? (
+							repeatTemplates.length === 0 ? (
+								<p className="rounded-md border p-3 text-sm text-muted-foreground">
+									No repeatable sales yet.
+								</p>
+							) : (
+								repeatTemplates.map((template) => {
+									const itemCount =
+										(template.items ?? []).length;
+									const firstItemName =
+										productMap.get(
+											template.items?.[0]
+												?.productId ?? "",
+										)?.name ?? "Sale";
+									const selected =
+										selectedTemplateId === template.id;
+									return (
+										<button
+											key={template.id}
+											type="button"
+											className={`w-full rounded-md border p-3 text-left ${
+												selected
+													? "border-amber-500 bg-amber-50/40"
+													: "hover:bg-accent/40"
+											}`}
+											onClick={() =>
+												startFastRepeatJourney(
+													template,
+												)
+											}
+										>
+											<p className="font-medium">
+												{firstItemName}
+												{itemCount > 1
+													? ` +${itemCount - 1}`
+													: ""}
+											</p>
+											<p className="text-xs text-muted-foreground">
+												{template.paymentMethod ?? "CASH"} |{" "}
+												{itemCount} item
+												{itemCount === 1 ? "" : "s"}
+											</p>
+										</button>
+									);
+								})
+							)
+						) : quickProducts.length === 0 ? (
+							<p className="rounded-md border p-3 text-sm text-muted-foreground">
+								No top sellers found for this date.
+							</p>
+						) : (
+							<div className="space-y-2">
+								{quickProducts.map((product) => {
+									const selected =
+										selectedTopSellerIds.includes(
+											product.id,
+										);
+									return (
+										<button
+											key={product.id}
+											type="button"
+											className={`w-full rounded-md border px-3 py-2 text-left ${
+												selected
+													? "border-amber-500 bg-amber-50/40"
+													: "hover:bg-accent/40"
+											}`}
+											onClick={() =>
+												toggleTopSellerSelection(
+													product.id,
+												)
+											}
+										>
+											{product.name}
+										</button>
+									);
+								})}
+							</div>
+						)}
+						{mode === "top-sellers" && (
+							<div className="shrink-0 border-t pt-3">
+								<Button
+									type="button"
+									className="w-full"
+									onClick={continueTopSellersJourney}
+								>
+									Continue to Edit
+								</Button>
+							</div>
+						)}
+					</div>
+				) : (
+					<>
 				<div className="space-y-2">
-					<Label>Scan Barcode</Label>
+					<Label>Search / Select / Scan Product</Label>
 					<div className="flex gap-2">
 						<Input
 							ref={scanInputRef}
 							value={scanInput}
+							list="quick-checkout-product-options"
 							onChange={(e) => {
 								const nextValue =
 									e.target.value;
@@ -1444,18 +1724,7 @@ function QuickCheckoutForm({
 									nextValue.length -
 									scanInput.length;
 
-								if (addedChars > 1) {
-									if (
-										nextValue.trim().length >=
-										6
-									) {
-										scheduleAutoAdd(
-											nextValue,
-										);
-									}
-								} else if (
-									addedChars === 1
-								) {
+								if (addedChars === 1) {
 									const delta =
 										now -
 										lastScanKeyTsRef.current;
@@ -1486,20 +1755,48 @@ function QuickCheckoutForm({
 							onKeyDown={(e) => {
 								if (e.key !== "Enter") return;
 								e.preventDefault();
-								addByBarcode(scanInput);
+								addByInput(scanInput);
 							}}
-							placeholder="Scan and press Enter"
+							placeholder="Type name or scan barcode, then Enter"
 						/>
-						<Button
-							type="button"
-							variant="outline"
-							onClick={() =>
-								addByBarcode(scanInput)
-							}
-						>
-							Add
-						</Button>
+						<datalist id="quick-checkout-product-options">
+							{products.flatMap((product) => [
+								<option
+									key={`${product.id}-name`}
+									value={product.name}
+								/>,
+								...(product.barcode
+									? [
+											<option
+												key={`${product.id}-barcode`}
+												value={String(
+													product.barcode,
+												)}
+											/>,
+									  ]
+									: []),
+							])}
+						</datalist>
 					</div>
+					{scanInput.trim().length > 0 &&
+						(matchedProductId ? (
+							<p className="text-xs text-emerald-700">
+								Selected:{" "}
+								<span className="font-medium">
+									{matchedProductName}
+								</span>
+								{" - "}Press Enter to add.
+							</p>
+						) : (
+							<p className="text-xs text-muted-foreground">
+								No product match yet.
+							</p>
+						))}
+					{items.length > 0 && (
+						<p className="text-xs text-muted-foreground">
+							Type, select, or scan to add.
+						</p>
+					)}
 				</div>
 
 				<div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
@@ -1517,11 +1814,6 @@ function QuickCheckoutForm({
 							const subtotalCents =
 								(product?.currentPriceCents ??
 									0) * units;
-							const netCents = Math.max(
-								0,
-								subtotalCents -
-									item.discountCents,
-							);
 							return (
 								<div
 									key={item.productId}
@@ -1533,31 +1825,8 @@ function QuickCheckoutForm({
 												item.productId}
 										</p>
 										<p className="text-sm font-semibold">
-											{formatZAR(netCents)}
+											{formatZAR(subtotalCents)}
 										</p>
-									</div>
-									<div className="mb-2">
-										<MoneyInput
-											label="Item Discount"
-											className="space-y-1"
-											value={
-												item.discountCents
-											}
-											onChange={(value) =>
-												setItems((prev) =>
-													prev.map((line) =>
-														line.productId ===
-															item.productId
-																? {
-																		...line,
-																		discountCents:
-																			value,
-																  }
-																: line,
-													),
-												)
-											}
-										/>
 									</div>
 									<div className="grid grid-cols-4 gap-2">
 										<Button
@@ -1603,7 +1872,7 @@ function QuickCheckoutForm({
 										</Button>
 										<Button
 											type="button"
-											variant="ghost"
+											variant="destructive"
 											size="sm"
 											onClick={() =>
 												removeItem(
@@ -1611,166 +1880,29 @@ function QuickCheckoutForm({
 												)
 											}
 										>
-											Remove
+											<Trash2 className="h-4 w-4" />
 										</Button>
 									</div>
 									<p className="mt-2 text-[11px] text-muted-foreground">
-										Subtotal {formatZAR(subtotalCents)} | Net{" "}
-										{formatZAR(netCents)}
+										Subtotal {formatZAR(subtotalCents)}
 									</p>
 								</div>
 							);
 						})
 					)}
 				</div>
-				<div className="space-y-2">
-					<div className="grid grid-cols-3 gap-2">
+				{isJourneyMode && (
+					<div className="flex justify-start">
 						<Button
 							type="button"
 							variant="outline"
 							size="sm"
-							onClick={() =>
-								setShowManualAdd((v) => !v)
-							}
+							onClick={() => setJourneyStep(1)}
 						>
-							{showManualAdd
-								? "Hide Manual"
-								: "Manual Add"}
-						</Button>
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							disabled={quickProducts.length === 0}
-							onClick={() =>
-								setShowTopSellers((v) => !v)
-							}
-						>
-							{showTopSellers
-								? "Hide Top"
-								: "Top Sellers"}
-						</Button>
-						<Button
-							type="button"
-							variant="secondary"
-							size="sm"
-							disabled={repeatTemplates.length === 0}
-							onClick={() =>
-								setShowFastRepeat((v) => !v)
-							}
-						>
-							{showFastRepeat
-								? "Hide Repeat"
-								: "Fast Repeat"}
+							Back to Selection
 						</Button>
 					</div>
-					{showManualAdd && (
-						<div className="space-y-2 rounded-md border p-2">
-							<Label>Manual Add</Label>
-							<div className="grid grid-cols-12 gap-2">
-								<div className="col-span-8">
-									<ProductSelect
-										products={products}
-										value={manualProductId}
-										onChange={setManualProductId}
-										placeholder="Select product"
-									/>
-								</div>
-								<div className="col-span-2">
-									<Input
-										type="number"
-										min="1"
-										value={manualUnits}
-										onChange={(e) =>
-											setManualUnits(
-												e.target.value,
-											)
-										}
-										placeholder="Qty"
-									/>
-								</div>
-								<div className="col-span-2">
-									<Button
-										type="button"
-										variant="outline"
-										className="w-full"
-										onClick={addManualItem}
-									>
-										Add
-									</Button>
-								</div>
-							</div>
-						</div>
-					)}
-					{showTopSellers &&
-						quickProducts.length > 0 && (
-							<div className="space-y-2 rounded-md border p-2">
-								<Label>Top Sellers</Label>
-								<div className="flex gap-2 overflow-x-auto pb-1">
-									{quickProducts.map((product) => (
-										<Button
-											key={product.id}
-											type="button"
-											variant="outline"
-											size="sm"
-											className="shrink-0"
-											onClick={() =>
-												addProductUnits(
-													product.id,
-													1,
-												)
-											}
-										>
-											{product.name}
-										</Button>
-									))}
-								</div>
-							</div>
-						)}
-					{showFastRepeat &&
-						repeatTemplates.length > 0 && (
-							<div className="space-y-2 rounded-md border p-2">
-								<Label>Fast Repeat Sale</Label>
-								<div className="flex gap-2 overflow-x-auto pb-1">
-									{repeatTemplates.map((template) => {
-										const itemCount =
-											(
-												template.items ?? []
-											).length;
-										const firstItemName =
-											productMap.get(
-												template.items?.[0]
-													?.productId ??
-													"",
-											)?.name ?? "Sale";
-										return (
-											<Button
-												key={template.id}
-												type="button"
-												variant="secondary"
-												size="sm"
-												className="shrink-0"
-												onClick={() =>
-													applyFastRepeat(
-														template,
-													)
-												}
-											>
-												{firstItemName}
-												{itemCount > 1
-													? ` +${itemCount - 1}`
-													: ""}{" "}
-												|{" "}
-												{template.paymentMethod ??
-													"CASH"}
-											</Button>
-										);
-									})}
-								</div>
-							</div>
-						)}
-				</div>
-
+				)}
 				<div className="grid grid-cols-2 gap-3">
 					<div className="space-y-2">
 						<Label>Payment Method</Label>
@@ -1807,11 +1939,8 @@ function QuickCheckoutForm({
 						</p>
 					</div>
 				</div>
-				<MoneyInput
-					label="Discount (optional)"
-					value={discountCents}
-					onChange={setDiscountCents}
-				/>
+					</>
+				)}
 			</div>
 			<SaveFooter
 				disabled={loading || items.length === 0}
@@ -1819,6 +1948,386 @@ function QuickCheckoutForm({
 				label="Checkout"
 			/>
 		</form>
+	);
+}
+
+function QuickAddSaleItems({
+	items,
+	setItems,
+	products,
+}: {
+	items: ChargeItem[];
+	setItems: React.Dispatch<
+		React.SetStateAction<ChargeItem[]>
+	>;
+	products: Product[];
+}) {
+	const [scanInput, setScanInput] =
+		React.useState("");
+	const lastScanKeyTsRef =
+		React.useRef<number>(0);
+	const fastKeyStreakRef =
+		React.useRef(0);
+	const autoAddTimerRef = React.useRef<
+		ReturnType<typeof setTimeout> | undefined
+	>(undefined);
+	const scanInputRef =
+		React.useRef<HTMLInputElement | null>(null);
+
+	const productMap = React.useMemo(
+		() => new Map(products.map((p) => [p.id, p])),
+		[products],
+	);
+	const productByBarcode = React.useMemo(
+		() =>
+			new Map(
+				products
+					.filter((p) => Boolean(p.barcode))
+					.map((p) => [
+						String(p.barcode)
+							.trim()
+							.toLowerCase(),
+						p.id,
+					]),
+			),
+		[products],
+	);
+
+	const addUnits = React.useCallback(
+		(productId: string, unitsToAdd: number) => {
+			if (!productId || unitsToAdd <= 0) return;
+			setItems((prev) => {
+				const existingIndex = prev.findIndex(
+					(item) => item.productId === productId,
+				);
+				if (existingIndex >= 0) {
+					return prev.map((item, index) =>
+						index === existingIndex
+							? {
+									...item,
+									units: String(
+										(parseInt(
+											item.units,
+											10,
+										) || 0) + unitsToAdd,
+									),
+							  }
+							: item,
+					);
+				}
+				return [
+					...prev,
+					{
+						productId,
+						units: String(unitsToAdd),
+					},
+				];
+			});
+		},
+		[setItems],
+	);
+
+	const resolveProductIdFromInput = React.useCallback(
+		(rawInput: string) => {
+			const query = rawInput.trim().toLowerCase();
+			if (!query) return null;
+			const barcodeMatch = productByBarcode.get(query);
+			if (barcodeMatch) return barcodeMatch;
+			const exactNameMatch = products.find(
+				(product) =>
+					product.name.trim().toLowerCase() ===
+						query ||
+					product.id.toLowerCase() === query,
+			);
+			if (exactNameMatch) return exactNameMatch.id;
+			const startsWithMatch = products.find((product) =>
+				product.name.toLowerCase().startsWith(query),
+			);
+			if (startsWithMatch) return startsWithMatch.id;
+			const includesMatch = products.find((product) =>
+				product.name.toLowerCase().includes(query),
+			);
+			return includesMatch?.id ?? null;
+		},
+		[products, productByBarcode],
+	);
+	const matchedProductId = React.useMemo(
+		() => resolveProductIdFromInput(scanInput),
+		[resolveProductIdFromInput, scanInput],
+	);
+	const matchedProductName = matchedProductId
+		? productMap.get(matchedProductId)?.name ??
+			matchedProductId
+		: "";
+
+	const addByInput = React.useCallback(
+		(rawInput: string) => {
+			const productId =
+				resolveProductIdFromInput(rawInput);
+			if (!productId) {
+				toast.error(
+					`No product match for "${rawInput.trim()}"`,
+				);
+				return;
+			}
+			const qty =
+				1;
+			addUnits(productId, qty);
+			setScanInput("");
+			fastKeyStreakRef.current = 0;
+			requestAnimationFrame(() =>
+				scanInputRef.current?.focus(),
+			);
+		},
+		[addUnits, resolveProductIdFromInput],
+	);
+
+	React.useEffect(() => {
+		return () => {
+			if (autoAddTimerRef.current) {
+				clearTimeout(autoAddTimerRef.current);
+			}
+		};
+	}, []);
+
+	const scheduleAutoAdd = React.useCallback(
+		(rawCode: string) => {
+			if (autoAddTimerRef.current) {
+				clearTimeout(autoAddTimerRef.current);
+			}
+			autoAddTimerRef.current = setTimeout(() => {
+				addByInput(rawCode);
+			}, 80);
+		},
+		[addByInput],
+	);
+
+	const adjustUnits = (productId: string, delta: number) => {
+		setItems((prev) =>
+			prev
+				.map((item) => {
+					if (item.productId !== productId) return item;
+					const next =
+						(parseInt(item.units, 10) || 0) + delta;
+					return { ...item, units: String(next) };
+				})
+				.filter(
+					(item) =>
+						(parseInt(item.units, 10) || 0) > 0,
+				),
+		);
+	};
+
+	const setUnits = (productId: string, nextUnits: number) => {
+		setItems((prev) =>
+			prev
+				.map((item) =>
+					item.productId === productId
+						? {
+								...item,
+								units: String(nextUnits),
+						  }
+						: item,
+				)
+				.filter(
+					(item) =>
+						(parseInt(item.units, 10) || 0) > 0,
+				),
+		);
+	};
+
+	const removeItem = (productId: string) => {
+		setItems((prev) =>
+			prev.filter(
+				(item) => item.productId !== productId,
+			),
+		);
+	};
+
+	return (
+		<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+			<div className="space-y-2">
+				<Label>Search / Select / Scan Product</Label>
+				<div className="flex gap-2">
+					<Input
+						ref={scanInputRef}
+						value={scanInput}
+						list="quick-sale-product-options"
+						onChange={(e) => {
+							const nextValue =
+								e.target.value;
+							const now = Date.now();
+							const addedChars =
+								nextValue.length -
+								scanInput.length;
+
+							if (addedChars === 1) {
+								const delta =
+									now -
+									lastScanKeyTsRef.current;
+								if (delta > 0 && delta < 35) {
+									fastKeyStreakRef.current += 1;
+								} else {
+									fastKeyStreakRef.current = 0;
+								}
+								if (
+									fastKeyStreakRef.current >=
+										5 &&
+									nextValue.trim().length >= 6
+								) {
+									scheduleAutoAdd(
+										nextValue,
+									);
+								}
+							} else if (
+								nextValue.length === 0
+							) {
+								fastKeyStreakRef.current = 0;
+							}
+
+							lastScanKeyTsRef.current = now;
+							setScanInput(nextValue);
+						}}
+						onKeyDown={(e) => {
+							if (e.key !== "Enter") return;
+							e.preventDefault();
+							addByInput(scanInput);
+						}}
+						placeholder="Type name or scan barcode, then Enter"
+					/>
+					<datalist id="quick-sale-product-options">
+						{products.flatMap((product) => [
+							<option
+								key={`${product.id}-name`}
+								value={product.name}
+							/>,
+							...(product.barcode
+								? [
+										<option
+											key={`${product.id}-barcode`}
+											value={String(
+												product.barcode,
+											)}
+										/>,
+								  ]
+								: []),
+						])}
+					</datalist>
+				</div>
+				{scanInput.trim().length > 0 &&
+					(matchedProductId ? (
+						<p className="text-xs text-emerald-700">
+							Selected:{" "}
+							<span className="font-medium">
+								{matchedProductName}
+							</span>
+							{" - "}Press Enter to add.
+						</p>
+					) : (
+						<p className="text-xs text-muted-foreground">
+							No product match yet.
+						</p>
+					))}
+				{items.length > 0 && (
+					<p className="text-xs text-muted-foreground">
+						Type, select, or scan to add.
+					</p>
+				)}
+			</div>
+
+			<div className="space-y-2">
+				<Label>Items</Label>
+				{items.length === 0 ? (
+					<p className="rounded-md border p-3 text-sm text-muted-foreground">
+						No items yet. Scan barcode or add by product.
+					</p>
+				) : (
+					items.map((item) => {
+						const product =
+							productMap.get(item.productId);
+						const units =
+							parseInt(item.units, 10) || 0;
+						const subtotalCents =
+							(product?.currentPriceCents ?? 0) *
+							units;
+						return (
+							<div
+								key={item.productId}
+								className="rounded-md border p-2"
+							>
+								<div className="mb-2 flex items-start justify-between gap-2">
+									<p className="font-medium">
+										{product?.name ??
+											item.productId}
+									</p>
+									<p className="text-sm font-semibold">
+										{formatZAR(subtotalCents)}
+									</p>
+								</div>
+								<div className="grid grid-cols-4 gap-2">
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										onClick={() =>
+											adjustUnits(
+												item.productId,
+												-1,
+											)
+										}
+									>
+										-
+									</Button>
+									<Input
+										value={units}
+										onChange={(e) => {
+											const next =
+												parseInt(
+													e.target.value,
+													10,
+												) || 0;
+											setUnits(
+												item.productId,
+												next,
+											);
+										}}
+										className="text-center"
+									/>
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										onClick={() =>
+											adjustUnits(
+												item.productId,
+												1,
+											)
+										}
+									>
+										+
+									</Button>
+									<Button
+										type="button"
+										variant="destructive"
+										size="sm"
+										onClick={() =>
+											removeItem(
+												item.productId,
+											)
+										}
+									>
+										<Trash2 className="h-4 w-4" />
+									</Button>
+								</div>
+								<p className="mt-2 text-xs text-muted-foreground">
+									Subtotal {formatZAR(subtotalCents)}
+								</p>
+							</div>
+						);
+					})
+				)}
+			</div>
+		</div>
 	);
 }
 
@@ -1835,33 +2344,12 @@ function DirectSaleForm({
 		React.useState(false);
 	const [items, setItems] = React.useState<
 		ChargeItem[]
-	>([
-		{
-			productId: "",
-			units: "",
-			discountCents: 0,
-		},
-	]);
+	>([]);
 	const [paymentMethod, setPaymentMethod] =
 		React.useState<PaymentMethod | "">("");
-	const [discountCents, setDiscountCents] =
-		React.useState(0);
 	const [note, setNote] = React.useState("");
 	const [showNote, setShowNote] =
 		React.useState(false);
-
-	const updateItem = (
-		index: number,
-		updates: Partial<ChargeItem>,
-	) => {
-		setItems((prev) =>
-			prev.map((item, i) =>
-				i === index
-					? { ...item, ...updates }
-					: item,
-			),
-		);
-	};
 
 	const handleSubmit = async (
 		e: React.FormEvent,
@@ -1875,10 +2363,6 @@ function DirectSaleForm({
 			.map((item) => ({
 				productId: item.productId,
 				units: parseInt(item.units, 10) || 0,
-				discountCents:
-					item.discountCents > 0
-						? item.discountCents
-						: undefined,
 			}))
 			.filter((item) => item.units > 0);
 		if (!validItems.length) {
@@ -1887,23 +2371,25 @@ function DirectSaleForm({
 			return;
 		}
 		try {
-			const res = await fetch("/api/sales", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					date,
-					paymentMethod,
-					discountCents:
-						discountCents > 0
-							? discountCents
-							: undefined,
-					items: validItems,
-					note:
-						showNote && note ? note : undefined,
-				}),
-			});
+			const payload = {
+				date,
+				paymentMethod,
+				items: validItems,
+				note:
+					showNote && note ? note : undefined,
+			};
+			const queueResult = await postSaleWithOfflineQueue(
+				"/api/sales",
+				payload,
+			);
+			if (queueResult.queued) {
+				toast.success(
+					"Offline: direct sale queued and will sync automatically.",
+				);
+				onSuccess();
+				return;
+			}
+			const res = queueResult.response;
 			if (!res.ok) {
 				const errorBody = await res
 					.json()
@@ -1934,15 +2420,10 @@ function DirectSaleForm({
 			className="flex flex-col h-[60vh]"
 		>
 			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
-				<ItemsSection
+				<QuickAddSaleItems
 					items={items}
+					setItems={setItems}
 					products={products}
-					onRemove={(index) =>
-						setItems((prev) =>
-							prev.filter((_, i) => i !== index),
-						)
-					}
-					onChange={updateItem}
 				/>
 				<div className="space-y-3">
 					<Label>Payment Method</Label>
@@ -1968,27 +2449,36 @@ function DirectSaleForm({
 						</SelectContent>
 					</Select>
 				</div>
-				<MoneyInput
-					label="Discount (optional)"
-					value={discountCents}
-					onChange={setDiscountCents}
-				/>
-				<BottomItemButtons
-					onAddItem={() =>
-						setItems((prev) => [
-							...prev,
-							{ productId: "", units: "", discountCents: 0 },
-						])
-					}
-					showNote={showNote}
-					setShowNote={setShowNote}
-					note={note}
-					setNote={setNote}
-					notePlaceholder="Any notes..."
-				/>
+				<div className="space-y-2">
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						className="w-full"
+						onClick={() =>
+							setShowNote((prev) => !prev)
+						}
+					>
+						{showNote ? "Hide Note" : "Add Note"}
+					</Button>
+					{showNote && (
+						<Textarea
+							value={note}
+							onChange={(e) =>
+								setNote(e.target.value)
+							}
+							placeholder="Any notes..."
+							rows={2}
+						/>
+					)}
+				</div>
 			</div>
 			<SaveFooter
-				disabled={loading || !paymentMethod}
+				disabled={
+					loading ||
+					!paymentMethod ||
+					items.length === 0
+				}
 				loading={loading}
 			/>
 		</form>
@@ -2012,31 +2502,10 @@ function AccountSaleForm({
 		React.useState("");
 	const [items, setItems] = React.useState<
 		ChargeItem[]
-	>([
-		{
-			productId: "",
-			units: "",
-			discountCents: 0,
-		},
-	]);
+	>([]);
 	const [note, setNote] = React.useState("");
 	const [showNote, setShowNote] =
 		React.useState(false);
-	const [discountCents, setDiscountCents] =
-		React.useState(0);
-
-	const updateItem = (
-		index: number,
-		updates: Partial<ChargeItem>,
-	) => {
-		setItems((prev) =>
-			prev.map((item, i) =>
-				i === index
-					? { ...item, ...updates }
-					: item,
-			),
-		);
-	};
 
 	const handleSubmit = async (
 		e: React.FormEvent,
@@ -2050,10 +2519,6 @@ function AccountSaleForm({
 			.map((item) => ({
 				productId: item.productId,
 				units: parseInt(item.units, 10) || 0,
-				discountCents:
-					item.discountCents > 0
-						? item.discountCents
-						: undefined,
 			}))
 			.filter((item) => item.units > 0);
 		if (!validItems.length) {
@@ -2062,26 +2527,25 @@ function AccountSaleForm({
 			return;
 		}
 		try {
-			const res = await fetch(
+			const payload = {
+				date,
+				customerId,
+				items: validItems,
+				note:
+					showNote && note ? note : undefined,
+			};
+			const queueResult = await postSaleWithOfflineQueue(
 				"/api/tabs/charge",
-				{
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-					},
-					body: JSON.stringify({
-						date,
-						customerId,
-						discountCents:
-							discountCents > 0
-								? discountCents
-								: undefined,
-						items: validItems,
-						note:
-							showNote && note ? note : undefined,
-					}),
-				},
+				payload,
 			);
+			if (queueResult.queued) {
+				toast.success(
+					"Offline: account sale queued and will sync automatically.",
+				);
+				onSuccess();
+				return;
+			}
+			const res = queueResult.response;
 			if (!res.ok) {
 				const errorBody = await res
 					.json()
@@ -2114,15 +2578,10 @@ function AccountSaleForm({
 			className="flex flex-col h-[60vh]"
 		>
 			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
-				<ItemsSection
+				<QuickAddSaleItems
 					items={items}
+					setItems={setItems}
 					products={products}
-					onRemove={(index) =>
-						setItems((prev) =>
-							prev.filter((_, i) => i !== index),
-						)
-					}
-					onChange={updateItem}
 				/>
 				<div className="space-y-3">
 					<CustomerSelect
@@ -2132,27 +2591,36 @@ function AccountSaleForm({
 						label="Customer Account"
 					/>
 				</div>
-				<MoneyInput
-					label="Discount (optional)"
-					value={discountCents}
-					onChange={setDiscountCents}
-				/>
-				<BottomItemButtons
-					onAddItem={() =>
-						setItems((prev) => [
-							...prev,
-							{ productId: "", units: "", discountCents: 0 },
-						])
-					}
-					showNote={showNote}
-					setShowNote={setShowNote}
-					note={note}
-					setNote={setNote}
-					notePlaceholder="Optional note for this account sale"
-				/>
+				<div className="space-y-2">
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						className="w-full"
+						onClick={() =>
+							setShowNote((prev) => !prev)
+						}
+					>
+						{showNote ? "Hide Note" : "Add Note"}
+					</Button>
+					{showNote && (
+						<Textarea
+							value={note}
+							onChange={(e) =>
+								setNote(e.target.value)
+							}
+							placeholder="Optional note for this account sale"
+							rows={2}
+						/>
+					)}
+				</div>
 			</div>
 			<SaveFooter
-				disabled={loading || !customerId}
+				disabled={
+					loading ||
+					!customerId ||
+					items.length === 0
+				}
 				loading={loading}
 			/>
 		</form>

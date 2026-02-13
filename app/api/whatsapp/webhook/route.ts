@@ -124,9 +124,29 @@ export async function POST(req: Request) {
 						whatsappDeliveryStatus: state.toUpperCase(),
 						whatsappStatusAt: statusAt,
 						whatsappError: err?.title,
+						"whatsappRecipients.$[recipient].deliveryStatus":
+							state.toUpperCase(),
+						"whatsappRecipients.$[recipient].deliveryError":
+							err?.title,
+						"whatsappRecipients.$[recipient].lastStatusAt":
+							statusAt,
 					},
 				},
+				{
+					arrayFilters: [
+						{
+							"recipient.messageId": messageId,
+						},
+					],
+				},
 			);
+			const updatedAlerts = await Alert.find({
+				$or: [
+					{ whatsappMessageId: messageId },
+					{ whatsappMessageIds: messageId },
+				],
+			}).lean();
+			void updatedAlerts;
 		}
 
 		return NextResponse.json({ ok: true });

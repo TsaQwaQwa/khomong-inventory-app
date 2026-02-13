@@ -8,6 +8,11 @@ import { transactionReverseSchema } from "@/lib/schemas";
 import { TabTransaction } from "@/models/TabTransaction";
 import { SaleTransaction } from "@/models/SaleTransaction";
 import { serializeDoc } from "@/lib/serialize";
+import {
+	getScopeIdFromAuth,
+	toAuditObject,
+	writeAuditLog,
+} from "@/lib/audit";
 
 export async function POST(req: Request) {
 	let a;
@@ -74,8 +79,8 @@ export async function POST(req: Request) {
 					-(item.lineTotalCents ?? 0),
 			}));
 
-			const created =
-				await SaleTransaction.create({
+				const created =
+					await SaleTransaction.create({
 					businessDayId: original.businessDayId,
 					paymentMethod: original.paymentMethod,
 					subtotalCents:
@@ -87,11 +92,23 @@ export async function POST(req: Request) {
 					note: `REVERSAL_OF:${input.transactionId} | ${input.reason}`,
 					reversalOfId: input.transactionId,
 					reversalReason: input.reason,
-					createdByUserId: a.userId!,
+						createdByUserId: a.userId!,
+					});
+				await writeAuditLog({
+					scopeId: getScopeIdFromAuth(a),
+					actorUserId: a.userId ?? undefined,
+					action: "REVERSE",
+					entityType: "SaleTransaction",
+					entityId: String(created._id),
+					oldValues: toAuditObject(original.toObject()),
+					newValues: toAuditObject(created.toObject()),
+					meta: {
+						reversalOfId: input.transactionId,
+					},
 				});
 
-			return ok(serializeDoc(created.toObject()), {
-				status: 201,
+				return ok(serializeDoc(created.toObject()), {
+					status: 201,
 			});
 		}
 
@@ -146,7 +163,7 @@ export async function POST(req: Request) {
 			}),
 		);
 
-		const created = await TabTransaction.create({
+			const created = await TabTransaction.create({
 			customerId: original.customerId,
 			businessDayId: original.businessDayId,
 			type: original.type,
@@ -162,10 +179,22 @@ export async function POST(req: Request) {
 			note: `REVERSAL_OF:${input.transactionId} | ${input.reason}`,
 			reversalOfId: input.transactionId,
 			reversalReason: input.reason,
-			createdByUserId: a.userId!,
-		});
+				createdByUserId: a.userId!,
+			});
+			await writeAuditLog({
+				scopeId: getScopeIdFromAuth(a),
+				actorUserId: a.userId ?? undefined,
+				action: "REVERSE",
+				entityType: "TabTransaction",
+				entityId: String(created._id),
+				oldValues: toAuditObject(original.toObject()),
+				newValues: toAuditObject(created.toObject()),
+				meta: {
+					reversalOfId: input.transactionId,
+				},
+			});
 
-		return ok(serializeDoc(created.toObject()), {
+			return ok(serializeDoc(created.toObject()), {
 			status: 201,
 		});
 	} catch (e: any) {

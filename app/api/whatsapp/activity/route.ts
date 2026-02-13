@@ -1,18 +1,18 @@
 export const runtime = "nodejs";
 
 import { connectDB } from "@/lib/db";
-import { requireOrgAuth } from "@/lib/authz";
+import { requireAdminEmail } from "@/lib/authz";
 import { ok, fail } from "@/lib/http";
 import { serializeDocs } from "@/lib/serialize";
 import { WhatsAppMessageEvent } from "@/models/WhatsAppMessageEvent";
 
 export async function GET(req: Request) {
 	try {
-		await requireOrgAuth();
+		await requireAdminEmail();
 	} catch {
-		return fail("Unauthorized", {
-			status: 401,
-			code: "UNAUTHORIZED",
+		return fail("Forbidden", {
+			status: 403,
+			code: "FORBIDDEN",
 		});
 	}
 
@@ -41,4 +41,3 @@ export async function GET(req: Request) {
 		);
 	}
 }
-

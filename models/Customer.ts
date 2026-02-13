@@ -21,5 +21,6 @@ const CustomerSchema = new Schema<CustomerDoc>(
 );
 
 CustomerSchema.index({ phone: 1 }, { unique: true });
+CustomerSchema.index({ name: 1 });
 
 export const Customer = getModel<CustomerDoc>('Customer', CustomerSchema);

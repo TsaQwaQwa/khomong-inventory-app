@@ -8,6 +8,11 @@ import { setPriceSchema } from "@/lib/schemas";
 import { todayYMD, addDays } from "@/lib/dates";
 import { Price } from "@/models/Price";
 import { serializeDoc } from "@/lib/serialize";
+import {
+	getScopeIdFromAuth,
+	toAuditObject,
+	writeAuditLog,
+} from "@/lib/audit";
 
 export async function POST(req: Request) {
 	let a;
@@ -29,6 +34,13 @@ export async function POST(req: Request) {
 		);
 		const effectiveFrom =
 			input.effectiveFrom ?? todayYMD();
+		const previousOpenPrices = await Price.find({
+			productId: input.productId,
+			$or: [
+				{ effectiveTo: { $exists: false } },
+				{ effectiveTo: null },
+			],
+		}).lean();
 
 		// Close any previous open-ended price window
 		await Price.updateMany(
@@ -52,6 +64,21 @@ export async function POST(req: Request) {
 			effectiveFrom,
 			changedByUserId: a.userId!,
 			reason: input.reason,
+		});
+		await writeAuditLog({
+			scopeId: getScopeIdFromAuth(a),
+			actorUserId: a.userId ?? undefined,
+			action: "SET_PRICE",
+			entityType: "Price",
+			entityId: String(created._id),
+			oldValues: toAuditObject({
+				previousOpenPrices,
+			}),
+			newValues: toAuditObject(created.toObject()),
+			meta: {
+				productId: input.productId,
+				effectiveFrom,
+			},
 		});
 
 		return ok(serializeDoc(created.toObject()), {

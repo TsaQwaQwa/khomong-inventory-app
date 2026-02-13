@@ -10,6 +10,11 @@ import { TabAccount } from "@/models/TabAccount";
 import { TabTransaction } from "@/models/TabTransaction";
 import { serializeDoc, serializeDocs } from "@/lib/serialize";
 import { todayYMD } from "@/lib/dates";
+import {
+	getScopeIdFromAuth,
+	toAuditObject,
+	writeAuditLog,
+} from "@/lib/audit";
 
 export async function GET() {
 	try {
@@ -205,11 +210,23 @@ export async function POST(req: Request) {
 			isActive: true,
 		});
 
-		await TabAccount.create({
+		const account = await TabAccount.create({
 			customerId: String(customer._id),
 			creditLimitCents: input.creditLimitCents,
 			status: "ACTIVE",
 			dueDays: input.dueDays,
+		});
+		await writeAuditLog({
+			scopeId: getScopeIdFromAuth(a),
+			actorUserId: a.userId ?? undefined,
+			action: "CREATE",
+			entityType: "Customer",
+			entityId: String(customer._id),
+			oldValues: null,
+			newValues: toAuditObject({
+				customer: customer.toObject(),
+				tabAccount: account.toObject(),
+			}),
 		});
 
 		return ok(serializeDoc(customer.toObject()), {

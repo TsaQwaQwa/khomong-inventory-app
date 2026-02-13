@@ -2,7 +2,6 @@
 /* eslint-disable max-len */
 
 import * as React from "react";
-import Link from "next/link";
 import {
 	usePathname,
 	useRouter,
@@ -43,6 +42,13 @@ import {
 	TabsList,
 	TabsTrigger,
 } from "@/components/ui/tabs";
+import {
+	Dialog,
+	DialogContent,
+	DialogHeader,
+	DialogTitle,
+	DialogDescription,
+} from "@/components/ui/dialog";
 import {
 	Table,
 	TableBody,
@@ -91,6 +97,31 @@ const fetcher = async (url: string) => {
 	}
 	return json?.data ?? json;
 };
+
+interface DashboardTransactionEntry {
+	id: string;
+	date: string | null;
+	customerName: string;
+	type:
+		| "CHARGE"
+		| "PAYMENT"
+		| "ADJUSTMENT"
+		| "DIRECT_SALE";
+	amountCents: number;
+	paymentMethod?: string;
+	createdAt?: string;
+	items?: {
+		productId: string;
+		units: number;
+	}[];
+}
+
+interface TransactionDrilldownState {
+	open: boolean;
+	title: string;
+	kind?: "direct" | "account" | "payment" | "all";
+	productId?: string;
+}
 
 export function DashboardClient() {
 	const router = useRouter();
@@ -198,19 +229,63 @@ export function DashboardClient() {
 		const sign = changePct > 0 ? "+" : "";
 		return `${sign}${changePct.toFixed(1)}%`;
 	}, [report]);
+	const [txDrilldown, setTxDrilldown] =
+		React.useState<TransactionDrilldownState>({
+			open: false,
+			title: "Transactions",
+			kind: "all",
+		});
 
-	const buildTransactionsHref =
-		React.useCallback(
-			(params: Record<string, string>) => {
-				const search =
-					new URLSearchParams({
-						date,
-						...params,
-					});
-				return `/transactions?${search.toString()}`;
-			},
-			[date],
+	const openTxDrilldown = React.useCallback(
+		({
+			title,
+			kind,
+			productId,
+		}: {
+			title: string;
+			kind?: "direct" | "account" | "payment" | "all";
+			productId?: string;
+		}) => {
+			setTxDrilldown({
+				open: true,
+				title,
+				kind: kind ?? "all",
+				productId,
+			});
+		},
+		[],
+	);
+
+	const { data: transactions = [], isLoading: txLoading } =
+		useSWR<DashboardTransactionEntry[]>(
+			txDrilldown.open
+				? `/api/transactions?date=${date}&limit=200`
+				: null,
+			fetcher,
 		);
+
+	const filteredTransactions = React.useMemo(
+		() =>
+			(transactions ?? []).filter((txn) => {
+				const kind = txDrilldown.kind ?? "all";
+				const kindMatch =
+					kind === "direct"
+						? txn.type === "DIRECT_SALE"
+						: kind === "account"
+							? txn.type === "CHARGE"
+							: kind === "payment"
+								? txn.type === "PAYMENT"
+								: true;
+				if (!kindMatch) return false;
+				if (!txDrilldown.productId) return true;
+				return (txn.items ?? []).some(
+					(item) =>
+						item.productId ===
+						txDrilldown.productId,
+				);
+			}),
+		[transactions, txDrilldown.kind, txDrilldown.productId],
+	);
 
 	return (
 		<PageWrapper
@@ -345,30 +420,42 @@ export function DashboardClient() {
 								value={
 									report.expectedRevenueCents
 								}
-								href={buildTransactionsHref(
-									{},
-								)}
+								onClick={() =>
+									openTxDrilldown({
+										title: "Expected Sales",
+										kind: "all",
+									})
+								}
 							/>
 							<SummaryCard
 								title="Collected Sales"
 								value={report.collectedSalesCents}
-								href={buildTransactionsHref(
-									{ kind: "direct" },
-								)}
+								onClick={() =>
+									openTxDrilldown({
+										title: "Collected Sales",
+										kind: "direct",
+									})
+								}
 							/>
 							<SummaryCard
 								title="Account Sales"
 								value={report.tabChargesCents}
-								href={buildTransactionsHref(
-									{ kind: "account" },
-								)}
+								onClick={() =>
+									openTxDrilldown({
+										title: "Account Sales",
+										kind: "account",
+									})
+								}
 							/>
 							<SummaryCard
 								title="Sales Accounted For"
 								value={report.accountedSalesCents}
-								href={buildTransactionsHref(
-									{},
-								)}
+								onClick={() =>
+									openTxDrilldown({
+										title: "Sales Accounted For",
+										kind: "all",
+									})
+								}
 							/>
 							<SummaryCard
 								title="Sales Difference"
@@ -380,9 +467,12 @@ export function DashboardClient() {
 										? "negative"
 										: "default"
 								}
-								href={buildTransactionsHref(
-									{},
-								)}
+								onClick={() =>
+									openTxDrilldown({
+										title: "Sales Difference",
+										kind: "all",
+									})
+								}
 							/>
 							<SummaryCard
 								title="Est. Gross Profit"
@@ -464,19 +554,24 @@ export function DashboardClient() {
 												>
 													<div className="flex items-start justify-between gap-2">
 														<div>
-															<p className="font-medium">
-																<Link
-																	href={buildTransactionsHref(
+														<p className="font-medium">
+															<button
+																type="button"
+																className="underline-offset-2 hover:underline"
+																onClick={() =>
+																	openTxDrilldown(
 																		{
+																			title: `${item.productName} Transactions`,
 																			productId:
 																				item.productId,
+																			kind: "all",
 																		},
-																	)}
-																	className="underline-offset-2 hover:underline"
-																>
-																	{item.productName}
-																</Link>
-															</p>
+																	)
+																}
+															>
+																{item.productName}
+															</button>
+														</p>
 															<p className="text-xs text-muted-foreground">
 																{item.unitsSold}{" "}
 																units sold
@@ -593,17 +688,22 @@ export function DashboardClient() {
 															key={item.productId}
 														>
 															<TableCell className="font-medium">
-																<Link
-																	href={buildTransactionsHref(
-																		{
-																			productId:
-																				item.productId,
-																		},
-																	)}
+																<button
+																	type="button"
 																	className="underline-offset-2 hover:underline"
+																	onClick={() =>
+																		openTxDrilldown(
+																			{
+																				title: `${item.productName} Transactions`,
+																				productId:
+																					item.productId,
+																				kind: "all",
+																			},
+																		)
+																	}
 																>
 																	{item.productName}
-																</Link>
+																</button>
 															</TableCell>
 															<TableCell className="text-right">
 																{item.unitsSold}
@@ -899,6 +999,125 @@ export function DashboardClient() {
 					</TabsContent>
 				</Tabs>
 			)}
+			<Dialog
+				open={txDrilldown.open}
+				onOpenChange={(open) =>
+					setTxDrilldown((prev) => ({
+						...prev,
+						open,
+					}))
+				}
+			>
+				<DialogContent className="h-[70vh] w-[90vw] max-w-[90vw] overflow-hidden p-0 md:max-w-3xl">
+					<DialogHeader className="h-16 shrink-0 space-y-0.5 border-b px-4 py-1.5">
+						<DialogTitle>
+							{txDrilldown.title}
+						</DialogTitle>
+						<DialogDescription className="text-xs leading-tight">
+							{date} transaction details shown in dashboard.
+						</DialogDescription>
+					</DialogHeader>
+					<div className="flex h-[60vh] min-h-0 flex-col overflow-hidden p-4">
+						<div className="min-h-0 flex-1 overflow-y-auto">
+						{txLoading ? (
+							<LoadingTable />
+						) : filteredTransactions.length === 0 ? (
+							<EmptyState
+								title="No transactions found"
+								description="No matching transactions for this selection."
+							/>
+						) : (
+							<>
+								<div className="space-y-3 md:hidden">
+									{filteredTransactions.map(
+										(txn) => (
+											<div
+												key={txn.id}
+												className="rounded-lg border p-3"
+											>
+												<div className="flex items-start justify-between gap-2">
+													<div>
+														<p className="text-sm font-medium">
+															{txn.customerName}
+														</p>
+														<p className="text-xs text-muted-foreground">
+															{txn.type}
+															{txn.paymentMethod
+																? ` | ${txn.paymentMethod}`
+																: ""}
+														</p>
+													</div>
+													<p className="font-semibold">
+														{formatZAR(
+															txn.amountCents,
+														)}
+													</p>
+												</div>
+											</div>
+										),
+									)}
+								</div>
+								<div className="hidden md:block">
+									<Table>
+										<TableHeader>
+											<TableRow>
+												<TableHead>
+													Customer
+												</TableHead>
+												<TableHead>
+													Type
+												</TableHead>
+												<TableHead>
+													Method
+												</TableHead>
+												<TableHead className="text-right">
+													Amount
+												</TableHead>
+												<TableHead className="text-right">
+													Time
+												</TableHead>
+											</TableRow>
+										</TableHeader>
+										<TableBody>
+											{filteredTransactions.map(
+												(txn) => (
+													<TableRow
+														key={txn.id}
+													>
+														<TableCell className="font-medium">
+															{txn.customerName}
+														</TableCell>
+														<TableCell>
+															{txn.type}
+														</TableCell>
+														<TableCell>
+															{txn.paymentMethod ??
+																"-"}
+														</TableCell>
+														<TableCell className="text-right">
+															{formatZAR(
+																txn.amountCents,
+															)}
+														</TableCell>
+														<TableCell className="text-right text-xs text-muted-foreground">
+															{txn.createdAt
+																? new Date(
+																		txn.createdAt,
+																  ).toLocaleTimeString()
+																: "-"}
+														</TableCell>
+													</TableRow>
+												),
+											)}
+										</TableBody>
+									</Table>
+								</div>
+							</>
+						)}
+						</div>
+					</div>
+				</DialogContent>
+			</Dialog>
 		</PageWrapper>
 	);
 }
@@ -907,14 +1126,14 @@ interface SummaryCardProps {
 	title: string;
 	value: number;
 	variant?: "default" | "negative";
-	href?: string;
+	onClick?: () => void;
 }
 
 function SummaryCard({
 	title,
 	value,
 	variant = "default",
-	href,
+	onClick,
 }: SummaryCardProps) {
 	const card = (
 		<Card className="shadow-md">
@@ -936,14 +1155,15 @@ function SummaryCard({
 			</CardContent>
 		</Card>
 	);
-	if (!href) return card;
+	if (!onClick) return card;
 	return (
-		<Link
-			href={href}
-			className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+		<button
+			type="button"
+			onClick={onClick}
+			className="block w-full rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 		>
 			{card}
-		</Link>
+		</button>
 	);
 }
 

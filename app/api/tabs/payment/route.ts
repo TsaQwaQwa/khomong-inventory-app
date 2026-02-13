@@ -9,6 +9,11 @@ import { getOrCreateDay } from "@/lib/businessDay";
 import { TabTransaction } from "@/models/TabTransaction";
 import { todayYMD } from "@/lib/dates";
 import { serializeDoc } from "@/lib/serialize";
+import {
+	getScopeIdFromAuth,
+	toAuditObject,
+	writeAuditLog,
+} from "@/lib/audit";
 
 export async function POST(req: Request) {
 	let a;
@@ -42,6 +47,15 @@ export async function POST(req: Request) {
 			reference: input.reference,
 			note: input.note,
 			createdByUserId: a.userId!,
+		});
+		await writeAuditLog({
+			scopeId: getScopeIdFromAuth(a),
+			actorUserId: a.userId ?? undefined,
+			action: "CREATE",
+			entityType: "TabTransaction",
+			entityId: String(created._id),
+			oldValues: null,
+			newValues: toAuditObject(created.toObject()),
 		});
 
 		return ok(serializeDoc(created.toObject()), {

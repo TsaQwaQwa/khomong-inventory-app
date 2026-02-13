@@ -8,11 +8,13 @@ import {
 	useSearchParams,
 } from "next/navigation";
 import useSWR from "swr";
+import { toast } from "sonner";
 import { AlertCircle } from "lucide-react";
 import { PageWrapper } from "@/components/page-wrapper";
 import { DatePickerYMD } from "@/components/date-picker-ymd";
 import { LoadingTable } from "@/components/loading-state";
 import { EmptyState } from "@/components/empty-state";
+import { Button } from "@/components/ui/button";
 import {
 	Alert,
 	AlertDescription,
@@ -152,6 +154,12 @@ export function SuppliersClient() {
 		"/api/suppliers",
 		fetcher,
 	);
+	const { data: access } = useSWR<{
+		isAdmin: boolean;
+	}>("/api/session/access", fetcher);
+	const isAdmin = access?.isAdmin ?? false;
+	const [backfillLoading, setBackfillLoading] =
+		React.useState(false);
 	const { data: products = [] } = useSWR<Product[]>(
 		"/api/products",
 		fetcher,
@@ -164,9 +172,10 @@ export function SuppliersClient() {
 		`/api/purchases?date=${date}&lookbackDays=90`,
 		fetcher,
 	);
-	const { data: supplierPrices = [] } = useSWR<
-		SupplierPrice[]
-	>(
+	const {
+		data: supplierPrices = [],
+		mutate: mutateSupplierPrices,
+	} = useSWR<SupplierPrice[]>(
 		`/api/supplier-prices?asOf=${date}`,
 		fetcher,
 	);
@@ -444,6 +453,39 @@ export function SuppliersClient() {
 		0,
 	);
 	const totalRestockItems = planRows.length;
+	const runSupplierCostBackfill = async () => {
+		setBackfillLoading(true);
+		try {
+			const res = await fetch(
+				"/api/supplier-prices/backfill",
+				{
+					method: "POST",
+				},
+			);
+			const json = await res
+				.json()
+				.catch(() => ({}));
+			if (!res.ok) {
+				throw new Error(
+					json?.error?.message ??
+						json?.error ??
+						"Backfill failed",
+				);
+			}
+			toast.success(
+				`Backfill complete. Purchases scanned: ${json?.data?.processedPurchases ?? 0}`,
+			);
+			await mutateSupplierPrices();
+		} catch (e) {
+			toast.error(
+				e instanceof Error
+					? e.message
+					: "Backfill failed",
+			);
+		} finally {
+			setBackfillLoading(false);
+		}
+	};
 
 	return (
 		<PageWrapper
@@ -617,9 +659,26 @@ export function SuppliersClient() {
 				<TabsContent value="contracts">
 					<Card>
 						<CardHeader>
-							<CardTitle>
-								Supplier Costs
-							</CardTitle>
+							<div className="flex items-center justify-between gap-2">
+								<CardTitle>
+									Supplier Costs
+								</CardTitle>
+								{isAdmin && (
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										onClick={
+											runSupplierCostBackfill
+										}
+										disabled={backfillLoading}
+									>
+										{backfillLoading
+											? "Backfilling..."
+											: "Backfill from Purchases"}
+									</Button>
+								)}
+							</div>
 						</CardHeader>
 						<CardContent>
 							{contractRows.length === 0 ? (

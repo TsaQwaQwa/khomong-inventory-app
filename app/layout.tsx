@@ -8,6 +8,7 @@ import { Analytics } from "@vercel/analytics/next";
 import { Toaster } from "sonner";
 import { Header } from "@/components/header";
 import { GlobalQuickActions } from "@/components/global-quick-actions";
+import { OfflineSalesSync } from "@/components/offline-sales-sync";
 import { ClerkProvider } from "@clerk/nextjs";
 import { SwrProvider } from "@/components/swr-provider";
 
@@ -56,6 +57,7 @@ export default function RootLayout({
 				<ClerkProvider>
 					<Header />
 					<SwrProvider>
+						<OfflineSalesSync />
 						<main className="flex-1 w-full">
 							{children}
 						</main>

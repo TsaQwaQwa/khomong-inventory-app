@@ -78,6 +78,7 @@ import {
 	getTodayJHB,
 	formatDateDisplay,
 } from "@/lib/date-utils";
+import { postSaleWithOfflineQueue } from "@/lib/offline-sales-queue";
 import { formatZAR } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import type {
@@ -245,7 +246,6 @@ export function TabsClient({
 	] = React.useState<{
 		items: ChargeItem[];
 		paymentMethod: PaymentMethod | "";
-		discountCents: number;
 		note: string;
 	} | null>(null);
 	const [
@@ -254,7 +254,6 @@ export function TabsClient({
 	] = React.useState<{
 		customerId: string;
 		items: ChargeItem[];
-		discountCents: number;
 		note: string;
 	} | null>(null);
 	const kindFilter =
@@ -262,10 +261,17 @@ export function TabsClient({
 	const productFilter =
 		searchParams.get("productId");
 	const action = searchParams.get("action");
+	const [transactionQuery, setTransactionQuery] =
+		React.useState("");
 
 	React.useEffect(() => {
 		const qsDate = searchParams.get("date");
 		if (qsDate) setDate(qsDate);
+	}, [searchParams]);
+
+	React.useEffect(() => {
+		const qsQuery = searchParams.get("q");
+		setTransactionQuery(qsQuery ?? "");
 	}, [searchParams]);
 
 	React.useEffect(() => {
@@ -289,54 +295,144 @@ export function TabsClient({
 		}
 	}, [action, isTransactionsOnly]);
 
-	const filteredTransactions = React.useMemo(
+	const productNameById = React.useMemo(
 		() =>
-			(transactionsHistory ?? []).filter(
-				(txn) => {
-					const kindMatch =
-						kindFilter === "direct"
-							? txn.type === "DIRECT_SALE"
-							: kindFilter === "account"
-								? txn.type === "CHARGE"
-								: kindFilter === "payment"
-									? txn.type === "PAYMENT"
-									: kindFilter === "reversals"
-										? Boolean(
-												txn.isReversal,
-										  )
-									: true;
-					if (!kindMatch) return false;
-					if (!productFilter) return true;
-					return (txn.items ?? []).some(
-						(item) =>
-							item.productId === productFilter,
-					);
-				},
+			new Map(
+				normalizedProducts.map((product) => [
+					product.id,
+					product.name,
+				]),
 			),
-		[
-			transactionsHistory,
-			kindFilter,
-			productFilter,
-		],
+		[normalizedProducts],
 	);
-
-	const updateKindFilter = React.useCallback(
-		(nextKind: string) => {
-			const params = new URLSearchParams(
-				searchParams.toString(),
-			);
-			if (nextKind === "all") {
-				params.delete("kind");
-			} else {
-				params.set("kind", nextKind);
+	const productByBarcode = React.useMemo(
+		() =>
+			new Map(
+				normalizedProducts
+					.filter((product) => Boolean(product.barcode))
+					.map((product) => [
+						String(product.barcode)
+							.trim()
+							.toLowerCase(),
+						product.id,
+					]),
+			),
+		[normalizedProducts],
+	);
+	const parsedKindFromQuery = React.useMemo(() => {
+		const match = transactionQuery.match(
+			/\bkind:(all|direct|account|payment|reversals)\b/i,
+		);
+		if (!match) return null;
+		return match[1].toLowerCase() as
+			| "all"
+			| "direct"
+			| "account"
+			| "payment"
+			| "reversals";
+	}, [transactionQuery]);
+	const freeTextQuery = React.useMemo(
+		() =>
+			transactionQuery
+				.replace(
+					/\bkind:(all|direct|account|payment|reversals)\b/gi,
+					"",
+				)
+				.trim()
+				.toLowerCase(),
+		[transactionQuery],
+	);
+	const filteredTransactions = React.useMemo(() => {
+		const effectiveKind =
+			parsedKindFromQuery ?? kindFilter;
+		const barcodeProductId = freeTextQuery
+			? productByBarcode.get(freeTextQuery)
+			: undefined;
+		return (transactionsHistory ?? []).filter((txn) => {
+			const kindMatch =
+				effectiveKind === "direct"
+					? txn.type === "DIRECT_SALE"
+					: effectiveKind === "account"
+						? txn.type === "CHARGE"
+						: effectiveKind === "payment"
+							? txn.type === "PAYMENT"
+							: effectiveKind === "reversals"
+								? Boolean(txn.isReversal)
+								: true;
+			if (!kindMatch) return false;
+			if (
+				productFilter &&
+				!(txn.items ?? []).some(
+					(item) => item.productId === productFilter,
+				)
+			) {
+				return false;
 			}
-			const qs = params.toString();
-			router.replace(
-				qs ? `${pathname}?${qs}` : pathname,
-			);
-		},
-		[pathname, router, searchParams],
-	);
+			if (!freeTextQuery) return true;
+			if (
+				barcodeProductId &&
+				(txn.items ?? []).some(
+					(item) => item.productId === barcodeProductId,
+				)
+			) {
+				return true;
+			}
+			const productNames = (txn.items ?? [])
+				.map((item) =>
+					productNameById.get(item.productId),
+				)
+				.filter(Boolean)
+				.join(" ")
+				.toLowerCase();
+			const searchable = [
+				txn.customerName,
+				txn.reference,
+				txn.note,
+				txn.paymentMethod,
+				txn.type,
+				formatZAR(txn.amountCents),
+				productNames,
+			]
+				.filter(Boolean)
+				.join(" ")
+				.toLowerCase();
+			return searchable.includes(freeTextQuery);
+		});
+	}, [
+		transactionsHistory,
+		parsedKindFromQuery,
+		kindFilter,
+		freeTextQuery,
+		productFilter,
+		productByBarcode,
+		productNameById,
+	]);
+	const transactionSearchOptions = React.useMemo(() => {
+		const options = new Set<string>([
+			"kind:all",
+			"kind:direct",
+			"kind:account",
+			"kind:payment",
+			"kind:reversals",
+		]);
+		for (const customer of normalizedCustomers) {
+			options.add(customer.name);
+		}
+		for (const product of normalizedProducts) {
+			options.add(product.name);
+			if (product.barcode) {
+				options.add(String(product.barcode));
+			}
+		}
+		for (const txn of transactionsHistory ?? []) {
+			if (txn.reference) options.add(txn.reference);
+		}
+		return Array.from(options).slice(0, 200);
+	}, [
+		normalizedCustomers,
+		normalizedProducts,
+		transactionsHistory,
+	]);
 
 	const handleReverseTransaction = async () => {
 		if (!reversingTxn) return;
@@ -397,7 +493,6 @@ export function TabsClient({
 			.map((item) => ({
 				productId: item.productId,
 				units: String(item.units),
-				discountCents: item.discountCents ?? 0,
 			}));
 		if (!items.length) {
 			toast.error("No sale items to repeat");
@@ -408,7 +503,6 @@ export function TabsClient({
 				items,
 				paymentMethod:
 					txn.paymentMethod ?? "CASH",
-				discountCents: txn.discountCents ?? 0,
 				note: txn.note ?? "",
 			});
 			setDirectSaleDialogOpen(true);
@@ -420,7 +514,6 @@ export function TabsClient({
 			setRepeatAccountSeed({
 				customerId: txn.customerId,
 				items,
-				discountCents: txn.discountCents ?? 0,
 				note: txn.note ?? "",
 			});
 			setSaleDialogOpen(true);
@@ -818,7 +911,7 @@ export function TabsClient({
 														? `repeat-direct-${repeatDirectSeed.items
 																.map(
 																	(item) =>
-																		`${item.productId}:${item.units}:${item.discountCents}`,
+																		`${item.productId}:${item.units}`,
 																)
 																.join("|")}`
 														: "direct-default"
@@ -884,7 +977,7 @@ export function TabsClient({
 														? `repeat-account-${repeatAccountSeed.customerId}-${repeatAccountSeed.items
 																.map(
 																	(item) =>
-																		`${item.productId}:${item.units}:${item.discountCents}`,
+																		`${item.productId}:${item.units}`,
 																)
 																.join("|")}`
 														: "account-default"
@@ -967,34 +1060,30 @@ export function TabsClient({
 									<CardTitle>
 										Transaction History
 									</CardTitle>
-									<div className="w-full sm:w-56">
-										<Select
-											value={kindFilter}
-											onValueChange={
-												updateKindFilter
+									<div className="w-full sm:w-[24rem]">
+										<Input
+											value={transactionQuery}
+											onChange={(e) =>
+												setTransactionQuery(
+													e.target.value,
+												)
 											}
-										>
-											<SelectTrigger>
-												<SelectValue placeholder="Filter transactions" />
-											</SelectTrigger>
-											<SelectContent>
-												<SelectItem value="all">
-													All
-												</SelectItem>
-												<SelectItem value="direct">
-													Direct Sales
-												</SelectItem>
-												<SelectItem value="account">
-													Account Sales
-												</SelectItem>
-												<SelectItem value="payment">
-													Payments
-												</SelectItem>
-												<SelectItem value="reversals">
-													Reversals
-												</SelectItem>
-											</SelectContent>
-										</Select>
+											list="transaction-search-options"
+											placeholder="Search/select/scan (use kind:direct etc.)"
+										/>
+										<datalist id="transaction-search-options">
+											{transactionSearchOptions.map(
+												(option) => (
+													<option
+														key={option}
+														value={option}
+													/>
+												),
+											)}
+										</datalist>
+										<p className="mt-1 text-[11px] text-muted-foreground">
+											Type, pick from suggestions, or scan barcode.
+										</p>
 									</div>
 								</div>
 							</CardHeader>
@@ -1693,7 +1782,6 @@ function EditCustomerDialog({
 interface ChargeItem {
 	productId: string;
 	units: string;
-	discountCents: number;
 }
 
 function TabChargeForm({
@@ -1709,7 +1797,6 @@ function TabChargeForm({
 	initialData?: {
 		customerId: string;
 		items: ChargeItem[];
-		discountCents: number;
 		note: string;
 	};
 	onSuccess?: () => void;
@@ -1730,14 +1817,9 @@ function TabChargeForm({
 					{
 						productId: "",
 						units: "",
-						discountCents: 0,
 					},
 				],
 	);
-	const [discountCents, setDiscountCents] =
-		React.useState(
-			initialData?.discountCents ?? 0,
-		);
 	const [note, setNote] = React.useState(
 		initialData?.note ?? "",
 	);
@@ -1761,15 +1843,13 @@ function TabChargeForm({
 		setItems(
 			initialData.items.length > 0
 				? initialData.items
-				: [
-						{
-							productId: "",
-							units: "",
-							discountCents: 0,
-						},
-					],
+			: [
+					{
+						productId: "",
+						units: "",
+					},
+				],
 		);
-		setDiscountCents(initialData.discountCents);
 		setNote(initialData.note);
 		setShowNote(Boolean(initialData.note));
 	}, [initialData]);
@@ -1780,7 +1860,6 @@ function TabChargeForm({
 			{
 				productId: "",
 				units: "",
-				discountCents: 0,
 			},
 		]);
 	};
@@ -1815,10 +1894,6 @@ function TabChargeForm({
 			.map((item) => ({
 				productId: item.productId,
 				units: parseInt(item.units) || 0,
-				discountCents:
-					item.discountCents > 0
-						? item.discountCents
-						: undefined,
 			}));
 
 		if (validItems.length === 0) {
@@ -1828,26 +1903,33 @@ function TabChargeForm({
 		}
 
 		try {
-			const res = await fetch(
+			const payload = {
+				date,
+				customerId,
+				items: validItems,
+				note:
+					showNote && note ? note : undefined,
+			};
+			const queueResult = await postSaleWithOfflineQueue(
 				"/api/tabs/charge",
-				{
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-					},
-					body: JSON.stringify({
-						date,
-						customerId,
-						discountCents:
-							discountCents > 0
-								? discountCents
-								: undefined,
-						items: validItems,
-						note:
-							showNote && note ? note : undefined,
-					}),
-				},
+				payload,
 			);
+			if (queueResult.queued) {
+				toast.success(
+					"Offline: account sale queued and will sync automatically.",
+				);
+				onSuccess?.();
+				setCustomerId("");
+				setItems([
+					{
+						productId: "",
+						units: "",
+					},
+				]);
+				setNote("");
+				return;
+			}
+			const res = queueResult.response;
 
 			if (!res.ok) {
 				const errorBody = await res
@@ -1874,10 +1956,8 @@ function TabChargeForm({
 				{
 					productId: "",
 					units: "",
-					discountCents: 0,
 				},
 			]);
-			setDiscountCents(0);
 			setNote("");
 			setShowNote(false);
 		} catch (err) {
@@ -1907,11 +1987,6 @@ function TabChargeForm({
 								(productPriceById.get(
 									item.productId,
 								) ?? 0) * units;
-							const netCents = Math.max(
-								0,
-								subtotalCents -
-									item.discountCents,
-							);
 							return (
 								<div
 									key={index}
@@ -1943,25 +2018,10 @@ function TabChargeForm({
 												placeholder="Qty"
 											/>
 										</div>
-										<div className="w-32 space-y-1">
-											<Label className="text-xs">
-												Item Discount
-											</Label>
-											<MoneyInput
-												className="space-y-0"
-												value={item.discountCents}
-												onChange={(v) =>
-													updateItem(index, {
-														discountCents: v,
-													})
-												}
-												placeholder="0.00"
-											/>
-										</div>
 										{items.length > 1 && (
 											<Button
 												type="button"
-												variant="ghost"
+												variant="destructive"
 												size="icon"
 												onClick={() =>
 													removeItem(index)
@@ -1972,8 +2032,7 @@ function TabChargeForm({
 										)}
 									</div>
 									<p className="text-[11px] text-muted-foreground">
-										Subtotal {formatZAR(subtotalCents)} | Net{" "}
-										{formatZAR(netCents)}
+										Subtotal {formatZAR(subtotalCents)}
 									</p>
 								</div>
 							);
@@ -1989,12 +2048,6 @@ function TabChargeForm({
 						label="Customer Account"
 					/>
 				</div>
-				<MoneyInput
-					label="Discount (optional)"
-					value={discountCents}
-					onChange={setDiscountCents}
-				/>
-
 				<div className="space-y-2">
 					<div className="grid grid-cols-2 gap-2">
 						<Button
@@ -2274,7 +2327,6 @@ function DirectSaleForm({
 	initialData?: {
 		items: ChargeItem[];
 		paymentMethod: PaymentMethod | "";
-		discountCents: number;
 		note: string;
 	};
 	onSuccess: () => void;
@@ -2291,17 +2343,12 @@ function DirectSaleForm({
 					{
 						productId: "",
 						units: "",
-						discountCents: 0,
 					},
 				],
 	);
 	const [paymentMethod, setPaymentMethod] =
 		React.useState<PaymentMethod | "">(
 			initialData?.paymentMethod ?? "",
-		);
-	const [discountCents, setDiscountCents] =
-		React.useState(
-			initialData?.discountCents ?? 0,
 		);
 	const [note, setNote] = React.useState(
 		initialData?.note ?? "",
@@ -2325,16 +2372,14 @@ function DirectSaleForm({
 		setItems(
 			initialData.items.length > 0
 				? initialData.items
-				: [
-						{
-							productId: "",
-							units: "",
-							discountCents: 0,
-						},
-					],
+			: [
+					{
+						productId: "",
+						units: "",
+					},
+				],
 		);
 		setPaymentMethod(initialData.paymentMethod);
-		setDiscountCents(initialData.discountCents);
 		setNote(initialData.note);
 		setShowNote(Boolean(initialData.note));
 	}, [initialData]);
@@ -2345,7 +2390,6 @@ function DirectSaleForm({
 			{
 				productId: "",
 				units: "",
-				discountCents: 0,
 			},
 		]);
 	};
@@ -2380,10 +2424,6 @@ function DirectSaleForm({
 			.map((item) => ({
 				productId: item.productId,
 				units: parseInt(item.units) || 0,
-				discountCents:
-					item.discountCents > 0
-						? item.discountCents
-						: undefined,
 			}))
 			.filter((item) => item.units > 0);
 
@@ -2394,23 +2434,33 @@ function DirectSaleForm({
 		}
 
 		try {
-			const res = await fetch("/api/sales", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					date,
-					paymentMethod,
-					discountCents:
-						discountCents > 0
-							? discountCents
-							: undefined,
-					items: validItems,
-					note:
-						showNote && note ? note : undefined,
-				}),
-			});
+			const payload = {
+				date,
+				paymentMethod,
+				items: validItems,
+				note:
+					showNote && note ? note : undefined,
+			};
+			const queueResult = await postSaleWithOfflineQueue(
+				"/api/sales",
+				payload,
+			);
+			if (queueResult.queued) {
+				toast.success(
+					"Offline: direct sale queued and will sync automatically.",
+				);
+				setItems([
+					{
+						productId: "",
+						units: "",
+					},
+				]);
+				setPaymentMethod("");
+				setNote("");
+				onSuccess();
+				return;
+			}
+			const res = queueResult.response;
 
 			if (!res.ok) {
 				const errorBody = await res
@@ -2429,11 +2479,9 @@ function DirectSaleForm({
 				{
 					productId: "",
 					units: "",
-					discountCents: 0,
 				},
 			]);
 			setPaymentMethod("");
-			setDiscountCents(0);
 			setNote("");
 			onSuccess();
 		} catch (err) {
@@ -2463,11 +2511,6 @@ function DirectSaleForm({
 								(productPriceById.get(
 									item.productId,
 								) ?? 0) * units;
-							const netCents = Math.max(
-								0,
-								subtotalCents -
-									item.discountCents,
-							);
 							return (
 								<div
 									key={index}
@@ -2499,25 +2542,10 @@ function DirectSaleForm({
 												placeholder="Qty"
 											/>
 										</div>
-										<div className="w-32 space-y-1">
-											<Label className="text-xs">
-												Item Discount
-											</Label>
-											<MoneyInput
-												className="space-y-0"
-												value={item.discountCents}
-												onChange={(v) =>
-													updateItem(index, {
-														discountCents: v,
-													})
-												}
-												placeholder="0.00"
-											/>
-										</div>
 										{items.length > 1 && (
 											<Button
 												type="button"
-												variant="ghost"
+												variant="destructive"
 												size="icon"
 												onClick={() =>
 													removeItem(index)
@@ -2528,8 +2556,7 @@ function DirectSaleForm({
 										)}
 									</div>
 									<p className="text-[11px] text-muted-foreground">
-										Subtotal {formatZAR(subtotalCents)} | Net{" "}
-										{formatZAR(netCents)}
+										Subtotal {formatZAR(subtotalCents)}
 									</p>
 								</div>
 							);
@@ -2561,12 +2588,6 @@ function DirectSaleForm({
 						</SelectContent>
 					</Select>
 				</div>
-				<MoneyInput
-					label="Discount (optional)"
-					value={discountCents}
-					onChange={setDiscountCents}
-				/>
-
 				<div className="space-y-2">
 					<div className="grid grid-cols-2 gap-2">
 						<Button

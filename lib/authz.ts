@@ -4,6 +4,7 @@ import {
 } from "@clerk/nextjs/server";
 import {
 	isEmailWhitelisted,
+	isAdminEmail,
 	normalizeEmail,
 } from "@/lib/whitelist";
 
@@ -15,6 +16,13 @@ export type AuthWithOrg = Awaited<
 >;
 
 async function ensureAllowedUser() {
+	const email = await getCurrentUserEmail();
+	if (!isEmailWhitelisted(email)) {
+		throw new Error("FORBIDDEN_USER");
+	}
+}
+
+export async function getCurrentUserEmail() {
 	const user = await currentUser();
 	const primaryEmailId =
 		user?.primaryEmailAddressId ?? null;
@@ -28,10 +36,21 @@ async function ensureAllowedUser() {
 	const email = normalizeEmail(
 		primaryEmail?.emailAddress ?? fallbackEmail,
 	);
+	return email;
+}
 
-	if (!isEmailWhitelisted(email)) {
-		throw new Error("FORBIDDEN_USER");
+export async function isCurrentUserAdminEmail(): Promise<boolean> {
+	const email = await getCurrentUserEmail();
+	return isAdminEmail(email);
+}
+
+export async function requireAdminEmail(): Promise<AuthWithOrg> {
+	const a = await requireOrgAuth();
+	const isAdmin = await isCurrentUserAdminEmail();
+	if (!isAdmin) {
+		throw new Error("FORBIDDEN_ADMIN");
 	}
+	return a;
 }
 
 export async function requireOrgAuth(): Promise<AuthWithOrg> {

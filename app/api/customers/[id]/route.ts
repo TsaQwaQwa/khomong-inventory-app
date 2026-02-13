@@ -8,13 +8,19 @@ import { customerUpdateSchema } from "@/lib/schemas";
 import { Customer } from "@/models/Customer";
 import { TabAccount } from "@/models/TabAccount";
 import { serializeDoc } from "@/lib/serialize";
+import {
+	getScopeIdFromAuth,
+	toAuditObject,
+	writeAuditLog,
+} from "@/lib/audit";
 
 export async function PATCH(
 	req: Request,
 	ctx: { params: Promise<{ id: string }> },
 ) {
+	let a;
 	try {
-		await requireOrgAuth();
+		a = await requireOrgAuth();
 	} catch {
 		return fail("Unauthorized", {
 			status: 401,
@@ -58,6 +64,9 @@ export async function PATCH(
 			_id: id,
 			isActive: true,
 		}).lean();
+		const accountBefore = await TabAccount.findOne({
+			customerId: id,
+		}).lean();
 		if (!customer)
 			return fail("Customer not found", {
 				status: 404,
@@ -98,6 +107,21 @@ export async function PATCH(
 				status: 404,
 				code: "NOT_FOUND",
 			});
+		await writeAuditLog({
+			scopeId: getScopeIdFromAuth(a),
+			actorUserId: a.userId ?? undefined,
+			action: "UPDATE",
+			entityType: "Customer",
+			entityId: id,
+			oldValues: toAuditObject({
+				customer,
+				tabAccount: accountBefore,
+			}),
+			newValues: toAuditObject({
+				customer: updatedCustomer,
+				tabAccount: updatedAccount,
+			}),
+		});
 
 		return ok({
 			...serializeDoc(updatedCustomer),

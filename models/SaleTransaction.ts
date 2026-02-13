@@ -86,6 +86,10 @@ SaleTransactionSchema.index({
 	businessDayId: 1,
 	createdAt: -1,
 });
+SaleTransactionSchema.index(
+	{ note: 1 },
+	{ sparse: true },
+);
 
 export const SaleTransaction =
 	getModel<SaleTransactionDoc>(

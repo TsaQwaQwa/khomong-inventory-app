@@ -6,6 +6,12 @@ import { usePathname } from "next/navigation";
 import useSWR from "swr";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { GlobalCommandSearch } from "@/components/global-command-search";
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
 import {
 	Sheet,
 	SheetContent,
@@ -22,6 +28,8 @@ import {
 	Receipt,
 	CreditCard,
 	Truck,
+	ClipboardList,
+	History,
 	Menu,
 } from "lucide-react";
 import { getTodayJHB } from "@/lib/date-utils";
@@ -36,6 +44,8 @@ const navItems = [
 		href: "/reports",
 		label: "Reports",
 		icon: LineChart,
+		adminOnly: true,
+		desktopGroup: "more",
 	},
 	{
 		href: "/products",
@@ -53,14 +63,28 @@ const navItems = [
 		icon: Truck,
 	},
 	{
+		href: "/purchase-assistant",
+		label: "Purchase Assistant",
+		icon: ClipboardList,
+		desktopGroup: "more",
+	},
+	{
 		href: "/adjustments",
 		label: "Stock Adjustments",
 		icon: AlertTriangle,
+		desktopGroup: "more",
 	},
 	{
 		href: "/alerts",
 		label: "Alerts",
 		icon: Bell,
+	},
+	{
+		href: "/audit",
+		label: "Audit Trail",
+		icon: History,
+		adminOnly: true,
+		desktopGroup: "more",
 	},
 	{
 		href: "/transactions",
@@ -79,6 +103,9 @@ interface HeaderReport {
 		priority: "HIGH" | "MEDIUM";
 	}[];
 }
+interface AccessData {
+	isAdmin: boolean;
+}
 interface HeaderAlert {
 	id: string;
 	status: "UNREAD" | "READ";
@@ -96,6 +123,13 @@ const alertsFetcher = async (url: string) => {
 	const json = await res.json().catch(() => ({}));
 	if (!res.ok) return [];
 	return (json?.data ?? json) as HeaderAlert[];
+};
+
+const accessFetcher = async (url: string) => {
+	const res = await fetch(url);
+	const json = await res.json().catch(() => ({}));
+	if (!res.ok) return { isAdmin: false } as AccessData;
+	return (json?.data ?? json) as AccessData;
 };
 
 export function Header() {
@@ -119,48 +153,67 @@ export function Header() {
 		alertsFetcher,
 	);
 	const unreadAlertCount = unreadAlerts.length;
+	const { data: access } = useSWR<AccessData>(
+		"/api/session/access",
+		accessFetcher,
+	);
+	const isAdmin = access?.isAdmin ?? false;
+	const visibleNavItems = React.useMemo(
+		() =>
+			navItems.filter(
+				(item) => !item.adminOnly || isAdmin,
+			),
+		[isAdmin],
+	);
+	const desktopPrimaryItems = React.useMemo(
+		() =>
+			visibleNavItems.filter(
+				(item) => item.desktopGroup !== "more",
+			),
+		[visibleNavItems],
+	);
+	const desktopMoreItems = React.useMemo(
+		() =>
+			visibleNavItems.filter(
+				(item) => item.desktopGroup === "more",
+			),
+		[visibleNavItems],
+	);
+	const getBadgeCount = React.useCallback(
+		(href: string) => {
+			if (href === "/alerts") return unreadAlertCount;
+			if (href === "/dashboard") return outOfStockCount;
+			return 0;
+		},
+		[outOfStockCount, unreadAlertCount],
+	);
 
 	return (
 		<header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60">
-			<div className="container flex h-14 items-center px-4">
+			<div className="container max-w-none flex h-14 items-center gap-2 px-4">
 				<Link
 					href="/dashboard"
-					className="mr-6 flex items-center space-x-2"
+					className="mr-2 flex shrink-0 items-center space-x-2"
 				>
 					<span className="font-bold text-lg">
 						Kgomong
 					</span>
 				</Link>
-				{lowStockCount > 0 && (
-					<Link
-						href="/dashboard"
-						className="mr-2 hidden rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 md:inline-flex"
-					>
-						{outOfStockCount > 0
-							? `${outOfStockCount} out`
-							: `${lowStockCount} low`}
-					</Link>
-				)}
-				{unreadAlertCount > 0 && (
-					<Link
-						href="/alerts"
-						className="mr-2 hidden rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-800 md:inline-flex"
-					>
-						{unreadAlertCount} alerts
-					</Link>
-				)}
 
 				{/* Desktop Navigation */}
-				<nav className="hidden md:flex items-center space-x-1 text-sm">
-					{navItems.map((item) => {
+				<nav className="hidden min-w-0 flex-1 items-center space-x-0.5 overflow-x-auto text-sm md:flex">
+					{desktopPrimaryItems.map((item) => {
 						const isActive =
 							pathname === item.href;
+						const badgeCount = getBadgeCount(
+							item.href,
+						);
 						return (
 							<Link
 								key={item.href}
 								href={item.href}
 								className={cn(
-									"flex items-center gap-1.5 px-3 py-2 rounded-md transition-colors",
+									"flex shrink-0 items-center gap-1.5 px-2 py-2 rounded-md transition-colors",
 									isActive
 										? "bg-accent text-accent-foreground font-medium"
 										: "text-muted-foreground hover:text-foreground hover:bg-accent/50",
@@ -168,16 +221,77 @@ export function Header() {
 							>
 								<item.icon className="h-4 w-4" />
 								<span>{item.label}</span>
+								{badgeCount > 0 && (
+									<span
+										className={cn(
+											"rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-none text-white",
+											item.href ===
+												"/dashboard"
+												? "bg-amber-500"
+												: "bg-rose-500",
+										)}
+									>
+										{badgeCount}
+									</span>
+								)}
 							</Link>
 						);
 					})}
+					{desktopMoreItems.length > 0 && (
+						<Popover>
+							<PopoverTrigger asChild>
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									className="shrink-0"
+								>
+									More
+								</Button>
+							</PopoverTrigger>
+							<PopoverContent
+								align="start"
+								className="w-56 p-2"
+							>
+								<div className="space-y-1">
+									{desktopMoreItems.map((item) => {
+										const isActive =
+											pathname ===
+											item.href;
+										return (
+											<Link
+												key={`more-${item.href}`}
+												href={
+													item.href
+												}
+												className={cn(
+													"flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+													isActive
+														? "bg-accent text-accent-foreground font-medium"
+														: "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+												)}
+											>
+												<item.icon className="h-4 w-4" />
+												<span>
+													{item.label}
+												</span>
+											</Link>
+										);
+									})}
+								</div>
+							</PopoverContent>
+						</Popover>
+					)}
 				</nav>
+				<div className="ml-auto flex shrink-0 items-center gap-2">
+					<GlobalCommandSearch />
+				</div>
 
 				{/* Mobile Navigation */}
 				<Sheet open={open} onOpenChange={setOpen}>
 					<SheetTrigger
 						asChild
-						className="md:hidden ml-auto"
+						className="md:hidden"
 					>
 						<Button variant="ghost" size="icon">
 							<Menu className="h-5 w-5" />
@@ -201,10 +315,10 @@ export function Header() {
 									className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800"
 								>
 									{outOfStockCount > 0
-										? `${outOfStockCount} out`
-										: `${lowStockCount} low`}
-								</Link>
-							)}
+											? `${outOfStockCount} out`
+											: `${lowStockCount} low`}
+									</Link>
+								)}
 							{unreadAlertCount > 0 && (
 								<Link
 									href="/alerts"
@@ -216,9 +330,12 @@ export function Header() {
 							)}
 						</div>
 						<nav className="flex flex-col space-y-1">
-							{navItems.map((item) => {
+							{visibleNavItems.map((item) => {
 								const isActive =
 									pathname === item.href;
+								const badgeCount = getBadgeCount(
+									item.href,
+								);
 								return (
 									<Link
 										key={item.href}
@@ -233,6 +350,19 @@ export function Header() {
 									>
 										<item.icon className="h-5 w-5" />
 										<span>{item.label}</span>
+										{badgeCount > 0 && (
+											<span
+												className={cn(
+													"ml-auto rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-none text-white",
+													item.href ===
+														"/dashboard"
+														? "bg-amber-500"
+														: "bg-rose-500",
+												)}
+											>
+												{badgeCount}
+											</span>
+										)}
 									</Link>
 								);
 							})}

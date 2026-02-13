@@ -8,6 +8,11 @@ import { parseJson } from "@/lib/validate";
 import { adjustmentSchema } from "@/lib/schemas";
 import { Adjustment } from "@/models/Adjustment";
 import { serializeDoc } from "@/lib/serialize";
+import {
+	getScopeIdFromAuth,
+	toAuditObject,
+	writeAuditLog,
+} from "@/lib/audit";
 
 const adjustmentUpdateSchema = z.object({
 	items: adjustmentSchema.shape.items,
@@ -17,8 +22,9 @@ export async function PATCH(
 	req: Request,
 	ctx: { params: Promise<{ id: string }> },
 ) {
+	let a;
 	try {
-		await requireOrgAuth();
+		a = await requireOrgAuth();
 	} catch {
 		return fail("Unauthorized", {
 			status: 401,
@@ -57,6 +63,15 @@ export async function PATCH(
 				status: 404,
 				code: "NOT_FOUND",
 			});
+		await writeAuditLog({
+			scopeId: getScopeIdFromAuth(a),
+			actorUserId: a.userId ?? undefined,
+			action: "UPDATE",
+			entityType: "Adjustment",
+			entityId: id,
+			oldValues: toAuditObject(existing),
+			newValues: toAuditObject(updated),
+		});
 
 		return ok(serializeDoc(updated));
 	} catch (e: any) {

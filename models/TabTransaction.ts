@@ -68,5 +68,9 @@ const TabTransactionSchema = new Schema<TabTransactionDoc>(
 );
 
 TabTransactionSchema.index({ customerId: 1, createdAt: -1 });
+TabTransactionSchema.index(
+	{ reference: 1 },
+	{ sparse: true },
+);
 
 export const TabTransaction = getModel<TabTransactionDoc>('TabTransaction', TabTransactionSchema);

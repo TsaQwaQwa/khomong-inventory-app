@@ -9,6 +9,11 @@ import { getOrCreateDay } from "@/lib/businessDay";
 import { Adjustment } from "@/models/Adjustment";
 import { BusinessDay } from "@/models/BusinessDay";
 import { serializeDoc } from "@/lib/serialize";
+import {
+	getScopeIdFromAuth,
+	toAuditObject,
+	writeAuditLog,
+} from "@/lib/audit";
 
 export async function GET(req: Request) {
 	try {
@@ -111,6 +116,15 @@ export async function POST(req: Request) {
 			businessDayId: String(day._id),
 			items: input.items,
 			createdByUserId: a.userId!,
+		});
+		await writeAuditLog({
+			scopeId: getScopeIdFromAuth(a),
+			actorUserId: a.userId ?? undefined,
+			action: "CREATE",
+			entityType: "Adjustment",
+			entityId: String(created._id),
+			oldValues: null,
+			newValues: toAuditObject(created.toObject()),
 		});
 
 		return ok(serializeDoc(created.toObject()), {
