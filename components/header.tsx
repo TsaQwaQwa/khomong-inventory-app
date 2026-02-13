@@ -14,11 +14,14 @@ import {
 } from "@/components/ui/sheet";
 import {
 	BarChart3,
+	LineChart,
 	Package,
 	ShoppingCart,
 	AlertTriangle,
+	Bell,
 	Receipt,
 	CreditCard,
+	Truck,
 	Menu,
 } from "lucide-react";
 import { getTodayJHB } from "@/lib/date-utils";
@@ -28,6 +31,11 @@ const navItems = [
 		href: "/dashboard",
 		label: "Daily Overview",
 		icon: BarChart3,
+	},
+	{
+		href: "/reports",
+		label: "Reports",
+		icon: LineChart,
 	},
 	{
 		href: "/products",
@@ -40,9 +48,19 @@ const navItems = [
 		icon: ShoppingCart,
 	},
 	{
+		href: "/suppliers",
+		label: "Suppliers",
+		icon: Truck,
+	},
+	{
 		href: "/adjustments",
 		label: "Stock Adjustments",
 		icon: AlertTriangle,
+	},
+	{
+		href: "/alerts",
+		label: "Alerts",
+		icon: Bell,
 	},
 	{
 		href: "/transactions",
@@ -61,12 +79,23 @@ interface HeaderReport {
 		priority: "HIGH" | "MEDIUM";
 	}[];
 }
+interface HeaderAlert {
+	id: string;
+	status: "UNREAD" | "READ";
+}
 
-const fetcher = async (url: string) => {
+const reportFetcher = async (url: string) => {
 	const res = await fetch(url);
 	const json = await res.json().catch(() => ({}));
 	if (!res.ok) return null;
 	return (json?.data ?? json) as HeaderReport;
+};
+
+const alertsFetcher = async (url: string) => {
+	const res = await fetch(url);
+	const json = await res.json().catch(() => ({}));
+	if (!res.ok) return [];
+	return (json?.data ?? json) as HeaderAlert[];
 };
 
 export function Header() {
@@ -75,7 +104,7 @@ export function Header() {
 	const today = React.useMemo(() => getTodayJHB(), []);
 	const { data: report } = useSWR<HeaderReport | null>(
 		`/api/reports/daily?date=${today}`,
-		fetcher,
+		reportFetcher,
 	);
 	const lowStockCount =
 		report?.stockRecommendations?.length ?? 0;
@@ -83,6 +112,13 @@ export function Header() {
 		report?.stockRecommendations?.filter(
 			(item) => item.priority === "HIGH",
 		).length ?? 0;
+	const { data: unreadAlerts = [] } = useSWR<
+		HeaderAlert[]
+	>(
+		"/api/alerts?status=UNREAD&limit=100",
+		alertsFetcher,
+	);
+	const unreadAlertCount = unreadAlerts.length;
 
 	return (
 		<header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60">
@@ -103,6 +139,14 @@ export function Header() {
 						{outOfStockCount > 0
 							? `${outOfStockCount} out`
 							: `${lowStockCount} low`}
+					</Link>
+				)}
+				{unreadAlertCount > 0 && (
+					<Link
+						href="/alerts"
+						className="mr-2 hidden rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-800 md:inline-flex"
+					>
+						{unreadAlertCount} alerts
 					</Link>
 				)}
 
@@ -159,6 +203,15 @@ export function Header() {
 									{outOfStockCount > 0
 										? `${outOfStockCount} out`
 										: `${lowStockCount} low`}
+								</Link>
+							)}
+							{unreadAlertCount > 0 && (
+								<Link
+									href="/alerts"
+									onClick={() => setOpen(false)}
+									className="rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-800"
+								>
+									{unreadAlertCount} alerts
 								</Link>
 							)}
 						</div>

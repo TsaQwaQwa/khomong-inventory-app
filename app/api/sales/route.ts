@@ -11,6 +11,7 @@ import { Price } from "@/models/Price";
 import { SaleTransaction } from "@/models/SaleTransaction";
 import { todayYMD } from "@/lib/dates";
 import { serializeDoc } from "@/lib/serialize";
+import { calculateSaleTotals } from "@/lib/sales-pricing";
 
 async function getPrice(
 	productId: string,
@@ -71,7 +72,12 @@ export async function POST(req: Request) {
 		}
 
 		const itemsWithPrice = [];
-		let amountCents = 0;
+		const rawLines: {
+			productId: string;
+			units: number;
+			unitPriceCents: number;
+			discountCents?: number;
+		}[] = [];
 		for (const item of input.items) {
 			const unitPriceCents = await getPrice(
 				item.productId,
@@ -83,22 +89,26 @@ export async function POST(req: Request) {
 					{ status: 400, code: "NO_PRICE" },
 				);
 
-			const lineTotalCents =
-				unitPriceCents * item.units;
-			amountCents += lineTotalCents;
-			itemsWithPrice.push({
+			rawLines.push({
 				productId: item.productId,
 				units: item.units,
 				unitPriceCents,
-				lineTotalCents,
+				discountCents: item.discountCents,
 			});
 		}
+		const totals = calculateSaleTotals(
+			rawLines,
+			input.discountCents,
+		);
+		itemsWithPrice.push(...totals.items);
 
 		const created =
 			await SaleTransaction.create({
 				businessDayId: String(day._id),
 				paymentMethod: input.paymentMethod,
-				amountCents,
+				subtotalCents: totals.subtotalCents,
+				discountCents: totals.discountCents,
+				amountCents: totals.amountCents,
 				items: itemsWithPrice,
 				note: input.note,
 				createdByUserId: a.userId!,

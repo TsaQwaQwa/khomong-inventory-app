@@ -66,6 +66,10 @@ export async function POST(req: Request) {
 				productId: item.productId,
 				units: -(item.units ?? 0),
 				unitPriceCents: item.unitPriceCents ?? 0,
+				subtotalCents:
+					-(item.subtotalCents ?? 0),
+				discountCents:
+					-(item.discountCents ?? 0),
 				lineTotalCents:
 					-(item.lineTotalCents ?? 0),
 			}));
@@ -74,6 +78,10 @@ export async function POST(req: Request) {
 				await SaleTransaction.create({
 					businessDayId: original.businessDayId,
 					paymentMethod: original.paymentMethod,
+					subtotalCents:
+						-(original.subtotalCents ?? 0),
+					discountCents:
+						-(original.discountCents ?? 0),
 					amountCents: -(original.amountCents ?? 0),
 					items: reversedItems,
 					note: `REVERSAL_OF:${input.transactionId} | ${input.reason}`,
@@ -130,6 +138,10 @@ export async function POST(req: Request) {
 				productId: item.productId,
 				units: -(item.units ?? 0),
 				unitPriceCents: item.unitPriceCents ?? 0,
+				subtotalCents:
+					-(item.subtotalCents ?? 0),
+				discountCents:
+					-(item.discountCents ?? 0),
 				lineTotalCents: -(item.lineTotalCents ?? 0),
 			}),
 		);
@@ -138,6 +150,8 @@ export async function POST(req: Request) {
 			customerId: original.customerId,
 			businessDayId: original.businessDayId,
 			type: original.type,
+			subtotalCents: -(original.subtotalCents ?? 0),
+			discountCents: -(original.discountCents ?? 0),
 			amountCents: -(original.amountCents ?? 0),
 			paymentMethod: original.paymentMethod,
 			reference: original.reference,

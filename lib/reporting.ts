@@ -582,41 +582,83 @@ export async function computeDailySummary(
 		.sort((a, b) => b.currentUnits - a.currentUnits)
 		.slice(0, 5);
 
-	const stockRecommendations: DailyReport["stockRecommendations"] =
-		Array.from(productById.entries())
-			.map(([productId, productMeta]) => {
+		const stockRecommendations: DailyReport["stockRecommendations"] =
+			Array.from(productById.entries())
+				.map(([productId, productMeta]) => {
 				const purchasedUnits =
 					purchasedUnitsToDateByProduct.get(productId) ?? 0;
 				const soldUnits =
 					soldUnitsToDateByProduct.get(productId) ?? 0;
 				const adjustedUnits =
 					adjustedUnitsToDateByProduct.get(productId) ?? 0;
-				const currentUnits =
-					purchasedUnits + adjustedUnits - soldUnits;
-				const reorderLevelUnits =
-					productMeta?.reorderLevelUnits ?? 0;
-				const recommendedOrderUnits = Math.max(
-					reorderLevelUnits - currentUnits,
-					0,
-				);
+					const currentUnits =
+						purchasedUnits + adjustedUnits - soldUnits;
+					const reorderLevelUnits =
+						productMeta?.reorderLevelUnits ?? 0;
+					const recentSoldUnits =
+						soldUnitsLast30ByProduct.get(productId) ??
+						0;
+					const recentAvgDailySoldUnits =
+						recentSoldUnits / 30;
+					const targetCoverDays = 7;
+					const velocityTargetUnits = Math.ceil(
+						recentAvgDailySoldUnits *
+							targetCoverDays,
+					);
+					const reorderGapUnits =
+						reorderLevelUnits - currentUnits;
+					const velocityGapUnits =
+						velocityTargetUnits - currentUnits;
+					const recommendedOrderUnits = Math.max(
+						reorderGapUnits,
+						velocityGapUnits,
+						0,
+					);
 
-				if (
-					reorderLevelUnits <= 0 ||
-					currentUnits > reorderLevelUnits ||
-					recommendedOrderUnits <= 0
-				) {
-					return null;
-				}
+					if (
+						reorderLevelUnits <= 0 &&
+						velocityTargetUnits <= 0
+					) {
+						return null;
+					}
 
-				return {
-					productId,
-					productName: productMeta.name,
-					currentUnits,
-					reorderLevelUnits,
-					recommendedOrderUnits,
-					priority: (currentUnits <= 0 ? "HIGH" : "MEDIUM") as "HIGH" | "MEDIUM",
-				};
-			})
+					if (
+						recommendedOrderUnits <= 0
+					) {
+						return null;
+					}
+
+					let recommendationBasis:
+						| "REORDER_LEVEL"
+						| "SELL_THROUGH"
+						| "BLENDED" = "REORDER_LEVEL";
+					if (
+						velocityGapUnits > 0 &&
+						reorderGapUnits <= 0
+					) {
+						recommendationBasis = "SELL_THROUGH";
+					} else if (
+						velocityGapUnits > 0 &&
+						reorderGapUnits > 0
+					) {
+						recommendationBasis = "BLENDED";
+					}
+
+					return {
+						productId,
+						productName: productMeta.name,
+						currentUnits,
+						reorderLevelUnits,
+						recommendedOrderUnits,
+						recentAvgDailySoldUnits:
+							Number(
+								recentAvgDailySoldUnits.toFixed(2),
+							),
+						targetCoverDays,
+						recommendationBasis,
+						priority: (currentUnits <= 0 ? "HIGH" : "MEDIUM") as "HIGH" | "MEDIUM",
+					};
+				})
 			.filter(
 				(
 					entry,

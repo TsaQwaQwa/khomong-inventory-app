@@ -17,6 +17,12 @@ Kgomong Monitor helps a tavern team track:
    - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
    - `CLERK_SECRET_KEY`
    - `ALLOWED_USER_EMAILS` (comma-separated whitelist)
+   - Optional WhatsApp alerts:
+     - `WHATSAPP_ACCESS_TOKEN`
+     - `WHATSAPP_PHONE_NUMBER_ID`
+     - `WHATSAPP_TO_PHONE`
+     - `WHATSAPP_API_VERSION` (optional, default `v20.0`)
+     - `WHATSAPP_WEBHOOK_VERIFY_TOKEN` (for callback verification)
 
 3. Install deps:
 
@@ -90,6 +96,9 @@ All endpoints are under `/app/api`.
 - `POST /api/tabs/payment`
 - `POST /api/sales` (direct cash/card/EFT sale with product lines)
 - `GET /api/reports/daily?date=YYYY-MM-DD`
+- `GET/PATCH /api/alerts`
+- `GET /api/whatsapp/activity`
+- `GET/POST /api/whatsapp/webhook` (Meta WhatsApp callback endpoint)
 
 ## 7) Glossary
 

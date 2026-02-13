@@ -9,6 +9,7 @@ import { addDays, todayYMD } from "@/lib/dates";
 import { Purchase } from "@/models/Purchase";
 import { Supplier } from "@/models/Supplier";
 import { serializeDoc, serializeDocs } from "@/lib/serialize";
+import { calculatePurchaseTotals } from "@/lib/purchase-pricing";
 
 export async function GET(req: Request) {
 	const a = await requireOrgAuth().catch(
@@ -98,11 +99,18 @@ export async function POST(req: Request) {
 		);
 		const purchaseDate =
 			input.purchaseDate ?? todayYMD();
+		const purchaseTotals = calculatePurchaseTotals(
+			input.items,
+			input.discountCents,
+		);
 		const created = await Purchase.create({
 			supplierId: input.supplierId,
 			invoiceNo: input.invoiceNo,
 			purchaseDate,
-			items: input.items,
+			items: purchaseTotals.items,
+			subtotalCents: purchaseTotals.subtotalCents,
+			discountCents: purchaseTotals.discountCents,
+			totalCostCents: purchaseTotals.totalCostCents,
 			attachmentIds: input.attachmentIds ?? [],
 			createdByUserId: a.userId!,
 		});

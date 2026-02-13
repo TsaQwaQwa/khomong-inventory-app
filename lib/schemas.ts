@@ -23,10 +23,21 @@ export const supplierCreateSchema = z.object({
   notes: z.string().optional(),
 });
 
+export const supplierProductPriceSchema = z.object({
+  supplierId: z.string().min(1),
+  productId: z.string().min(1),
+  unitCostCents: z.number().int().min(0),
+  effectiveFrom: ymdSchema.optional(),
+  moqUnits: z.number().int().min(1).optional(),
+  leadTimeDays: z.number().int().min(0).max(365).optional(),
+  note: z.string().max(500).optional(),
+});
+
 export const purchaseCreateSchema = z.object({
   supplierId: z.string().optional(),
   invoiceNo: z.string().optional(),
   purchaseDate: ymdSchema.optional(),
+  discountCents: z.number().int().min(0).optional(),
   items: z.array(
     z.object({
       productId: z.string().min(1),
@@ -34,6 +45,7 @@ export const purchaseCreateSchema = z.object({
       singles: z.number().int().min(0).default(0),
       units: z.number().int().min(0),
       unitCostCents: z.number().int().min(0).optional(),
+      discountCents: z.number().int().min(0).optional(),
     })
   ).min(1),
   attachmentIds: z.array(z.string()).optional(),
@@ -56,7 +68,13 @@ export const adjustmentSchema = z.object({
     z.object({
       productId: z.string().min(1),
       unitsDelta: z.number().int(),
-      reason: z.enum(['SPILLAGE', 'BREAKAGE', 'FREEBIES', 'THEFT_SUSPECTED', 'COUNT_CORRECTION']),
+      reason: z.enum([
+        'SPILLAGE',
+        'BREAKAGE',
+        'FREEBIES',
+        'THEFT_SUSPECTED',
+        'COUNT_CORRECTION',
+      ]),
       note: z.string().optional(),
       attachmentId: z.string().optional(),
     })
@@ -82,9 +100,11 @@ export const customerUpdateSchema = z.object({
 export const tabChargeSchema = z.object({
   date: ymdSchema.optional(),
   customerId: z.string().min(1),
+  discountCents: z.number().int().min(0).optional(),
   items: z.array(z.object({
     productId: z.string().min(1),
     units: z.number().int().min(1),
+    discountCents: z.number().int().min(0).optional(),
   })).min(1),
   note: z.string().optional(),
 });
@@ -101,9 +121,11 @@ export const tabPaymentSchema = z.object({
 export const directSaleSchema = z.object({
   date: ymdSchema.optional(),
   paymentMethod: z.enum(['CASH', 'CARD', 'EFT']),
+  discountCents: z.number().int().min(0).optional(),
   items: z.array(z.object({
     productId: z.string().min(1),
     units: z.number().int().min(1),
+    discountCents: z.number().int().min(0).optional(),
   })).min(1),
   note: z.string().optional(),
 });

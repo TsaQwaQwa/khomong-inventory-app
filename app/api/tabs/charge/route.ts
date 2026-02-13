@@ -12,6 +12,7 @@ import { Product } from "@/models/Product";
 import { Price } from "@/models/Price";
 import { todayYMD } from "@/lib/dates";
 import { serializeDoc } from "@/lib/serialize";
+import { calculateSaleTotals } from "@/lib/sales-pricing";
 
 async function getPrice(
 	productId: string,
@@ -87,7 +88,12 @@ export async function POST(req: Request) {
 		}
 
 		const itemsWithPrice = [];
-		let amountCents = 0;
+		const rawLines: {
+			productId: string;
+			units: number;
+			unitPriceCents: number;
+			discountCents?: number;
+		}[] = [];
 		for (const it of input.items) {
 			const unitPriceCents = await getPrice(
 				it.productId,
@@ -98,16 +104,18 @@ export async function POST(req: Request) {
 					`No price set for productId=${it.productId} on ${date}`,
 					{ status: 400, code: "NO_PRICE" },
 				);
-			const lineTotalCents =
-				unitPriceCents * it.units;
-			amountCents += lineTotalCents;
-			itemsWithPrice.push({
+			rawLines.push({
 				productId: it.productId,
 				units: it.units,
 				unitPriceCents,
-				lineTotalCents,
+				discountCents: it.discountCents,
 			});
 		}
+		const totals = calculateSaleTotals(
+			rawLines,
+			input.discountCents,
+		);
+		itemsWithPrice.push(...totals.items);
 
 		// Naive balance check (starter): compute current balance from ledger
 		const agg = await TabTransaction.aggregate([
@@ -160,7 +168,7 @@ export async function POST(req: Request) {
 			(agg.payments ?? 0) +
 			(agg.adjustments ?? 0);
 		if (
-			balance + amountCents >
+			balance + totals.amountCents >
 			account.creditLimitCents
 		) {
 			return fail("Credit limit exceeded", {
@@ -173,7 +181,9 @@ export async function POST(req: Request) {
 			customerId: input.customerId,
 			businessDayId: String(day._id),
 			type: "CHARGE",
-			amountCents,
+			subtotalCents: totals.subtotalCents,
+			discountCents: totals.discountCents,
+			amountCents: totals.amountCents,
 			items: itemsWithPrice,
 			note: input.note,
 			createdByUserId: a.userId!,

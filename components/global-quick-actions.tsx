@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable max-len */
 
 import * as React from "react";
 import { usePathname } from "next/navigation";
@@ -33,11 +34,13 @@ import { MoneyInput } from "@/components/money-input";
 import {
 	Box,
 	CreditCard,
+	DollarSign,
 	PackageMinus,
 	Plus,
 	Receipt,
 	ShoppingCart,
 	Trash2,
+	Truck,
 	Users,
 } from "lucide-react";
 import {
@@ -55,8 +58,10 @@ import type {
 
 const ENABLED_PATHS = [
 	"/dashboard",
+	"/reports",
 	"/products",
 	"/purchases",
+	"/suppliers",
 	"/adjustments",
 	"/tabs",
 	"/transactions",
@@ -72,6 +77,8 @@ type QuickAction =
 	| "account-payment"
 	| "restock"
 	| "customer"
+	| "supplier"
+	| "supplier-price"
 	| "product"
 	| "purchase"
 	| "adjustment";
@@ -79,6 +86,7 @@ type QuickAction =
 interface ChargeItem {
 	productId: string;
 	units: string;
+	discountCents: number;
 }
 
 interface PurchaseItemForm {
@@ -86,6 +94,7 @@ interface PurchaseItemForm {
 	cases: string;
 	singles: string;
 	unitCostCents: number;
+	discountCents: number;
 }
 
 interface AdjustmentItemForm {
@@ -114,6 +123,12 @@ interface PurchaseHistoryLite {
 		productId: string;
 		unitCostCents?: number;
 	}[];
+}
+
+interface SupplierPriceLite {
+	supplierId: string;
+	productId: string;
+	unitCostCents: number;
 }
 
 const CATEGORIES = [
@@ -146,6 +161,20 @@ const ADJUSTMENT_REASONS: {
 interface QuickProductLite {
 	id: string;
 	name: string;
+}
+
+interface DirectSaleHistoryLite {
+	id: string;
+	type: "DIRECT_SALE";
+	paymentMethod?: PaymentMethod;
+	discountCents?: number;
+	items?: {
+		productId: string;
+		units: number;
+		discountCents?: number;
+	}[];
+	isReversal?: boolean;
+	isReversed?: boolean;
 }
 
 const fetcher = async (url: string) => {
@@ -221,6 +250,12 @@ export function GlobalQuickActions() {
 		`/api/purchases?date=${date}&lookbackDays=60`,
 		fetcher,
 	);
+	const { data: supplierPrices = [] } = useSWR<
+		SupplierPriceLite[]
+	>(
+		`/api/supplier-prices?asOf=${date}`,
+		fetcher,
+	);
 	const restockSeed = React.useMemo(
 		() => {
 			const recommendations = (
@@ -239,6 +274,39 @@ export function GlobalQuickActions() {
 				string,
 				{ supplierId: string; unitCostCents: number }
 			>();
+			const bestContractByProduct = new Map<
+				string,
+				{ supplierId: string; unitCostCents: number }
+			>();
+
+			for (const supplierPrice of supplierPrices) {
+				if (
+					!supplierPrice.productId ||
+					!supplierPrice.supplierId ||
+					supplierPrice.unitCostCents <= 0
+				) {
+					continue;
+				}
+				const existing = bestContractByProduct.get(
+					supplierPrice.productId,
+				);
+				if (
+					!existing ||
+					supplierPrice.unitCostCents <
+						existing.unitCostCents
+				) {
+					bestContractByProduct.set(
+						supplierPrice.productId,
+						{
+							supplierId:
+								supplierPrice.supplierId,
+							unitCostCents:
+								supplierPrice.unitCostCents,
+						},
+					);
+				}
+			}
+
 			for (const purchase of purchaseHistory) {
 				for (const item of purchase.items ?? []) {
 					if (
@@ -260,10 +328,16 @@ export function GlobalQuickActions() {
 
 			const restockItems = recommendations.map(
 				(item) => {
+					const contractBest =
+						bestContractByProduct.get(
+							item.productId,
+						);
 					const recent =
 						perProductRecentMeta.get(
 							item.productId,
 						);
+					const selectedMeta =
+						contractBest ?? recent;
 					const packSize =
 						productPackSizeById.get(
 							item.productId,
@@ -284,9 +358,10 @@ export function GlobalQuickActions() {
 								? String(singles)
 								: "",
 						unitCostCents:
-							recent?.unitCostCents ?? 0,
+							selectedMeta?.unitCostCents ?? 0,
+						discountCents: 0,
 						suggestedSupplierId:
-							recent?.supplierId ?? "",
+							selectedMeta?.supplierId ?? "",
 					};
 				},
 			);
@@ -318,7 +393,7 @@ export function GlobalQuickActions() {
 				initialSupplierId,
 			};
 		},
-		[report, purchaseHistory, products],
+		[report, purchaseHistory, products, supplierPrices],
 	);
 
 	if (!show) return null;
@@ -349,6 +424,16 @@ export function GlobalQuickActions() {
 				(key) =>
 					typeof key === "string" &&
 					key.startsWith("/api/customers"),
+			),
+			mutate(
+				(key) =>
+					typeof key === "string" &&
+					key.startsWith("/api/suppliers"),
+			),
+			mutate(
+				(key) =>
+					typeof key === "string" &&
+					key.startsWith("/api/supplier-prices"),
 			),
 			mutate(
 				(key) =>
@@ -449,6 +534,26 @@ export function GlobalQuickActions() {
 								}
 								onClick={() => {
 									setActiveAction("customer");
+									setOpen(false);
+								}}
+							/>
+							<ActionBtn
+								label="Add Supplier"
+								icon={
+									<Truck className="mr-2 h-4 w-4" />
+								}
+								onClick={() => {
+									setActiveAction("supplier");
+									setOpen(false);
+								}}
+							/>
+							<ActionBtn
+								label="Set Supplier Cost"
+								icon={
+									<DollarSign className="mr-2 h-4 w-4" />
+								}
+								onClick={() => {
+									setActiveAction("supplier-price");
 									setOpen(false);
 								}}
 							/>
@@ -582,6 +687,26 @@ export function GlobalQuickActions() {
 						description="Add a new product to your catalog."
 					>
 						<AddProductForm onSuccess={onSaved} />
+					</ActionDialog>
+				)}
+				{activeAction === "supplier" && (
+					<ActionDialog
+						title="Add Supplier"
+						description="Create a supplier with contact details for purchase planning."
+					>
+						<AddSupplierForm onSuccess={onSaved} />
+					</ActionDialog>
+				)}
+				{activeAction === "supplier-price" && (
+					<ActionDialog
+						title="Set Supplier Cost"
+						description="Set a supplier-specific unit cost for a product."
+					>
+						<AddSupplierPriceForm
+							products={products}
+							suppliers={suppliers}
+							onSuccess={onSaved}
+						/>
 					</ActionDialog>
 				)}
 				{activeAction === "purchase" && (
@@ -718,52 +843,95 @@ function ItemsSection({
 		updates: Partial<ChargeItem>,
 	) => void;
 }) {
+	const productPriceById = React.useMemo(
+		() =>
+			new Map(
+				products.map((product) => [
+					product.id,
+					product.currentPriceCents ?? 0,
+				]),
+			),
+		[products],
+	);
+
 	return (
 		<div className="flex h-[50vh] min-h-0 flex-1 flex-col space-y-2">
 			<Label>Items Sold</Label>
 			<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-				{items.map((item, index) => (
-					<div
-						key={index}
-						className="flex items-end gap-2"
-					>
-						<div className="flex-1">
-							<ProductSelect
-								products={products}
-								value={item.productId}
-								onChange={(v) =>
-									onChange(index, {
-										productId: v,
-									})
-								}
-								placeholder="Product"
-							/>
+				{items.map((item, index) => {
+					const units =
+						parseInt(item.units, 10) || 0;
+					const unitPrice =
+						productPriceById.get(item.productId) ??
+						0;
+					const subtotalCents = unitPrice * units;
+					const netCents = Math.max(
+						0,
+						subtotalCents - item.discountCents,
+					);
+					return (
+						<div key={index} className="space-y-1">
+							<div className="flex items-end gap-2">
+								<div className="flex-1">
+									<ProductSelect
+										products={products}
+										value={item.productId}
+										onChange={(v) =>
+											onChange(index, {
+												productId: v,
+											})
+										}
+										placeholder="Product"
+									/>
+								</div>
+								<div className="w-20">
+									<Input
+										type="number"
+										min="1"
+										value={item.units}
+										onChange={(e) =>
+											onChange(index, {
+												units: e.target.value,
+											})
+										}
+										placeholder="Qty"
+									/>
+								</div>
+								<div className="w-32 space-y-1">
+									<Label className="text-xs">
+										Item Discount
+									</Label>
+									<MoneyInput
+										className="space-y-0"
+										value={item.discountCents}
+										onChange={(v) =>
+											onChange(index, {
+												discountCents: v,
+											})
+										}
+										placeholder="0.00"
+									/>
+								</div>
+								{items.length > 1 && (
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon"
+										onClick={() =>
+											onRemove(index)
+										}
+									>
+										<Trash2 className="h-4 w-4" />
+									</Button>
+								)}
+							</div>
+							<p className="text-[11px] text-muted-foreground">
+								Subtotal {formatZAR(subtotalCents)} | Net{" "}
+								{formatZAR(netCents)}
+							</p>
 						</div>
-						<div className="w-20">
-							<Input
-								type="number"
-								min="1"
-								value={item.units}
-								onChange={(e) =>
-									onChange(index, {
-										units: e.target.value,
-									})
-								}
-								placeholder="Qty"
-							/>
-						</div>
-						{items.length > 1 && (
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon"
-								onClick={() => onRemove(index)}
-							>
-								<Trash2 className="h-4 w-4" />
-							</Button>
-						)}
-					</div>
-				))}
+					);
+				})}
 			</div>
 		</div>
 	);
@@ -847,10 +1015,18 @@ function QuickCheckoutForm({
 	>([]);
 	const [paymentMethod, setPaymentMethod] =
 		React.useState<PaymentMethod>("CASH");
+	const [discountCents, setDiscountCents] =
+		React.useState(0);
 	const [manualProductId, setManualProductId] =
 		React.useState("");
 	const [manualUnits, setManualUnits] =
 		React.useState("1");
+	const [showManualAdd, setShowManualAdd] =
+		React.useState(false);
+	const [showTopSellers, setShowTopSellers] =
+		React.useState(false);
+	const [showFastRepeat, setShowFastRepeat] =
+		React.useState(false);
 	const scanInputRef =
 		React.useRef<HTMLInputElement | null>(null);
 	const lastScanKeyTsRef = React.useRef(0);
@@ -858,6 +1034,12 @@ function QuickCheckoutForm({
 	const autoAddTimerRef = React.useRef<
 		ReturnType<typeof setTimeout> | null
 	>(null);
+	const { data: txnHistory = [] } = useSWR<
+		DirectSaleHistoryLite[]
+	>(
+		`/api/transactions?date=${date}&limit=60`,
+		fetcher,
+	);
 
 	const productMap = React.useMemo(
 		() => new Map(products.map((p) => [p.id, p])),
@@ -876,6 +1058,77 @@ function QuickCheckoutForm({
 					]),
 			),
 		[products],
+	);
+	const repeatTemplates = React.useMemo(() => {
+		const unique = new Map<
+			string,
+			DirectSaleHistoryLite
+		>();
+		for (const txn of txnHistory) {
+			if (
+				txn.type !== "DIRECT_SALE" ||
+				txn.isReversal ||
+				txn.isReversed
+			) {
+				continue;
+			}
+			const validItems = (txn.items ?? []).filter(
+				(item) =>
+					item.productId &&
+					(item.units ?? 0) > 0,
+			);
+			if (!validItems.length) continue;
+			const signature = [
+				txn.paymentMethod ?? "CASH",
+				txn.discountCents ?? 0,
+				...validItems
+					.map((item) =>
+						[
+							item.productId,
+							item.units,
+							item.discountCents ?? 0,
+						].join(":"),
+					)
+					.sort(),
+			].join("|");
+			if (!unique.has(signature)) {
+				unique.set(signature, txn);
+			}
+			if (unique.size >= 8) break;
+		}
+		return Array.from(unique.values());
+	}, [txnHistory]);
+
+	const applyFastRepeat = React.useCallback(
+		(template: DirectSaleHistoryLite) => {
+			const nextItems = (template.items ?? [])
+				.filter(
+					(item) =>
+						item.productId &&
+						(item.units ?? 0) > 0,
+				)
+				.map((item) => ({
+					productId: item.productId,
+					units: String(item.units),
+					discountCents:
+						item.discountCents ?? 0,
+				}));
+			if (!nextItems.length) {
+				toast.error(
+					"That sale has no valid items to repeat",
+				);
+				return;
+			}
+			setItems(nextItems);
+			setPaymentMethod(
+				template.paymentMethod ?? "CASH",
+			);
+			setDiscountCents(template.discountCents ?? 0);
+			requestAnimationFrame(() =>
+				scanInputRef.current?.focus(),
+			);
+		},
+		[],
 	);
 
 	React.useEffect(() => {
@@ -931,6 +1184,7 @@ function QuickCheckoutForm({
 					{
 						productId: matchedProduct.id,
 						units: "1",
+						discountCents: 0,
 					},
 				];
 			});
@@ -1027,6 +1281,7 @@ function QuickCheckoutForm({
 				{
 					productId: manualProductId,
 					units: String(units),
+					discountCents: 0,
 				},
 			];
 		});
@@ -1064,6 +1319,7 @@ function QuickCheckoutForm({
 					{
 						productId,
 						units: String(unitsToAdd),
+						discountCents: 0,
 					},
 				];
 			});
@@ -1108,6 +1364,10 @@ function QuickCheckoutForm({
 			.map((item) => ({
 				productId: item.productId,
 				units: parseInt(item.units, 10) || 0,
+				discountCents:
+					item.discountCents > 0
+						? item.discountCents
+						: undefined,
 			}))
 			.filter((item) => item.units > 0);
 
@@ -1126,6 +1386,10 @@ function QuickCheckoutForm({
 				body: JSON.stringify({
 					date,
 					paymentMethod,
+					discountCents:
+						discountCents > 0
+							? discountCents
+							: undefined,
 					items: validItems,
 				}),
 			});
@@ -1143,6 +1407,7 @@ function QuickCheckoutForm({
 			toast.success("Checkout saved");
 			setItems([]);
 			setScanInput("");
+			setDiscountCents(0);
 			fastKeyStreakRef.current = 0;
 			requestAnimationFrame(() =>
 				scanInputRef.current?.focus(),
@@ -1236,66 +1501,6 @@ function QuickCheckoutForm({
 						</Button>
 					</div>
 				</div>
-				<div className="space-y-2">
-					<Label>Manual Add (Fallback)</Label>
-					<div className="grid grid-cols-12 gap-2">
-						<div className="col-span-8">
-							<ProductSelect
-								products={products}
-								value={manualProductId}
-								onChange={setManualProductId}
-								placeholder="Select product"
-							/>
-						</div>
-						<div className="col-span-2">
-							<Input
-								type="number"
-								min="1"
-								value={manualUnits}
-								onChange={(e) =>
-									setManualUnits(
-										e.target.value,
-									)
-								}
-								placeholder="Qty"
-							/>
-						</div>
-						<div className="col-span-2">
-							<Button
-								type="button"
-								variant="outline"
-								className="w-full"
-								onClick={addManualItem}
-							>
-								Add
-							</Button>
-						</div>
-					</div>
-				</div>
-				{quickProducts.length > 0 && (
-					<div className="space-y-2">
-						<Label>Top Sellers</Label>
-						<div className="flex gap-2 overflow-x-auto pb-1">
-							{quickProducts.map((product) => (
-								<Button
-									key={product.id}
-									type="button"
-									variant="outline"
-									size="sm"
-									className="shrink-0"
-									onClick={() =>
-										addProductUnits(
-											product.id,
-											1,
-										)
-									}
-								>
-									{product.name}
-								</Button>
-							))}
-						</div>
-					</div>
-				)}
 
 				<div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
 					<Label>Items</Label>
@@ -1309,9 +1514,14 @@ function QuickCheckoutForm({
 								productMap.get(item.productId);
 							const units =
 								parseInt(item.units, 10) || 0;
-							const lineTotal =
+							const subtotalCents =
 								(product?.currentPriceCents ??
 									0) * units;
+							const netCents = Math.max(
+								0,
+								subtotalCents -
+									item.discountCents,
+							);
 							return (
 								<div
 									key={item.productId}
@@ -1323,8 +1533,31 @@ function QuickCheckoutForm({
 												item.productId}
 										</p>
 										<p className="text-sm font-semibold">
-											{formatZAR(lineTotal)}
+											{formatZAR(netCents)}
 										</p>
+									</div>
+									<div className="mb-2">
+										<MoneyInput
+											label="Item Discount"
+											className="space-y-1"
+											value={
+												item.discountCents
+											}
+											onChange={(value) =>
+												setItems((prev) =>
+													prev.map((line) =>
+														line.productId ===
+															item.productId
+																? {
+																		...line,
+																		discountCents:
+																			value,
+																  }
+																: line,
+													),
+												)
+											}
+										/>
 									</div>
 									<div className="grid grid-cols-4 gap-2">
 										<Button
@@ -1381,10 +1614,161 @@ function QuickCheckoutForm({
 											Remove
 										</Button>
 									</div>
+									<p className="mt-2 text-[11px] text-muted-foreground">
+										Subtotal {formatZAR(subtotalCents)} | Net{" "}
+										{formatZAR(netCents)}
+									</p>
 								</div>
 							);
 						})
 					)}
+				</div>
+				<div className="space-y-2">
+					<div className="grid grid-cols-3 gap-2">
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							onClick={() =>
+								setShowManualAdd((v) => !v)
+							}
+						>
+							{showManualAdd
+								? "Hide Manual"
+								: "Manual Add"}
+						</Button>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							disabled={quickProducts.length === 0}
+							onClick={() =>
+								setShowTopSellers((v) => !v)
+							}
+						>
+							{showTopSellers
+								? "Hide Top"
+								: "Top Sellers"}
+						</Button>
+						<Button
+							type="button"
+							variant="secondary"
+							size="sm"
+							disabled={repeatTemplates.length === 0}
+							onClick={() =>
+								setShowFastRepeat((v) => !v)
+							}
+						>
+							{showFastRepeat
+								? "Hide Repeat"
+								: "Fast Repeat"}
+						</Button>
+					</div>
+					{showManualAdd && (
+						<div className="space-y-2 rounded-md border p-2">
+							<Label>Manual Add</Label>
+							<div className="grid grid-cols-12 gap-2">
+								<div className="col-span-8">
+									<ProductSelect
+										products={products}
+										value={manualProductId}
+										onChange={setManualProductId}
+										placeholder="Select product"
+									/>
+								</div>
+								<div className="col-span-2">
+									<Input
+										type="number"
+										min="1"
+										value={manualUnits}
+										onChange={(e) =>
+											setManualUnits(
+												e.target.value,
+											)
+										}
+										placeholder="Qty"
+									/>
+								</div>
+								<div className="col-span-2">
+									<Button
+										type="button"
+										variant="outline"
+										className="w-full"
+										onClick={addManualItem}
+									>
+										Add
+									</Button>
+								</div>
+							</div>
+						</div>
+					)}
+					{showTopSellers &&
+						quickProducts.length > 0 && (
+							<div className="space-y-2 rounded-md border p-2">
+								<Label>Top Sellers</Label>
+								<div className="flex gap-2 overflow-x-auto pb-1">
+									{quickProducts.map((product) => (
+										<Button
+											key={product.id}
+											type="button"
+											variant="outline"
+											size="sm"
+											className="shrink-0"
+											onClick={() =>
+												addProductUnits(
+													product.id,
+													1,
+												)
+											}
+										>
+											{product.name}
+										</Button>
+									))}
+								</div>
+							</div>
+						)}
+					{showFastRepeat &&
+						repeatTemplates.length > 0 && (
+							<div className="space-y-2 rounded-md border p-2">
+								<Label>Fast Repeat Sale</Label>
+								<div className="flex gap-2 overflow-x-auto pb-1">
+									{repeatTemplates.map((template) => {
+										const itemCount =
+											(
+												template.items ?? []
+											).length;
+										const firstItemName =
+											productMap.get(
+												template.items?.[0]
+													?.productId ??
+													"",
+											)?.name ?? "Sale";
+										return (
+											<Button
+												key={template.id}
+												type="button"
+												variant="secondary"
+												size="sm"
+												className="shrink-0"
+												onClick={() =>
+													applyFastRepeat(
+														template,
+													)
+												}
+											>
+												{firstItemName}
+												{itemCount > 1
+													? ` +${itemCount - 1}`
+													: ""}{" "}
+												|{" "}
+												{template.paymentMethod ??
+													"CASH"}
+											</Button>
+										);
+									})}
+								</div>
+							</div>
+						)}
 				</div>
 
 				<div className="grid grid-cols-2 gap-3">
@@ -1423,6 +1807,11 @@ function QuickCheckoutForm({
 						</p>
 					</div>
 				</div>
+				<MoneyInput
+					label="Discount (optional)"
+					value={discountCents}
+					onChange={setDiscountCents}
+				/>
 			</div>
 			<SaveFooter
 				disabled={loading || items.length === 0}
@@ -1446,9 +1835,17 @@ function DirectSaleForm({
 		React.useState(false);
 	const [items, setItems] = React.useState<
 		ChargeItem[]
-	>([{ productId: "", units: "" }]);
+	>([
+		{
+			productId: "",
+			units: "",
+			discountCents: 0,
+		},
+	]);
 	const [paymentMethod, setPaymentMethod] =
 		React.useState<PaymentMethod | "">("");
+	const [discountCents, setDiscountCents] =
+		React.useState(0);
 	const [note, setNote] = React.useState("");
 	const [showNote, setShowNote] =
 		React.useState(false);
@@ -1478,6 +1875,10 @@ function DirectSaleForm({
 			.map((item) => ({
 				productId: item.productId,
 				units: parseInt(item.units, 10) || 0,
+				discountCents:
+					item.discountCents > 0
+						? item.discountCents
+						: undefined,
 			}))
 			.filter((item) => item.units > 0);
 		if (!validItems.length) {
@@ -1494,6 +1895,10 @@ function DirectSaleForm({
 				body: JSON.stringify({
 					date,
 					paymentMethod,
+					discountCents:
+						discountCents > 0
+							? discountCents
+							: undefined,
 					items: validItems,
 					note:
 						showNote && note ? note : undefined,
@@ -1563,11 +1968,16 @@ function DirectSaleForm({
 						</SelectContent>
 					</Select>
 				</div>
+				<MoneyInput
+					label="Discount (optional)"
+					value={discountCents}
+					onChange={setDiscountCents}
+				/>
 				<BottomItemButtons
 					onAddItem={() =>
 						setItems((prev) => [
 							...prev,
-							{ productId: "", units: "" },
+							{ productId: "", units: "", discountCents: 0 },
 						])
 					}
 					showNote={showNote}
@@ -1602,10 +2012,18 @@ function AccountSaleForm({
 		React.useState("");
 	const [items, setItems] = React.useState<
 		ChargeItem[]
-	>([{ productId: "", units: "" }]);
+	>([
+		{
+			productId: "",
+			units: "",
+			discountCents: 0,
+		},
+	]);
 	const [note, setNote] = React.useState("");
 	const [showNote, setShowNote] =
 		React.useState(false);
+	const [discountCents, setDiscountCents] =
+		React.useState(0);
 
 	const updateItem = (
 		index: number,
@@ -1632,6 +2050,10 @@ function AccountSaleForm({
 			.map((item) => ({
 				productId: item.productId,
 				units: parseInt(item.units, 10) || 0,
+				discountCents:
+					item.discountCents > 0
+						? item.discountCents
+						: undefined,
 			}))
 			.filter((item) => item.units > 0);
 		if (!validItems.length) {
@@ -1650,6 +2072,10 @@ function AccountSaleForm({
 					body: JSON.stringify({
 						date,
 						customerId,
+						discountCents:
+							discountCents > 0
+								? discountCents
+								: undefined,
 						items: validItems,
 						note:
 							showNote && note ? note : undefined,
@@ -1706,11 +2132,16 @@ function AccountSaleForm({
 						label="Customer Account"
 					/>
 				</div>
+				<MoneyInput
+					label="Discount (optional)"
+					value={discountCents}
+					onChange={setDiscountCents}
+				/>
 				<BottomItemButtons
 					onAddItem={() =>
 						setItems((prev) => [
 							...prev,
-							{ productId: "", units: "" },
+							{ productId: "", units: "", discountCents: 0 },
 						])
 					}
 					showNote={showNote}
@@ -2193,6 +2624,289 @@ function AddProductForm({
 	);
 }
 
+function AddSupplierForm({
+	onSuccess,
+}: {
+	onSuccess: () => void;
+}) {
+	const [loading, setLoading] =
+		React.useState(false);
+	const [name, setName] = React.useState("");
+	const [phone, setPhone] = React.useState("");
+	const [notes, setNotes] = React.useState("");
+
+	const handleSubmit = async (
+		e: React.FormEvent,
+	) => {
+		e.preventDefault();
+		setLoading(true);
+		try {
+			const res = await fetch("/api/suppliers", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					name,
+					phone: phone || undefined,
+					notes: notes || undefined,
+				}),
+			});
+			if (!res.ok) {
+				const errorBody = await res
+					.json()
+					.catch(() => ({}));
+				throw new Error(
+					getApiErrorMessage(
+						errorBody,
+						"Failed to add supplier",
+					),
+				);
+			}
+			toast.success("Supplier added successfully");
+			onSuccess();
+		} catch (err) {
+			toast.error(
+				err instanceof Error
+					? err.message
+					: "Failed to add supplier",
+			);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	return (
+		<form
+			onSubmit={handleSubmit}
+			className="flex flex-col h-[60vh]"
+		>
+			<div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-3 pt-2">
+				<div className="space-y-2">
+					<Label>Name</Label>
+					<Input
+						value={name}
+						onChange={(e) =>
+							setName(e.target.value)
+						}
+						placeholder="Supplier name"
+						required
+					/>
+				</div>
+				<div className="space-y-2">
+					<Label>Phone (optional)</Label>
+					<Input
+						type="tel"
+						value={phone}
+						onChange={(e) =>
+							setPhone(e.target.value)
+						}
+						placeholder="072 123 4567"
+					/>
+				</div>
+				<div className="space-y-2">
+					<Label>Notes (optional)</Label>
+					<Textarea
+						value={notes}
+						onChange={(e) =>
+							setNotes(e.target.value)
+						}
+						placeholder="Delivery terms, discount rules, or account details..."
+						rows={3}
+					/>
+				</div>
+			</div>
+			<SaveFooter
+				disabled={loading || !name.trim()}
+				loading={loading}
+			/>
+		</form>
+	);
+}
+
+function AddSupplierPriceForm({
+	products,
+	suppliers,
+	onSuccess,
+}: {
+	products: Product[];
+	suppliers: Supplier[];
+	onSuccess: () => void;
+}) {
+	const [loading, setLoading] =
+		React.useState(false);
+	const [supplierId, setSupplierId] =
+		React.useState("");
+	const [productId, setProductId] =
+		React.useState("");
+	const [unitCostCents, setUnitCostCents] =
+		React.useState(0);
+	const [effectiveFrom, setEffectiveFrom] =
+		React.useState(getTodayJHB());
+	const [moqUnits, setMoqUnits] =
+		React.useState("");
+	const [leadTimeDays, setLeadTimeDays] =
+		React.useState("");
+	const [note, setNote] = React.useState("");
+
+	const handleSubmit = async (
+		e: React.FormEvent,
+	) => {
+		e.preventDefault();
+		setLoading(true);
+		try {
+			const res = await fetch(
+				"/api/supplier-prices",
+				{
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+					},
+					body: JSON.stringify({
+						supplierId,
+						productId,
+						unitCostCents,
+						effectiveFrom:
+							effectiveFrom || undefined,
+						moqUnits: moqUnits
+							? parseInt(moqUnits, 10)
+							: undefined,
+						leadTimeDays: leadTimeDays
+							? parseInt(leadTimeDays, 10)
+							: undefined,
+						note: note || undefined,
+					}),
+				},
+			);
+			if (!res.ok) {
+				const errorBody = await res
+					.json()
+					.catch(() => ({}));
+				throw new Error(
+					getApiErrorMessage(
+						errorBody,
+						"Failed to set supplier cost",
+					),
+				);
+			}
+			toast.success("Supplier cost saved");
+			onSuccess();
+		} catch (err) {
+			toast.error(
+				err instanceof Error
+					? err.message
+					: "Failed to set supplier cost",
+			);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	return (
+		<form
+			onSubmit={handleSubmit}
+			className="flex flex-col h-[60vh]"
+		>
+			<div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-3 pt-2">
+				<div className="space-y-2">
+					<Label>Supplier</Label>
+					<Select
+						value={supplierId}
+						onValueChange={setSupplierId}
+					>
+						<SelectTrigger>
+							<SelectValue placeholder="Select supplier" />
+						</SelectTrigger>
+						<SelectContent>
+							{suppliers.map((supplier) => (
+								<SelectItem
+									key={supplier.id}
+									value={supplier.id}
+								>
+									{supplier.name}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				</div>
+				<div className="space-y-2">
+					<Label>Product</Label>
+					<ProductSelect
+						products={products}
+						value={productId}
+						onChange={setProductId}
+						placeholder="Select product"
+					/>
+				</div>
+				<MoneyInput
+					label="Unit Cost"
+					value={unitCostCents}
+					onChange={setUnitCostCents}
+				/>
+				<div className="space-y-2">
+					<Label>Effective From</Label>
+					<Input
+						type="date"
+						value={effectiveFrom}
+						onChange={(e) =>
+							setEffectiveFrom(e.target.value)
+						}
+					/>
+				</div>
+				<div className="grid grid-cols-2 gap-3">
+					<div className="space-y-2">
+						<Label>MOQ Units (optional)</Label>
+						<Input
+							type="number"
+							min="1"
+							value={moqUnits}
+							onChange={(e) =>
+								setMoqUnits(e.target.value)
+							}
+							placeholder="24"
+						/>
+					</div>
+					<div className="space-y-2">
+						<Label>Lead Time Days (optional)</Label>
+						<Input
+							type="number"
+							min="0"
+							value={leadTimeDays}
+							onChange={(e) =>
+								setLeadTimeDays(
+									e.target.value,
+								)
+							}
+							placeholder="2"
+						/>
+					</div>
+				</div>
+				<div className="space-y-2">
+					<Label>Note (optional)</Label>
+					<Textarea
+						value={note}
+						onChange={(e) =>
+							setNote(e.target.value)
+						}
+						rows={2}
+						placeholder="Terms, delivery notes, or negotiated deal details..."
+					/>
+				</div>
+			</div>
+			<SaveFooter
+				disabled={
+					loading ||
+					!supplierId ||
+					!productId ||
+					unitCostCents <= 0
+				}
+				loading={loading}
+				label="Save Supplier Cost"
+			/>
+		</form>
+	);
+}
+
 function AddPurchaseForm({
 	products,
 	suppliers,
@@ -2214,6 +2928,8 @@ function AddPurchaseForm({
 		React.useState(initialSupplierId ?? "");
 	const [invoiceNo, setInvoiceNo] =
 		React.useState("");
+	const [discountCents, setDiscountCents] =
+		React.useState(0);
 	const [items, setItems] = React.useState<
 		PurchaseItemForm[]
 	>(
@@ -2225,6 +2941,7 @@ function AddPurchaseForm({
 						cases: "",
 						singles: "",
 						unitCostCents: 0,
+						discountCents: 0,
 					},
 				],
 	);
@@ -2241,6 +2958,7 @@ function AddPurchaseForm({
 				cases: "",
 				singles: "",
 				unitCostCents: 0,
+				discountCents: 0,
 			},
 		]);
 	}, [initialItems, initialSupplierId]);
@@ -2294,6 +3012,10 @@ function AddPurchaseForm({
 				units: calculateUnits(item),
 				unitCostCents:
 					item.unitCostCents || undefined,
+				discountCents:
+					item.discountCents > 0
+						? item.discountCents
+						: undefined,
 			}));
 		if (!validItems.length) {
 			toast.error("Please add at least one item");
@@ -2310,6 +3032,10 @@ function AddPurchaseForm({
 					supplierId: supplierId || undefined,
 					invoiceNo: invoiceNo || undefined,
 					purchaseDate: date,
+					discountCents:
+						discountCents > 0
+							? discountCents
+							: undefined,
 					items: validItems,
 				}),
 			});
@@ -2379,89 +3105,140 @@ function AddPurchaseForm({
 							placeholder="INV-12345"
 						/>
 					</div>
+					<MoneyInput
+						label="Purchase Discount (optional)"
+						value={discountCents}
+						onChange={setDiscountCents}
+					/>
 					<div className="space-y-2">
 						<Label>Items</Label>
 						<div className="space-y-3">
-							{items.map((item, index) => (
-								<div
-									key={index}
-									className="grid grid-cols-12 items-end gap-2 rounded-lg border p-2"
-								>
-									<div className="col-span-12 sm:col-span-4">
-										<ProductSelect
-											products={products}
-											value={item.productId}
-											onChange={(v) =>
-												updateItem(index, {
-													productId: v,
-												})
-											}
-											placeholder="Product"
-										/>
+							{items.map((item, index) => {
+								const units =
+									calculateUnits(item);
+								const subtotalCents =
+									units *
+									(item.unitCostCents ?? 0);
+								const netCents = Math.max(
+									0,
+									subtotalCents -
+										item.discountCents,
+								);
+								return (
+									<div
+										key={index}
+										className="space-y-1 rounded-lg border p-2"
+									>
+										<div className="grid grid-cols-12 items-end gap-2">
+											<div className="col-span-12 sm:col-span-4">
+												<ProductSelect
+													products={products}
+													value={item.productId}
+													onChange={(v) =>
+														updateItem(index, {
+															productId: v,
+														})
+													}
+													placeholder="Product"
+												/>
+											</div>
+											<div className="col-span-4 sm:col-span-2">
+												<Input
+													type="number"
+													min="0"
+													value={item.cases}
+													onChange={(e) =>
+														updateItem(index, {
+															cases:
+																e.target.value,
+														})
+													}
+													placeholder="Cases"
+												/>
+											</div>
+											<div className="col-span-4 sm:col-span-2">
+												<Input
+													type="number"
+													min="0"
+													value={item.singles}
+													onChange={(e) =>
+														updateItem(index, {
+															singles:
+																e.target.value,
+														})
+													}
+													placeholder="Singles"
+												/>
+											</div>
+											<div className="col-span-4 sm:col-span-2">
+												<Input
+													value={units}
+													disabled
+													placeholder="Units"
+												/>
+											</div>
+											<div className="col-span-8 flex items-end gap-1 sm:col-span-2">
+												<div className="min-w-0 flex-1 space-y-1">
+													<Label className="text-xs">
+														Unit Cost
+													</Label>
+														<MoneyInput
+															value={
+																item.unitCostCents
+															}
+															onChange={(v) =>
+																updateItem(index, {
+																	unitCostCents: v,
+															})
+														}
+														placeholder="0.00"
+														className="space-y-0"
+													/>
+												</div>
+												<div className="min-w-0 flex-1 space-y-1">
+													<Label className="text-xs">
+														Item Discount
+													</Label>
+														<MoneyInput
+															value={
+																item.discountCents
+															}
+															onChange={(v) =>
+																updateItem(index, {
+																	discountCents: v,
+															})
+														}
+														placeholder="0.00"
+														className="space-y-0"
+													/>
+												</div>
+												{items.length > 1 && (
+													<Button
+														type="button"
+														variant="ghost"
+														size="icon"
+														onClick={() =>
+															setItems((prev) =>
+																prev.filter(
+																	(_, i) =>
+																		i !==
+																		index,
+																),
+															)
+														}
+													>
+														<Trash2 className="h-4 w-4" />
+													</Button>
+												)}
+											</div>
+										</div>
+										<p className="text-[11px] text-muted-foreground">
+											Subtotal {formatZAR(subtotalCents)} | Net{" "}
+											{formatZAR(netCents)}
+										</p>
 									</div>
-									<div className="col-span-4 sm:col-span-2">
-										<Input
-											type="number"
-											min="0"
-											value={item.cases}
-											onChange={(e) =>
-												updateItem(index, {
-													cases: e.target.value,
-												})
-											}
-											placeholder="Cases"
-										/>
-									</div>
-									<div className="col-span-4 sm:col-span-2">
-										<Input
-											type="number"
-											min="0"
-											value={item.singles}
-											onChange={(e) =>
-												updateItem(index, {
-													singles: e.target.value,
-												})
-											}
-											placeholder="Singles"
-										/>
-									</div>
-									<div className="col-span-4 sm:col-span-2">
-										<Input
-											value={calculateUnits(item)}
-											disabled
-											placeholder="Units"
-										/>
-									</div>
-									<div className="col-span-8 flex items-end gap-1 sm:col-span-2">
-										<MoneyInput
-											value={item.unitCostCents}
-											onChange={(v) =>
-												updateItem(index, {
-													unitCostCents: v,
-												})
-											}
-											placeholder="Cost"
-										/>
-										{items.length > 1 && (
-											<Button
-												type="button"
-												variant="ghost"
-												size="icon"
-												onClick={() =>
-													setItems((prev) =>
-														prev.filter(
-															(_, i) =>
-																i !== index,
-														),
-													)
-												}
-											>
-												<Trash2 className="h-4 w-4" />
-											</Button>
-										)}
-									</div>
-								</div>
-							))}
+								);
+							})}
 						</div>
 					</div>
 				</div>
@@ -2479,6 +3256,7 @@ function AddPurchaseForm({
 									cases: "",
 									singles: "",
 									unitCostCents: 0,
+									discountCents: 0,
 								},
 							])
 						}

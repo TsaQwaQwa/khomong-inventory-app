@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable max-len */
 
 import * as React from "react";
 import useSWR from "swr";
@@ -106,7 +107,6 @@ export function PurchasesClient() {
 	);
 	const {
 		data: suppliers,
-		mutate: mutateSuppliers,
 	} = useSWR<Supplier[]>(
 		"/api/suppliers",
 		fetcher,
@@ -146,9 +146,6 @@ export function PurchasesClient() {
 								setRecordDialogOpen(false);
 								mutate();
 							}}
-							onSupplierAdded={() =>
-								mutateSuppliers()
-							}
 						/>
 					</Dialog>
 				</div>
@@ -225,12 +222,22 @@ function PurchaseCard({
 		(sum, item) => sum + item.units,
 		0,
 	);
-	const totalCost = purchase.items.reduce(
+	const subtotalCost = purchase.items.reduce(
 		(sum, item) =>
 			sum +
-			(item.unitCostCents || 0) * item.units,
+			(item.lineTotalCostCents ??
+				(item.unitCostCents || 0) * item.units),
 		0,
 	);
+	const purchaseDiscountCents =
+		purchase.discountCents ?? 0;
+	const totalCost =
+		typeof purchase.totalCostCents === "number"
+			? purchase.totalCostCents
+			: Math.max(
+					0,
+					subtotalCost - purchaseDiscountCents,
+				);
 
 	return (
 		<Card className="shadow-md">
@@ -279,10 +286,10 @@ function PurchaseCard({
 						</div>
 						<div>
 							<p className="text-muted-foreground">
-								Invoice
+								Discount
 							</p>
-							<p className="font-medium truncate">
-								{purchase.invoiceNo ?? "-"}
+							<p className="font-medium">
+								{formatZAR(purchaseDiscountCents)}
 							</p>
 						</div>
 						<div className="text-right">
@@ -404,6 +411,10 @@ function PurchaseCard({
 							{totalUnits}
 						</span>
 						<span>
+							<strong>Discount:</strong>{" "}
+							{formatZAR(purchaseDiscountCents)}
+						</span>
+						<span>
 							<strong>Total Cost:</strong>{" "}
 							{formatZAR(totalCost)}
 						</span>
@@ -450,6 +461,7 @@ interface LineItem {
 	cases: string;
 	singles: string;
 	unitCostCents: number;
+	discountCents: number;
 }
 
 function RecordPurchaseDialog({
@@ -457,13 +469,11 @@ function RecordPurchaseDialog({
 	suppliers,
 	date,
 	onSuccess,
-	onSupplierAdded,
 }: {
 	products: Product[];
 	suppliers: Supplier[];
 	date: string;
 	onSuccess: () => void;
-	onSupplierAdded: () => void;
 }) {
 	const [loading, setLoading] =
 		React.useState(false);
@@ -471,6 +481,8 @@ function RecordPurchaseDialog({
 		React.useState("");
 	const [invoiceNo, setInvoiceNo] =
 		React.useState("");
+	const [discountCents, setDiscountCents] =
+		React.useState(0);
 	const [scanBarcode, setScanBarcode] =
 		React.useState("");
 	const [items, setItems] = React.useState<
@@ -481,11 +493,9 @@ function RecordPurchaseDialog({
 			cases: "",
 			singles: "",
 			unitCostCents: 0,
+			discountCents: 0,
 		},
 	]);
-	const [addSupplierOpen, setAddSupplierOpen] =
-		React.useState(false);
-
 	const normalizedProducts = React.useMemo(
 		() =>
 			Array.isArray(products) ? products : [],
@@ -524,6 +534,7 @@ function RecordPurchaseDialog({
 				cases: "",
 				singles: "",
 				unitCostCents: 0,
+				discountCents: 0,
 			},
 		]);
 	};
@@ -613,6 +624,7 @@ function RecordPurchaseDialog({
 							cases: "0",
 							singles: "1",
 							unitCostCents: 0,
+							discountCents: 0,
 						},
 					]);
 				}
@@ -642,6 +654,10 @@ function RecordPurchaseDialog({
 				units: calculateUnits(item),
 				unitCostCents:
 					item.unitCostCents || undefined,
+				discountCents:
+					item.discountCents > 0
+						? item.discountCents
+						: undefined,
 			}));
 
 		if (validItems.length === 0) {
@@ -660,6 +676,10 @@ function RecordPurchaseDialog({
 					supplierId: supplierId || undefined,
 					invoiceNo: invoiceNo || undefined,
 					purchaseDate: date,
+					discountCents:
+						discountCents > 0
+							? discountCents
+							: undefined,
 					items: validItems,
 				}),
 			});
@@ -702,49 +722,29 @@ function RecordPurchaseDialog({
 			<form onSubmit={handleSubmit}>
 				<div className="grid gap-4 py-4">
 					{/* Supplier */}
-					<div className="flex gap-2 items-end">
-						<div className="flex-1 space-y-2">
-							<Label>Supplier</Label>
-							<Select
-								value={supplierId}
-								onValueChange={setSupplierId}
-							>
-								<SelectTrigger>
-									<SelectValue placeholder="Select supplier (optional)" />
-								</SelectTrigger>
-								<SelectContent>
-									{suppliers.map((s) => (
-										<SelectItem
-											key={s.id}
-											value={s.id}
-										>
-											{s.name}
-										</SelectItem>
-									))}
-								</SelectContent>
-							</Select>
-						</div>
-						<Dialog
-							open={addSupplierOpen}
-							onOpenChange={setAddSupplierOpen}
+					<div className="space-y-2">
+						<Label>Supplier</Label>
+						<Select
+							value={supplierId}
+							onValueChange={setSupplierId}
 						>
-							<DialogTrigger asChild>
-								<Button
-									type="button"
-									variant="outline"
-									size="icon"
-								>
-									<Plus className="h-4 w-4" />
-								</Button>
-							</DialogTrigger>
-							<AddSupplierDialog
-								onSuccess={(newId) => {
-									setAddSupplierOpen(false);
-									onSupplierAdded();
-									setSupplierId(newId);
-								}}
-							/>
-						</Dialog>
+							<SelectTrigger>
+								<SelectValue placeholder="Select supplier (optional)" />
+							</SelectTrigger>
+							<SelectContent>
+								{suppliers.map((s) => (
+									<SelectItem
+										key={s.id}
+										value={s.id}
+									>
+										{s.name}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+						<p className="text-xs text-muted-foreground">
+							Use Global Quick Actions to add new suppliers.
+						</p>
 					</div>
 
 					{/* Invoice No */}
@@ -761,6 +761,11 @@ function RecordPurchaseDialog({
 							placeholder="INV-12345"
 						/>
 					</div>
+					<MoneyInput
+						label="Purchase Discount (optional)"
+						value={discountCents}
+						onChange={setDiscountCents}
+					/>
 
 					<div className="space-y-2">
 						<Label htmlFor="scanBarcode">
@@ -807,94 +812,139 @@ function RecordPurchaseDialog({
 					<div className="space-y-2">
 						<Label>Items</Label>
 						<div className="space-y-3">
-							{items.map((item, index) => (
-								<div
-									key={index}
-									className="grid grid-cols-12 gap-2 items-end p-3 bg-muted/50 rounded-lg"
-								>
-									<div className="col-span-12 sm:col-span-4">
-										<ProductSelect
-											products={
-												normalizedProducts
-											}
-											value={item.productId}
-											onChange={(v) =>
-												updateItem(index, {
-													productId: v,
-												})
-											}
-											placeholder="Select product"
-										/>
+							{items.map((item, index) => {
+								const units =
+									calculateUnits(item);
+								const subtotalCents =
+									units *
+									(item.unitCostCents ?? 0);
+								const netCents = Math.max(
+									0,
+									subtotalCents -
+										item.discountCents,
+								);
+								return (
+									<div
+										key={index}
+										className="space-y-1 rounded-lg bg-muted/50 p-3"
+									>
+										<div className="grid grid-cols-12 gap-2 items-end">
+											<div className="col-span-12 sm:col-span-4">
+												<ProductSelect
+													products={
+														normalizedProducts
+													}
+													value={item.productId}
+													onChange={(v) =>
+														updateItem(index, {
+															productId: v,
+														})
+													}
+													placeholder="Select product"
+												/>
+											</div>
+											<div className="col-span-4 sm:col-span-2 space-y-1">
+												<Label className="text-xs">
+													Cases
+												</Label>
+												<Input
+													type="number"
+													min="0"
+													value={item.cases}
+													onChange={(e) =>
+														updateItem(index, {
+															cases:
+																e.target.value,
+														})
+													}
+													placeholder="0"
+												/>
+											</div>
+											<div className="col-span-4 sm:col-span-2 space-y-1">
+												<Label className="text-xs">
+													Singles
+												</Label>
+												<Input
+													type="number"
+													min="0"
+													value={item.singles}
+													onChange={(e) =>
+														updateItem(index, {
+															singles:
+																e.target.value,
+														})
+													}
+													placeholder="0"
+												/>
+											</div>
+											<div className="col-span-4 sm:col-span-2 space-y-1">
+												<Label className="text-xs">
+													Units
+												</Label>
+												<Input
+													type="number"
+													value={units}
+													disabled
+													className="bg-muted"
+												/>
+											</div>
+											<div className="col-span-8 sm:col-span-2 flex gap-1 items-end">
+												<div className="min-w-0 flex-1 space-y-1">
+													<Label className="text-xs">
+														Unit Cost
+													</Label>
+														<MoneyInput
+															value={
+																item.unitCostCents
+															}
+															onChange={(v) =>
+																updateItem(index, {
+																	unitCostCents: v,
+															})
+														}
+														placeholder="0.00"
+														className="space-y-0"
+													/>
+												</div>
+												<div className="min-w-0 flex-1 space-y-1">
+													<Label className="text-xs">
+														Item Discount
+													</Label>
+														<MoneyInput
+															value={
+																item.discountCents
+															}
+															onChange={(v) =>
+																updateItem(index, {
+																	discountCents: v,
+															})
+														}
+														placeholder="0.00"
+														className="space-y-0"
+													/>
+												</div>
+												{items.length > 1 && (
+													<Button
+														type="button"
+														variant="ghost"
+														size="icon"
+														onClick={() =>
+															removeItem(index)
+														}
+														className="shrink-0"
+													>
+														<Trash2 className="h-4 w-4" />
+													</Button>
+												)}
+											</div>
+										</div>
+										<p className="text-[11px] text-muted-foreground">
+											Subtotal {formatZAR(subtotalCents)} | Net{" "}
+											{formatZAR(netCents)}
+										</p>
 									</div>
-									<div className="col-span-4 sm:col-span-2 space-y-1">
-										<Label className="text-xs">
-											Cases
-										</Label>
-										<Input
-											type="number"
-											min="0"
-											value={item.cases}
-											onChange={(e) =>
-												updateItem(index, {
-													cases: e.target.value,
-												})
-											}
-											placeholder="0"
-										/>
-									</div>
-									<div className="col-span-4 sm:col-span-2 space-y-1">
-										<Label className="text-xs">
-											Singles
-										</Label>
-										<Input
-											type="number"
-											min="0"
-											value={item.singles}
-											onChange={(e) =>
-												updateItem(index, {
-													singles: e.target.value,
-												})
-											}
-											placeholder="0"
-										/>
-									</div>
-									<div className="col-span-4 sm:col-span-2 space-y-1">
-										<Label className="text-xs">
-											Units
-										</Label>
-										<Input
-											type="number"
-											value={calculateUnits(item)}
-											disabled
-											className="bg-muted"
-										/>
-									</div>
-									<div className="col-span-8 sm:col-span-2 flex gap-1 items-end">
-										<MoneyInput
-											value={item.unitCostCents}
-											onChange={(v) =>
-												updateItem(index, {
-													unitCostCents: v,
-												})
-											}
-											placeholder="Cost"
-										/>
-										{items.length > 1 && (
-											<Button
-												type="button"
-												variant="ghost"
-												size="icon"
-												onClick={() =>
-													removeItem(index)
-												}
-												className="shrink-0"
-											>
-												<Trash2 className="h-4 w-4" />
-											</Button>
-										)}
-									</div>
-								</div>
-							))}
+								);
+							})}
 						</div>
 						<Button
 							type="button"
@@ -1120,103 +1170,6 @@ function EditInvoiceDialog({
 						disabled={loading}
 					>
 						{loading ? "Saving..." : "Save"}
-					</Button>
-				</DialogFooter>
-			</form>
-		</DialogContent>
-	);
-}
-
-function AddSupplierDialog({
-	onSuccess,
-}: {
-	onSuccess: (id: string) => void;
-}) {
-	const [loading, setLoading] =
-		React.useState(false);
-	const [name, setName] = React.useState("");
-
-	const handleSubmit = async (
-		e: React.FormEvent,
-	) => {
-		e.preventDefault();
-		setLoading(true);
-
-		try {
-			const res = await fetch("/api/suppliers", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({ name }),
-			});
-
-			if (!res.ok) {
-				const error = await res
-					.json()
-					.catch(() => ({
-						error: "Request failed",
-					}));
-				throw new Error(
-					error.error || "Failed to add supplier",
-				);
-			}
-
-			const data = await res.json();
-			toast.success(
-				"Supplier added successfully",
-			);
-			onSuccess(data.id);
-		} catch (err) {
-			toast.error(
-				err instanceof Error
-					? err.message
-					: "Failed to add supplier",
-			);
-		} finally {
-			setLoading(false);
-		}
-	};
-
-	return (
-		<DialogContent>
-			<DialogHeader>
-				<DialogTitle>Add Supplier</DialogTitle>
-				<DialogDescription>
-					Add a new supplier to your list.
-				</DialogDescription>
-			</DialogHeader>
-			<form onSubmit={handleSubmit}>
-				<div className="py-4">
-					<Label htmlFor="supplierName">
-						Name
-					</Label>
-					<Input
-						id="supplierName"
-						value={name}
-						onChange={(e) =>
-							setName(e.target.value)
-						}
-						placeholder="SAB Miller"
-						required
-					/>
-				</div>
-				<DialogFooter>
-					<DialogClose asChild>
-						<Button
-							type="button"
-							variant="outline"
-						>
-							Cancel
-						</Button>
-					</DialogClose>
-					<Button
-						type="submit"
-						disabled={loading}
-					>
-						{loading
-							? "Saving..."
-							: "Save"}
 					</Button>
 				</DialogFooter>
 			</form>

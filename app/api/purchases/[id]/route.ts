@@ -5,6 +5,7 @@ import { requireOrgAuth } from "@/lib/authz";
 import { ok, fail } from "@/lib/http";
 import { Purchase } from "@/models/Purchase";
 import { serializeDoc } from "@/lib/serialize";
+import { calculatePurchaseTotals } from "@/lib/purchase-pricing";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -29,7 +30,9 @@ export async function PATCH(
 	if (
 		!payload ||
 		(payload.invoiceNo !== undefined &&
-			typeof payload.invoiceNo !== "string")
+			typeof payload.invoiceNo !== "string") ||
+		(payload.discountCents !== undefined &&
+			typeof payload.discountCents !== "number")
 	) {
 		return fail("Invalid payload", {
 			status: 400,
@@ -89,27 +92,55 @@ export async function PATCH(
 	const existing = await Purchase.findOne({
 		_id: id,
 	}).lean();
-	if (Array.isArray(payload.items) && existing) {
+	if (
+		(Array.isArray(payload.items) ||
+			payload.discountCents !== undefined) &&
+		existing
+	) {
 		const itemsByProduct = new Map<string, any>(
-			payload.items.map((item: any) => [
+			Array.isArray(payload.items)
+				? payload.items.map((item: any) => [
+						item.productId,
+						item,
+					])
+				: [],
+		);
+		const mergedItems = existing.items.map((item) => {
+			const override = itemsByProduct.get(
 				item.productId,
-				item,
-			]),
+			);
+			if (!override) return item;
+			return {
+				...item,
+				unitCostCents:
+					override.unitCostCents ?? item.unitCostCents,
+				discountCents:
+					override.discountCents ?? item.discountCents,
+			};
+		});
+		const existingItemDiscountTotal =
+			mergedItems.reduce(
+				(sum, item) =>
+					sum + (item.discountCents ?? 0),
+				0,
+			);
+		const existingAdditionalDiscount = Math.max(
+			0,
+			(existing.discountCents ?? 0) -
+				existingItemDiscountTotal,
 		);
-		updatePayload.items = existing.items.map(
-			(item) => {
-				const override = itemsByProduct.get(
-					item.productId,
-				);
-				if (!override) return item;
-				return {
-					...item,
-					unitCostCents:
-						override.unitCostCents ??
-						item.unitCostCents,
-				};
-			},
+		const requestedAdditionalDiscount =
+			payload.discountCents !== undefined
+				? payload.discountCents
+				: existingAdditionalDiscount;
+		const totals = calculatePurchaseTotals(
+			mergedItems,
+			requestedAdditionalDiscount,
 		);
+		updatePayload.items = totals.items;
+		updatePayload.subtotalCents = totals.subtotalCents;
+		updatePayload.discountCents = totals.discountCents;
+		updatePayload.totalCostCents = totals.totalCostCents;
 	}
 	if (attachments.length && existing) {
 		updatePayload.attachmentIds = [

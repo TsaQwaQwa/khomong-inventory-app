@@ -143,6 +143,7 @@ interface TabTransactionHistory {
 		| "ADJUSTMENT"
 		| "DIRECT_SALE";
 	amountCents: number;
+	discountCents?: number;
 	paymentMethod?: PaymentMethod;
 	note?: string;
 	reference?: string;
@@ -150,6 +151,7 @@ interface TabTransactionHistory {
 	items?: {
 		productId: string;
 		units: number;
+		discountCents?: number;
 	}[];
 	reversalOfId?: string;
 	reversalReason?: string;
@@ -237,6 +239,24 @@ export function TabsClient({
 	);
 	const [reverseLoading, setReverseLoading] =
 		React.useState(false);
+	const [
+		repeatDirectSeed,
+		setRepeatDirectSeed,
+	] = React.useState<{
+		items: ChargeItem[];
+		paymentMethod: PaymentMethod | "";
+		discountCents: number;
+		note: string;
+	} | null>(null);
+	const [
+		repeatAccountSeed,
+		setRepeatAccountSeed,
+	] = React.useState<{
+		customerId: string;
+		items: ChargeItem[];
+		discountCents: number;
+		note: string;
+	} | null>(null);
 	const kindFilter =
 		searchParams.get("kind") ?? "all";
 	const productFilter =
@@ -362,6 +382,50 @@ export function TabsClient({
 			);
 		} finally {
 			setReverseLoading(false);
+		}
+	};
+
+	const repeatSaleFromHistory = (
+		txn: TabTransactionHistory,
+	) => {
+		const items = (txn.items ?? [])
+			.filter(
+				(item) =>
+					item.productId &&
+					(item.units ?? 0) > 0,
+			)
+			.map((item) => ({
+				productId: item.productId,
+				units: String(item.units),
+				discountCents: item.discountCents ?? 0,
+			}));
+		if (!items.length) {
+			toast.error("No sale items to repeat");
+			return;
+		}
+		if (txn.type === "DIRECT_SALE") {
+			setRepeatDirectSeed({
+				items,
+				paymentMethod:
+					txn.paymentMethod ?? "CASH",
+				discountCents: txn.discountCents ?? 0,
+				note: txn.note ?? "",
+			});
+			setDirectSaleDialogOpen(true);
+			setSaleDialogOpen(false);
+			setPaymentDialogOpen(false);
+			return;
+		}
+		if (txn.type === "CHARGE" && txn.customerId) {
+			setRepeatAccountSeed({
+				customerId: txn.customerId,
+				items,
+				discountCents: txn.discountCents ?? 0,
+				note: txn.note ?? "",
+			});
+			setSaleDialogOpen(true);
+			setDirectSaleDialogOpen(false);
+			setPaymentDialogOpen(false);
 		}
 	};
 
@@ -711,12 +775,21 @@ export function TabsClient({
 						) : (
 							<>
 								<div className="mb-4 hidden flex-wrap justify-end gap-2">
-									<Dialog
-										open={directSaleDialogOpen}
-										onOpenChange={
-											setDirectSaleDialogOpen
-										}
-									>
+										<Dialog
+											open={directSaleDialogOpen}
+											onOpenChange={
+												(next) => {
+													setDirectSaleDialogOpen(
+														next,
+													);
+													if (!next) {
+														setRepeatDirectSeed(
+															null,
+														);
+													}
+												}
+											}
+										>
 										<DialogTrigger asChild>
 											<Button
 												type="button"
@@ -740,26 +813,52 @@ export function TabsClient({
 												</DialogDescription>
 											</DialogHeader>
 											<DirectSaleForm
+												key={
+													repeatDirectSeed
+														? `repeat-direct-${repeatDirectSeed.items
+																.map(
+																	(item) =>
+																		`${item.productId}:${item.units}:${item.discountCents}`,
+																)
+																.join("|")}`
+														: "direct-default"
+												}
 												products={
 													normalizedProducts
 												}
 												date={date}
+												initialData={
+													repeatDirectSeed ??
+													undefined
+												}
 												onSuccess={() => {
 													mutateTransactions();
 													setDirectSaleDialogOpen(
 														false,
+													);
+													setRepeatDirectSeed(
+														null,
 													);
 												}}
 											/>
 										</DialogContent>
 									</Dialog>
 
-									<Dialog
-										open={saleDialogOpen}
-										onOpenChange={
-											setSaleDialogOpen
-										}
-									>
+										<Dialog
+											open={saleDialogOpen}
+											onOpenChange={
+												(next) => {
+													setSaleDialogOpen(
+														next,
+													);
+													if (!next) {
+														setRepeatAccountSeed(
+															null,
+														);
+													}
+												}
+											}
+										>
 										<DialogTrigger asChild>
 											<Button type="button">
 												Add Sale
@@ -780,6 +879,16 @@ export function TabsClient({
 												</DialogDescription>
 											</DialogHeader>
 											<TabChargeForm
+												key={
+													repeatAccountSeed
+														? `repeat-account-${repeatAccountSeed.customerId}-${repeatAccountSeed.items
+																.map(
+																	(item) =>
+																		`${item.productId}:${item.units}:${item.discountCents}`,
+																)
+																.join("|")}`
+														: "account-default"
+												}
 												customers={
 													normalizedCustomers
 												}
@@ -787,11 +896,18 @@ export function TabsClient({
 													normalizedProducts
 												}
 												date={date}
+												initialData={
+													repeatAccountSeed ??
+													undefined
+												}
 												onSuccess={() => {
 													mutateCustomers();
 													mutateTransactions();
 													setSaleDialogOpen(
 														false,
+													);
+													setRepeatAccountSeed(
+														null,
 													);
 												}}
 											/>
@@ -946,7 +1062,7 @@ export function TabsClient({
 																	"-"}
 															</span>
 														</div>
-														<div className="mt-3 flex items-center justify-end gap-2">
+															<div className="mt-3 flex items-center justify-end gap-2">
 															{txn.isReversal && (
 																<span className="rounded px-2 py-1 text-xs bg-muted text-muted-foreground">
 																	Reversal
@@ -957,6 +1073,25 @@ export function TabsClient({
 																	Reversed
 																</span>
 															)}
+															{!txn.isReversal &&
+																!txn.isReversed &&
+																(txn.type ===
+																	"DIRECT_SALE" ||
+																	txn.type ===
+																		"CHARGE") && (
+																	<Button
+																		type="button"
+																		size="sm"
+																		variant="secondary"
+																		onClick={() =>
+																			repeatSaleFromHistory(
+																				txn,
+																			)
+																		}
+																	>
+																		Repeat
+																	</Button>
+																)}
 															{!txn.isReversal &&
 																!txn.isReversed &&
 																(txn.type ===
@@ -1065,19 +1200,38 @@ export function TabsClient({
 																			"CHARGE" ||
 																		txn.type ===
 																			"PAYMENT" ? (
-																		<Button
-																			type="button"
-																			size="sm"
-																			variant="outline"
-																			onClick={() =>
-																				setReversingTxn(
-																					txn,
-																				)
-																			}
-																		>
-																			<RotateCcw className="mr-2 h-3.5 w-3.5" />
-																			Reverse
-																		</Button>
+																		<div className="inline-flex items-center gap-2">
+																			{(txn.type ===
+																				"DIRECT_SALE" ||
+																				txn.type ===
+																					"CHARGE") && (
+																				<Button
+																					type="button"
+																					size="sm"
+																					variant="secondary"
+																					onClick={() =>
+																						repeatSaleFromHistory(
+																							txn,
+																						)
+																					}
+																				>
+																					Repeat
+																				</Button>
+																			)}
+																			<Button
+																				type="button"
+																				size="sm"
+																				variant="outline"
+																				onClick={() =>
+																					setReversingTxn(
+																						txn,
+																					)
+																				}
+																			>
+																				<RotateCcw className="mr-2 h-3.5 w-3.5" />
+																				Reverse
+																			</Button>
+																		</div>
 																	) : (
 																		"-"
 																	)}
@@ -1539,34 +1693,95 @@ function EditCustomerDialog({
 interface ChargeItem {
 	productId: string;
 	units: string;
+	discountCents: number;
 }
 
 function TabChargeForm({
 	customers,
 	products,
 	date,
+	initialData,
 	onSuccess,
 }: {
 	customers: Customer[];
 	products: Product[];
 	date: string;
+	initialData?: {
+		customerId: string;
+		items: ChargeItem[];
+		discountCents: number;
+		note: string;
+	};
 	onSuccess?: () => void;
 }) {
 	const [loading, setLoading] =
 		React.useState(false);
 	const [customerId, setCustomerId] =
-		React.useState("");
+		React.useState(
+			initialData?.customerId ?? "",
+		);
 	const [items, setItems] = React.useState<
 		ChargeItem[]
-	>([{ productId: "", units: "" }]);
-	const [note, setNote] = React.useState("");
+	>(
+		initialData?.items &&
+			initialData.items.length > 0
+			? initialData.items
+			: [
+					{
+						productId: "",
+						units: "",
+						discountCents: 0,
+					},
+				],
+	);
+	const [discountCents, setDiscountCents] =
+		React.useState(
+			initialData?.discountCents ?? 0,
+		);
+	const [note, setNote] = React.useState(
+		initialData?.note ?? "",
+	);
 	const [showNote, setShowNote] =
-		React.useState(false);
+		React.useState(
+			Boolean(initialData?.note),
+		);
+	const productPriceById = React.useMemo(
+		() =>
+			new Map(
+				products.map((product) => [
+					product.id,
+					product.currentPriceCents ?? 0,
+				]),
+			),
+		[products],
+	);
+	React.useEffect(() => {
+		if (!initialData) return;
+		setCustomerId(initialData.customerId);
+		setItems(
+			initialData.items.length > 0
+				? initialData.items
+				: [
+						{
+							productId: "",
+							units: "",
+							discountCents: 0,
+						},
+					],
+		);
+		setDiscountCents(initialData.discountCents);
+		setNote(initialData.note);
+		setShowNote(Boolean(initialData.note));
+	}, [initialData]);
 
 	const addItem = () => {
 		setItems([
 			...items,
-			{ productId: "", units: "" },
+			{
+				productId: "",
+				units: "",
+				discountCents: 0,
+			},
 		]);
 	};
 
@@ -1600,6 +1815,10 @@ function TabChargeForm({
 			.map((item) => ({
 				productId: item.productId,
 				units: parseInt(item.units) || 0,
+				discountCents:
+					item.discountCents > 0
+						? item.discountCents
+						: undefined,
 			}));
 
 		if (validItems.length === 0) {
@@ -1619,6 +1838,10 @@ function TabChargeForm({
 					body: JSON.stringify({
 						date,
 						customerId,
+						discountCents:
+							discountCents > 0
+								? discountCents
+								: undefined,
 						items: validItems,
 						note:
 							showNote && note ? note : undefined,
@@ -1647,8 +1870,16 @@ function TabChargeForm({
 
 			// Reset form
 			setCustomerId("");
-			setItems([{ productId: "", units: "" }]);
+			setItems([
+				{
+					productId: "",
+					units: "",
+					discountCents: 0,
+				},
+			]);
+			setDiscountCents(0);
 			setNote("");
+			setShowNote(false);
 		} catch (err) {
 			toast.error(
 				err instanceof Error
@@ -1669,50 +1900,84 @@ function TabChargeForm({
 				<div className="flex min-h-0 flex-1 flex-col space-y-2 h-[50vh]">
 					<Label>Items Sold</Label>
 					<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-						{items.map((item, index) => (
-							<div
-								key={index}
-								className="flex gap-2 items-end"
-							>
-								<div className="flex-1">
-									<ProductSelect
-										products={products}
-										value={item.productId}
-										onChange={(v) =>
-											updateItem(index, {
-												productId: v,
-											})
-										}
-										placeholder="Product"
-									/>
+						{items.map((item, index) => {
+							const units =
+								parseInt(item.units, 10) || 0;
+							const subtotalCents =
+								(productPriceById.get(
+									item.productId,
+								) ?? 0) * units;
+							const netCents = Math.max(
+								0,
+								subtotalCents -
+									item.discountCents,
+							);
+							return (
+								<div
+									key={index}
+									className="space-y-1"
+								>
+									<div className="flex gap-2 items-end">
+										<div className="flex-1">
+											<ProductSelect
+												products={products}
+												value={item.productId}
+												onChange={(v) =>
+													updateItem(index, {
+														productId: v,
+													})
+												}
+												placeholder="Product"
+											/>
+										</div>
+										<div className="w-20">
+											<Input
+												type="number"
+												min="1"
+												value={item.units}
+												onChange={(e) =>
+													updateItem(index, {
+														units: e.target.value,
+													})
+												}
+												placeholder="Qty"
+											/>
+										</div>
+										<div className="w-32 space-y-1">
+											<Label className="text-xs">
+												Item Discount
+											</Label>
+											<MoneyInput
+												className="space-y-0"
+												value={item.discountCents}
+												onChange={(v) =>
+													updateItem(index, {
+														discountCents: v,
+													})
+												}
+												placeholder="0.00"
+											/>
+										</div>
+										{items.length > 1 && (
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon"
+												onClick={() =>
+													removeItem(index)
+												}
+											>
+												<Trash2 className="h-4 w-4" />
+											</Button>
+										)}
+									</div>
+									<p className="text-[11px] text-muted-foreground">
+										Subtotal {formatZAR(subtotalCents)} | Net{" "}
+										{formatZAR(netCents)}
+									</p>
 								</div>
-								<div className="w-20">
-									<Input
-										type="number"
-										min="1"
-										value={item.units}
-										onChange={(e) =>
-											updateItem(index, {
-												units: e.target.value,
-											})
-										}
-										placeholder="Qty"
-									/>
-								</div>
-								{items.length > 1 && (
-									<Button
-										type="button"
-										variant="ghost"
-										size="icon"
-										onClick={() =>
-											removeItem(index)
-										}
-									>
-										<Trash2 className="h-4 w-4" />
-									</Button>
-								)}
-							</div>
-						))}
+							);
+						})}
 					</div>
 				</div>
 
@@ -1724,6 +1989,11 @@ function TabChargeForm({
 						label="Customer Account"
 					/>
 				</div>
+				<MoneyInput
+					label="Discount (optional)"
+					value={discountCents}
+					onChange={setDiscountCents}
+				/>
 
 				<div className="space-y-2">
 					<div className="grid grid-cols-2 gap-2">
@@ -1996,27 +2266,87 @@ function TabPaymentForm({
 function DirectSaleForm({
 	products,
 	date,
+	initialData,
 	onSuccess,
 }: {
 	products: Product[];
 	date: string;
+	initialData?: {
+		items: ChargeItem[];
+		paymentMethod: PaymentMethod | "";
+		discountCents: number;
+		note: string;
+	};
 	onSuccess: () => void;
 }) {
 	const [loading, setLoading] =
 		React.useState(false);
 	const [items, setItems] = React.useState<
 		ChargeItem[]
-	>([{ productId: "", units: "" }]);
+	>(
+		initialData?.items &&
+			initialData.items.length > 0
+			? initialData.items
+			: [
+					{
+						productId: "",
+						units: "",
+						discountCents: 0,
+					},
+				],
+	);
 	const [paymentMethod, setPaymentMethod] =
-		React.useState<PaymentMethod | "">("");
-	const [note, setNote] = React.useState("");
+		React.useState<PaymentMethod | "">(
+			initialData?.paymentMethod ?? "",
+		);
+	const [discountCents, setDiscountCents] =
+		React.useState(
+			initialData?.discountCents ?? 0,
+		);
+	const [note, setNote] = React.useState(
+		initialData?.note ?? "",
+	);
 	const [showNote, setShowNote] =
-		React.useState(false);
+		React.useState(
+			Boolean(initialData?.note),
+		);
+	const productPriceById = React.useMemo(
+		() =>
+			new Map(
+				products.map((product) => [
+					product.id,
+					product.currentPriceCents ?? 0,
+				]),
+			),
+		[products],
+	);
+	React.useEffect(() => {
+		if (!initialData) return;
+		setItems(
+			initialData.items.length > 0
+				? initialData.items
+				: [
+						{
+							productId: "",
+							units: "",
+							discountCents: 0,
+						},
+					],
+		);
+		setPaymentMethod(initialData.paymentMethod);
+		setDiscountCents(initialData.discountCents);
+		setNote(initialData.note);
+		setShowNote(Boolean(initialData.note));
+	}, [initialData]);
 
 	const addItem = () => {
 		setItems([
 			...items,
-			{ productId: "", units: "" },
+			{
+				productId: "",
+				units: "",
+				discountCents: 0,
+			},
 		]);
 	};
 
@@ -2050,6 +2380,10 @@ function DirectSaleForm({
 			.map((item) => ({
 				productId: item.productId,
 				units: parseInt(item.units) || 0,
+				discountCents:
+					item.discountCents > 0
+						? item.discountCents
+						: undefined,
 			}))
 			.filter((item) => item.units > 0);
 
@@ -2068,6 +2402,10 @@ function DirectSaleForm({
 				body: JSON.stringify({
 					date,
 					paymentMethod,
+					discountCents:
+						discountCents > 0
+							? discountCents
+							: undefined,
 					items: validItems,
 					note:
 						showNote && note ? note : undefined,
@@ -2087,8 +2425,15 @@ function DirectSaleForm({
 			}
 
 			toast.success("Direct sale saved");
-			setItems([{ productId: "", units: "" }]);
+			setItems([
+				{
+					productId: "",
+					units: "",
+					discountCents: 0,
+				},
+			]);
 			setPaymentMethod("");
+			setDiscountCents(0);
 			setNote("");
 			onSuccess();
 		} catch (err) {
@@ -2111,50 +2456,84 @@ function DirectSaleForm({
 				<div className="flex min-h-0 flex-1 flex-col space-y-2 h-[50vh]">
 					<Label>Items Sold</Label>
 					<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-						{items.map((item, index) => (
-							<div
-								key={index}
-								className="flex gap-2 items-end"
-							>
-								<div className="flex-1">
-									<ProductSelect
-										products={products}
-										value={item.productId}
-										onChange={(v) =>
-											updateItem(index, {
-												productId: v,
-											})
-										}
-										placeholder="Product"
-									/>
+						{items.map((item, index) => {
+							const units =
+								parseInt(item.units, 10) || 0;
+							const subtotalCents =
+								(productPriceById.get(
+									item.productId,
+								) ?? 0) * units;
+							const netCents = Math.max(
+								0,
+								subtotalCents -
+									item.discountCents,
+							);
+							return (
+								<div
+									key={index}
+									className="space-y-1"
+								>
+									<div className="flex gap-2 items-end">
+										<div className="flex-1">
+											<ProductSelect
+												products={products}
+												value={item.productId}
+												onChange={(v) =>
+													updateItem(index, {
+														productId: v,
+													})
+												}
+												placeholder="Product"
+											/>
+										</div>
+										<div className="w-20">
+											<Input
+												type="number"
+												min="1"
+												value={item.units}
+												onChange={(e) =>
+													updateItem(index, {
+														units: e.target.value,
+													})
+												}
+												placeholder="Qty"
+											/>
+										</div>
+										<div className="w-32 space-y-1">
+											<Label className="text-xs">
+												Item Discount
+											</Label>
+											<MoneyInput
+												className="space-y-0"
+												value={item.discountCents}
+												onChange={(v) =>
+													updateItem(index, {
+														discountCents: v,
+													})
+												}
+												placeholder="0.00"
+											/>
+										</div>
+										{items.length > 1 && (
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon"
+												onClick={() =>
+													removeItem(index)
+												}
+											>
+												<Trash2 className="h-4 w-4" />
+											</Button>
+										)}
+									</div>
+									<p className="text-[11px] text-muted-foreground">
+										Subtotal {formatZAR(subtotalCents)} | Net{" "}
+										{formatZAR(netCents)}
+									</p>
 								</div>
-								<div className="w-20">
-									<Input
-										type="number"
-										min="1"
-										value={item.units}
-										onChange={(e) =>
-											updateItem(index, {
-												units: e.target.value,
-											})
-										}
-										placeholder="Qty"
-									/>
-								</div>
-								{items.length > 1 && (
-									<Button
-										type="button"
-										variant="ghost"
-										size="icon"
-										onClick={() =>
-											removeItem(index)
-										}
-									>
-										<Trash2 className="h-4 w-4" />
-									</Button>
-								)}
-							</div>
-						))}
+							);
+						})}
 					</div>
 				</div>
 
@@ -2182,6 +2561,11 @@ function DirectSaleForm({
 						</SelectContent>
 					</Select>
 				</div>
+				<MoneyInput
+					label="Discount (optional)"
+					value={discountCents}
+					onChange={setDiscountCents}
+				/>
 
 				<div className="space-y-2">
 					<div className="grid grid-cols-2 gap-2">

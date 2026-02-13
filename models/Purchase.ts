@@ -7,6 +7,8 @@ export interface PurchaseItem {
   singles: number;
   units: number;
   unitCostCents?: number;
+  discountCents?: number;
+  lineTotalCostCents?: number;
 }
 
 export interface PurchaseDoc {
@@ -14,6 +16,9 @@ export interface PurchaseDoc {
   invoiceNo?: string;
   purchaseDate: YMD;
   items: PurchaseItem[];
+  subtotalCents?: number;
+  discountCents?: number;
+  totalCostCents?: number;
   attachmentIds: string[];
   createdByUserId: string;
   createdAt: Date;
@@ -32,8 +37,13 @@ const PurchaseSchema = new Schema<PurchaseDoc>(
         singles: { type: Number, required: true, default: 0 },
         units: { type: Number, required: true },
         unitCostCents: { type: Number },
+        discountCents: { type: Number },
+        lineTotalCostCents: { type: Number },
       },
     ],
+    subtotalCents: { type: Number },
+    discountCents: { type: Number },
+    totalCostCents: { type: Number },
     attachmentIds: [{ type: String }],
     createdByUserId: { type: String, required: true },
   },

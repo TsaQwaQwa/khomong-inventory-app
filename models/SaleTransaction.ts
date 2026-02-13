@@ -7,12 +7,16 @@ export interface SaleTxnItem {
 	productId: string;
 	units: number;
 	unitPriceCents: number;
+	subtotalCents: number;
+	discountCents?: number;
 	lineTotalCents: number;
 }
 
 export interface SaleTransactionDoc {
 	businessDayId: string;
 	paymentMethod: PaymentMethod;
+	subtotalCents?: number;
+	discountCents?: number;
 	amountCents: number;
 	items: SaleTxnItem[];
 	note?: string;
@@ -38,6 +42,8 @@ const SaleTransactionSchema =
 				type: Number,
 				required: true,
 			},
+			subtotalCents: { type: Number },
+			discountCents: { type: Number },
 			items: [
 				{
 					productId: {
@@ -51,6 +57,13 @@ const SaleTransactionSchema =
 					unitPriceCents: {
 						type: Number,
 						required: true,
+					},
+					subtotalCents: {
+						type: Number,
+						required: true,
+					},
+					discountCents: {
+						type: Number,
 					},
 					lineTotalCents: {
 						type: Number,

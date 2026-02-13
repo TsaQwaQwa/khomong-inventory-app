@@ -3,6 +3,11 @@
 
 import * as React from "react";
 import Link from "next/link";
+import {
+	usePathname,
+	useRouter,
+	useSearchParams,
+} from "next/navigation";
 import useSWR from "swr";
 import { toast } from "sonner";
 import {
@@ -51,6 +56,29 @@ import { formatZAR } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import type { DailyReport } from "@/lib/types";
 
+const DASHBOARD_TABS = [
+	"overview",
+	"sales-by-product",
+	"trends-recommendations",
+] as const;
+
+type DashboardTab = (typeof DASHBOARD_TABS)[number];
+
+const isValidDateParam = (
+	value: string | null,
+): value is string =>
+	Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
+
+const isDashboardTab = (
+	value: string | null,
+): value is DashboardTab =>
+	Boolean(
+		value &&
+			DASHBOARD_TABS.includes(
+				value as DashboardTab,
+			),
+	);
+
 const fetcher = async (url: string) => {
 	const res = await fetch(url);
 	const json = await res.json().catch(() => ({}));
@@ -65,8 +93,49 @@ const fetcher = async (url: string) => {
 };
 
 export function DashboardClient() {
-	const [date, setDate] = React.useState(
-		getTodayJHB(),
+	const router = useRouter();
+	const pathname = usePathname();
+	const searchParams = useSearchParams();
+
+	const date = isValidDateParam(
+		searchParams.get("date"),
+	)
+		? searchParams.get("date")!
+		: getTodayJHB();
+	const activeTab = isDashboardTab(
+		searchParams.get("tab"),
+	)
+		? searchParams.get("tab")!
+		: "overview";
+
+	const updateQueryParam = React.useCallback(
+		(key: string, value: string) => {
+			const params = new URLSearchParams(
+				searchParams.toString(),
+			);
+			params.set(key, value);
+			const query = params.toString();
+			router.replace(
+				query ? `${pathname}?${query}` : pathname,
+				{ scroll: false },
+			);
+		},
+		[pathname, router, searchParams],
+	);
+
+	const onDateChange = React.useCallback(
+		(nextDate: string) => {
+			updateQueryParam("date", nextDate);
+		},
+		[updateQueryParam],
+	);
+
+	const onTabChange = React.useCallback(
+		(nextTab: string) => {
+			if (!isDashboardTab(nextTab)) return;
+			updateQueryParam("tab", nextTab);
+		},
+		[updateQueryParam],
 	);
 
 	const {
@@ -150,7 +219,7 @@ export function DashboardClient() {
 			actions={
 				<DatePickerYMD
 					value={date}
-					onChange={setDate}
+					onChange={onDateChange}
 				/>
 			}
 		>
@@ -174,7 +243,8 @@ export function DashboardClient() {
 				/>
 			) : (
 				<Tabs
-					defaultValue="overview"
+					value={activeTab}
+					onValueChange={onTabChange}
 					className="space-y-6"
 				>
 					<TabsList className="flex w-full items-center gap-1 overflow-x-auto">
@@ -709,20 +779,20 @@ export function DashboardClient() {
 							</Card>
 						</div>
 
-						<Card className="shadow-md">
-							<CardHeader>
-								<CardTitle>
-									Product Stock Recommendations
-								</CardTitle>
-							</CardHeader>
-							<CardContent>
-								{report.stockRecommendations
-									.length === 0 ? (
-									<p className="text-sm text-muted-foreground">
-										No products below reorder
-										level for this date.
-									</p>
-								) : (
+							<Card className="shadow-md">
+								<CardHeader>
+									<CardTitle>
+										Daily Suggested Purchase List
+									</CardTitle>
+								</CardHeader>
+								<CardContent>
+									{report.stockRecommendations
+										.length === 0 ? (
+										<p className="text-sm text-muted-foreground">
+											No purchase suggestions for this
+											date.
+										</p>
+									) : (
 									<div className="space-y-3">
 										{report.stockRecommendations.map(
 											(item) => (
@@ -735,21 +805,33 @@ export function DashboardClient() {
 															<p className="font-medium">
 																{item.productName}
 															</p>
-															<div className="mt-1 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-																<p>
-																	Current:{" "}
+														<div className="mt-1 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+															<p>
+																Current:{" "}
 																	{
 																		item.currentUnits
 																	}
 																</p>
-																<p>
-																	Reorder:{" "}
+															<p>
+																Reorder:{" "}
 																	{
 																		item.reorderLevelUnits
 																	}
-																</p>
-															</div>
+															</p>
+															<p>
+																Sell-through:{" "}
+																{item.recentAvgDailySoldUnits?.toFixed(
+																	2,
+																) ?? "0.00"}
+																/day
+															</p>
+															<p>
+																Basis:{" "}
+																{item.recommendationBasis ??
+																	"REORDER_LEVEL"}
+															</p>
 														</div>
+													</div>
 														<span
 															className={cn(
 																"rounded px-2 py-0.5 text-xs font-medium",

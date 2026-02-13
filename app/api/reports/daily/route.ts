@@ -4,6 +4,8 @@ import { requireOrgAuth } from "@/lib/authz";
 import { ok, fail } from "@/lib/http";
 import { todayYMD } from "@/lib/dates";
 import { computeDailySummary } from "@/lib/reporting";
+import { connectDB } from "@/lib/db";
+import { syncStockAlertsForDay } from "@/lib/alerts";
 
 export async function GET(req: Request) {
 	let a;
@@ -21,10 +23,17 @@ export async function GET(req: Request) {
 		url.searchParams.get("date") ?? todayYMD();
 
 	try {
+		await connectDB();
 		const summary = await computeDailySummary(
 			date,
 			a.userId!,
 		);
+		const scopeId = a.orgId ?? a.userId!;
+		await syncStockAlertsForDay({
+			scopeId,
+			date,
+			summary,
+		});
 		return ok(summary);
 	} catch (e: any) {
 		console.error(

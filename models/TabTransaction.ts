@@ -8,6 +8,8 @@ export interface TabTxnItem {
   productId: string;
   units: number;
   unitPriceCents: number;
+  subtotalCents: number;
+  discountCents?: number;
   lineTotalCents: number;
 }
 
@@ -15,6 +17,8 @@ export interface TabTransactionDoc {
   customerId: string;
   businessDayId: string;
   type: TabTxnType;
+  subtotalCents?: number;
+  discountCents?: number;
   amountCents: number;
 
   paymentMethod?: PaymentMethod;
@@ -36,6 +40,8 @@ const TabTransactionSchema = new Schema<TabTransactionDoc>(
     customerId: { type: String, required: true },
     businessDayId: { type: String, required: true, index: true },
     type: { type: String, required: true },
+    subtotalCents: { type: Number },
+    discountCents: { type: Number },
     amountCents: { type: Number, required: true },
 
     paymentMethod: { type: String },
@@ -46,6 +52,8 @@ const TabTransactionSchema = new Schema<TabTransactionDoc>(
         productId: { type: String, required: true },
         units: { type: Number, required: true },
         unitPriceCents: { type: Number, required: true },
+        subtotalCents: { type: Number, required: true },
+        discountCents: { type: Number },
         lineTotalCents: { type: Number, required: true },
       },
     ],

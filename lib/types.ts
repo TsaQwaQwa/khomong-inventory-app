@@ -13,6 +13,20 @@ export interface Product {
 export interface Supplier {
 	id: string;
 	name: string;
+	phone?: string;
+	notes?: string;
+}
+
+export interface SupplierPrice {
+	id: string;
+	supplierId: string;
+	productId: string;
+	unitCostCents: number;
+	effectiveFrom: string;
+	effectiveTo?: string;
+	moqUnits?: number;
+	leadTimeDays?: number;
+	note?: string;
 }
 
 // Customer types
@@ -37,6 +51,8 @@ export interface PurchaseItem {
 	singles: number;
 	units: number;
 	unitCostCents?: number;
+	discountCents?: number;
+	lineTotalCostCents?: number;
 }
 
 export interface Purchase {
@@ -46,8 +62,10 @@ export interface Purchase {
 	invoiceNo?: string;
 	purchaseDate: string;
 	items: PurchaseItem[];
-	totalUnits?: number;
+	subtotalCents?: number;
+	discountCents?: number;
 	totalCostCents?: number;
+	totalUnits?: number;
 	attachmentIds?: string[];
 }
 
@@ -157,6 +175,12 @@ export interface DailyReport {
 		currentUnits: number;
 		reorderLevelUnits: number;
 		recommendedOrderUnits: number;
+		recentAvgDailySoldUnits?: number;
+		targetCoverDays?: number;
+		recommendationBasis?:
+			| "REORDER_LEVEL"
+			| "SELL_THROUGH"
+			| "BLENDED";
 		priority: "HIGH" | "MEDIUM";
 	}[];
 }
