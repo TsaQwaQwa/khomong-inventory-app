@@ -17,6 +17,10 @@ export async function GET(req: Request) {
 	const expected =
 		process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
 
+		console.log(
+			"WhatsApp webhook verification attempt",
+			{ mode, token, challenge, expected },
+		);
 	if (
 		mode === "subscribe" &&
 		token &&
