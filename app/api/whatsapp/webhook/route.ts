@@ -107,7 +107,18 @@ export async function POST(req: Request) {
 			);
 
 			await Alert.updateMany(
-				{ whatsappMessageId: messageId },
+				{
+					$or: [
+						{
+							whatsappMessageId:
+								messageId,
+						},
+						{
+							whatsappMessageIds:
+								messageId,
+						},
+					],
+				},
 				{
 					$set: {
 						whatsappDeliveryStatus: state.toUpperCase(),
@@ -130,4 +141,3 @@ export async function POST(req: Request) {
 		);
 	}
 }
-

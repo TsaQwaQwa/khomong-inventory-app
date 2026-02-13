@@ -20,7 +20,8 @@ Kgomong Monitor helps a tavern team track:
    - Optional WhatsApp alerts:
      - `WHATSAPP_ACCESS_TOKEN`
      - `WHATSAPP_PHONE_NUMBER_ID`
-     - `WHATSAPP_TO_PHONE`
+     - `WHATSAPP_TO_PHONE` (single recipient)
+     - `WHATSAPP_TO_PHONES` (optional comma-separated recipients)
      - `WHATSAPP_API_VERSION` (optional, default `v20.0`)
      - `WHATSAPP_WEBHOOK_VERIFY_TOKEN` (for callback verification)
 

@@ -114,6 +114,8 @@ export async function syncStockAlertsForDay({
 						whatsappSentAt: new Date(),
 						whatsappMessageId:
 							result.messageId,
+						whatsappMessageIds:
+							result.messageIds ?? [],
 						whatsappDeliveryStatus: "SENT",
 						whatsappStatusAt: new Date(),
 						whatsappError: undefined,
@@ -125,6 +127,10 @@ export async function syncStockAlertsForDay({
 				{ _id: alert._id },
 				{
 					$set: {
+						whatsappMessageId:
+							result.messageId,
+						whatsappMessageIds:
+							result.messageIds ?? [],
 						whatsappError:
 							result.error ??
 							"Failed to send WhatsApp",

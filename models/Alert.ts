@@ -21,6 +21,7 @@ export interface AlertDoc {
 	dedupeKey: string;
 	status: AlertStatus;
 	whatsappMessageId?: string;
+	whatsappMessageIds?: string[];
 	whatsappDeliveryStatus?: string;
 	whatsappStatusAt?: Date;
 	whatsappSentAt?: Date;
@@ -52,6 +53,7 @@ const AlertSchema = new Schema<AlertDoc>(
 			default: "UNREAD",
 		},
 		whatsappMessageId: { type: String },
+		whatsappMessageIds: [{ type: String }],
 		whatsappDeliveryStatus: { type: String },
 		whatsappStatusAt: { type: Date },
 		whatsappSentAt: { type: Date },
