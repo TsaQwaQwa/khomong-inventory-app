@@ -24,6 +24,7 @@ import {
 	Package,
 	ShoppingCart,
 	AlertTriangle,
+	ShieldAlert,
 	Bell,
 	Receipt,
 	CreditCard,
@@ -71,6 +72,12 @@ const navItems = [
 		href: "/adjustments",
 		label: "Stock Adjustments",
 		icon: AlertTriangle,
+		desktopGroup: "more",
+	},
+	{
+		href: "/exceptions",
+		label: "Exceptions",
+		icon: ShieldAlert,
 		desktopGroup: "more",
 	},
 	{

@@ -2,6 +2,7 @@
 /* eslint-disable max-len */
 
 import * as React from "react";
+import { useSearchParams } from "next/navigation";
 import useSWR, { type KeyedMutator } from "swr";
 import { toast } from "sonner";
 import {
@@ -83,6 +84,9 @@ interface CurrentStockRow {
 type ProductWithStock = Product & CurrentStockRow;
 
 export function ProductsClient() {
+	const searchParams = useSearchParams();
+	const focusedProductId =
+		searchParams.get("productId");
 	const {
 		data: products,
 		error,
@@ -94,6 +98,15 @@ export function ProductsClient() {
 		onError: (err) => toast.error(err.message),
 		},
 	);
+	const visibleProducts = React.useMemo(() => {
+		if (!products) return [];
+		if (!focusedProductId) return products;
+		const focused = products.find(
+			(product) =>
+				product.id === focusedProductId,
+		);
+		return focused ? [focused] : products;
+	}, [focusedProductId, products]);
 
 	const [addDialogOpen, setAddDialogOpen] =
 		React.useState(false);
@@ -152,7 +165,7 @@ export function ProductsClient() {
 				<Card className="shadow-lg">
 					<CardContent className="pt-6">
 						<div className="space-y-3 md:hidden">
-							{products.map((product) => {
+							{visibleProducts.map((product) => {
 								const priceDisplay =
 									product.currentPriceCents
 										? formatZAR(
@@ -271,7 +284,7 @@ export function ProductsClient() {
 									</TableRow>
 								</TableHeader>
 								<TableBody>
-									{products.map((product) => {
+									{visibleProducts.map((product) => {
 										const priceDisplay =
 											product.currentPriceCents
 												? formatZAR(

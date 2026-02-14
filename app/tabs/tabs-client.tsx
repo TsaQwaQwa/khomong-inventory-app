@@ -287,6 +287,13 @@ export function TabsClient({
 			Array.isArray(customers) ? customers : [],
 		[customers],
 	);
+	const displayedCustomers = React.useMemo(() => {
+		if (!selectedCustomerId) return normalizedCustomers;
+		const selected = normalizedCustomers.find(
+			(customer) => customer.id === selectedCustomerId,
+		);
+		return selected ? [selected] : normalizedCustomers;
+	}, [normalizedCustomers, selectedCustomerId]);
 	const [addCustomerOpen, setAddCustomerOpen] =
 		React.useState(false);
 	const [editingCustomer, setEditingCustomer] =
@@ -330,6 +337,8 @@ export function TabsClient({
 	const kindFilter = normalizeTransactionKind(
 		searchParams.get("kind"),
 	);
+	const selectedCustomerId =
+		searchParams.get("customerId");
 	const productFilter =
 		searchParams.get("productId");
 	const action = searchParams.get("action");
@@ -677,7 +686,7 @@ export function TabsClient({
 									</Dialog>
 								</div>
 
-								{!customers?.length ? (
+								{displayedCustomers.length === 0 ? (
 									<EmptyState
 										icon={
 											<Users className="h-8 w-8 text-muted-foreground" />
@@ -689,7 +698,7 @@ export function TabsClient({
 									<Card className="shadow-lg">
 										<CardContent className="pt-6">
 											<div className="space-y-3 md:hidden">
-												{customers.map(
+												{displayedCustomers.map(
 													(customer) => {
 														const balanceCents =
 															customer.balanceCents ??
@@ -823,7 +832,7 @@ export function TabsClient({
 														</TableRow>
 													</TableHeader>
 													<TableBody>
-														{customers.map(
+														{displayedCustomers.map(
 															(customer) => {
 																const balanceCents =
 																	customer.balanceCents ??
