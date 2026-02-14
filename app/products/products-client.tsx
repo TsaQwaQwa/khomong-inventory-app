@@ -227,6 +227,9 @@ export function ProductsClient() {
 														stock?.status ===
 															"LOW" &&
 															"text-amber-700 font-medium",
+														stock?.status ===
+															"OK" &&
+															"text-emerald-700 font-medium",
 													)}
 												>
 													{stock?.currentUnits ??
@@ -325,6 +328,9 @@ export function ProductsClient() {
 														stock?.status ===
 															"LOW" &&
 															"text-amber-700 font-medium",
+														stock?.status ===
+															"OK" &&
+															"text-emerald-700 font-medium",
 													)}
 												>
 													{stock?.currentUnits ??
