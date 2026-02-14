@@ -287,12 +287,18 @@ export function TabsClient({
 			Array.isArray(customers) ? customers : [],
 		[customers],
 	);
+	const selectedCustomerId =
+		searchParams.get("customerId");
 	const displayedCustomers = React.useMemo(() => {
-		if (!selectedCustomerId) return normalizedCustomers;
+		if (!selectedCustomerId)
+			return normalizedCustomers;
 		const selected = normalizedCustomers.find(
-			(customer) => customer.id === selectedCustomerId,
+			(customer) =>
+				customer.id === selectedCustomerId,
 		);
-		return selected ? [selected] : normalizedCustomers;
+		return selected
+			? [selected]
+			: normalizedCustomers;
 	}, [normalizedCustomers, selectedCustomerId]);
 	const [addCustomerOpen, setAddCustomerOpen] =
 		React.useState(false);
@@ -310,22 +316,18 @@ export function TabsClient({
 	] = React.useState(false);
 	const [reverseReason, setReverseReason] =
 		React.useState("");
-	const [
-		reversingTxn,
-		setReversingTxn,
-	] = React.useState<TabTransactionHistory | null>(
-		null,
-	);
+	const [reversingTxn, setReversingTxn] =
+		React.useState<TabTransactionHistory | null>(
+			null,
+		);
 	const [reverseLoading, setReverseLoading] =
 		React.useState(false);
-	const [
-		repeatDirectSeed,
-		setRepeatDirectSeed,
-	] = React.useState<{
-		items: ChargeItem[];
-		paymentMethod: PaymentMethod | "";
-		note: string;
-	} | null>(null);
+	const [repeatDirectSeed, setRepeatDirectSeed] =
+		React.useState<{
+			items: ChargeItem[];
+			paymentMethod: PaymentMethod | "";
+			note: string;
+		} | null>(null);
 	const [
 		repeatAccountSeed,
 		setRepeatAccountSeed,
@@ -337,8 +339,6 @@ export function TabsClient({
 	const kindFilter = normalizeTransactionKind(
 		searchParams.get("kind"),
 	);
-	const selectedCustomerId =
-		searchParams.get("customerId");
 	const productFilter =
 		searchParams.get("productId");
 	const action = searchParams.get("action");
@@ -390,7 +390,9 @@ export function TabsClient({
 		() =>
 			new Map(
 				normalizedProducts
-					.filter((product) => Boolean(product.barcode))
+					.filter((product) =>
+						Boolean(product.barcode),
+					)
 					.map((product) => [
 						String(product.barcode)
 							.trim()
@@ -400,118 +402,124 @@ export function TabsClient({
 			),
 		[normalizedProducts],
 	);
-	const parsedKindFromQuery = React.useMemo(() => {
-		const normalizedQuery =
-			transactionQuery.trim().toLowerCase();
-		if (!normalizedQuery) return null;
-		const option = SEARCH_KIND_OPTIONS.find(
-			(entry) =>
-				entry.aliases.includes(
-					normalizedQuery,
-				),
-		);
-		return option?.kind ?? null;
-	}, [transactionQuery]);
-	const freeTextQuery = React.useMemo(
-		() => {
-			if (parsedKindFromQuery) return "";
-			return transactionQuery
+	const parsedKindFromQuery =
+		React.useMemo(() => {
+			const normalizedQuery = transactionQuery
 				.trim()
 				.toLowerCase();
-		},
-		[parsedKindFromQuery, transactionQuery],
-	);
-	const filteredTransactions = React.useMemo(() => {
-		const effectiveKind =
-			parsedKindFromQuery ?? kindFilter;
-		const barcodeProductId = freeTextQuery
-			? productByBarcode.get(freeTextQuery)
-			: undefined;
-		return (transactionsHistory ?? []).filter((txn) => {
-			const kindMatch =
-				effectiveKind === "direct-sales"
-					? txn.type === "DIRECT_SALE"
-					: effectiveKind === "account-sales"
-						? txn.type === "CHARGE"
-						: effectiveKind ===
-							  "account-payments"
-							? txn.type === "PAYMENT"
-							: effectiveKind ===
-								  "reversal-transactions"
-								? Boolean(txn.isReversal)
-								: true;
-			if (!kindMatch) return false;
-			if (
-				productFilter &&
-				!(txn.items ?? []).some(
-					(item) => item.productId === productFilter,
-				)
-			) {
-				return false;
+			if (!normalizedQuery) return null;
+			const option = SEARCH_KIND_OPTIONS.find(
+				(entry) =>
+					entry.aliases.includes(normalizedQuery),
+			);
+			return option?.kind ?? null;
+		}, [transactionQuery]);
+	const freeTextQuery = React.useMemo(() => {
+		if (parsedKindFromQuery) return "";
+		return transactionQuery.trim().toLowerCase();
+	}, [parsedKindFromQuery, transactionQuery]);
+	const filteredTransactions =
+		React.useMemo(() => {
+			const effectiveKind =
+				parsedKindFromQuery ?? kindFilter;
+			const barcodeProductId = freeTextQuery
+				? productByBarcode.get(freeTextQuery)
+				: undefined;
+			return (transactionsHistory ?? []).filter(
+				(txn) => {
+					const kindMatch =
+						effectiveKind === "direct-sales"
+							? txn.type === "DIRECT_SALE"
+							: effectiveKind === "account-sales"
+								? txn.type === "CHARGE"
+								: effectiveKind ===
+									  "account-payments"
+									? txn.type === "PAYMENT"
+									: effectiveKind ===
+										  "reversal-transactions"
+										? Boolean(txn.isReversal)
+										: true;
+					if (!kindMatch) return false;
+					if (
+						productFilter &&
+						!(txn.items ?? []).some(
+							(item) =>
+								item.productId === productFilter,
+						)
+					) {
+						return false;
+					}
+					if (!freeTextQuery) return true;
+					if (
+						barcodeProductId &&
+						(txn.items ?? []).some(
+							(item) =>
+								item.productId ===
+								barcodeProductId,
+						)
+					) {
+						return true;
+					}
+					const productNames = (txn.items ?? [])
+						.map((item) =>
+							productNameById.get(item.productId),
+						)
+						.filter(Boolean)
+						.join(" ")
+						.toLowerCase();
+					const searchable = [
+						txn.customerName,
+						txn.reference,
+						txn.note,
+						txn.paymentMethod,
+						txn.type,
+						formatZAR(txn.amountCents),
+						productNames,
+					]
+						.filter(Boolean)
+						.join(" ")
+						.toLowerCase();
+					return searchable.includes(
+						freeTextQuery,
+					);
+				},
+			);
+		}, [
+			transactionsHistory,
+			parsedKindFromQuery,
+			kindFilter,
+			freeTextQuery,
+			productFilter,
+			productByBarcode,
+			productNameById,
+		]);
+	const transactionSearchOptions =
+		React.useMemo(() => {
+			const options = new Set<string>(
+				SEARCH_KIND_OPTIONS.map(
+					(option) => option.label,
+				),
+			);
+			for (const customer of normalizedCustomers) {
+				options.add(customer.name);
 			}
-			if (!freeTextQuery) return true;
-			if (
-				barcodeProductId &&
-				(txn.items ?? []).some(
-					(item) => item.productId === barcodeProductId,
-				)
-			) {
-				return true;
+			for (const product of normalizedProducts) {
+				options.add(product.name);
+				if (product.barcode) {
+					options.add(String(product.barcode));
+				}
 			}
-			const productNames = (txn.items ?? [])
-				.map((item) =>
-					productNameById.get(item.productId),
-				)
-				.filter(Boolean)
-				.join(" ")
-				.toLowerCase();
-			const searchable = [
-				txn.customerName,
-				txn.reference,
-				txn.note,
-				txn.paymentMethod,
-				txn.type,
-				formatZAR(txn.amountCents),
-				productNames,
-			]
-				.filter(Boolean)
-				.join(" ")
-				.toLowerCase();
-			return searchable.includes(freeTextQuery);
-		});
-	}, [
-		transactionsHistory,
-		parsedKindFromQuery,
-		kindFilter,
-		freeTextQuery,
-		productFilter,
-		productByBarcode,
-		productNameById,
-	]);
-	const transactionSearchOptions = React.useMemo(() => {
-		const options = new Set<string>(
-			SEARCH_KIND_OPTIONS.map(
-				(option) => option.label,
-			),
-		);
-		for (const customer of normalizedCustomers) {
-			options.add(customer.name);
-		}
-		for (const product of normalizedProducts) {
-			options.add(product.name);
-			if (product.barcode) {
-				options.add(String(product.barcode));
+			for (const txn of transactionsHistory ??
+				[]) {
+				if (txn.reference)
+					options.add(txn.reference);
 			}
-		}
-		for (const txn of transactionsHistory ?? []) {
-			if (txn.reference) options.add(txn.reference);
-		}
-		return Array.from(options).slice(0, 200);
-	}, [
-		normalizedCustomers,
-		normalizedProducts,
-		transactionsHistory,
-	]);
+			return Array.from(options).slice(0, 200);
+		}, [
+			normalizedCustomers,
+			normalizedProducts,
+			transactionsHistory,
+		]);
 
 	const handleReverseTransaction = async () => {
 		if (!reversingTxn) return;
@@ -566,8 +574,7 @@ export function TabsClient({
 		const items = (txn.items ?? [])
 			.filter(
 				(item) =>
-					item.productId &&
-					(item.units ?? 0) > 0,
+					item.productId && (item.units ?? 0) > 0,
 			)
 			.map((item) => ({
 				productId: item.productId,
@@ -686,7 +693,8 @@ export function TabsClient({
 									</Dialog>
 								</div>
 
-								{displayedCustomers.length === 0 ? (
+								{displayedCustomers.length ===
+								0 ? (
 									<EmptyState
 										icon={
 											<Users className="h-8 w-8 text-muted-foreground" />
@@ -709,7 +717,7 @@ export function TabsClient({
 															customer.dueDate
 																? formatDateDisplay(
 																		customer.dueDate,
-																  )
+																	)
 																: "-";
 
 														return (
@@ -767,7 +775,7 @@ export function TabsClient({
 																				? "Not enforced"
 																				: formatZAR(
 																						customer.creditLimitCents,
-																				  )}
+																					)}
 																		</p>
 																	</div>
 																	<div className="text-right">
@@ -844,7 +852,7 @@ export function TabsClient({
 																	customer.dueDate
 																		? formatDateDisplay(
 																				customer.dueDate,
-																		  )
+																			)
 																		: "-";
 
 																return (
@@ -860,7 +868,8 @@ export function TabsClient({
 																				}
 																				{customer.isTemporaryTab && (
 																					<span className="rounded border border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-sky-700">
-																						Temp Tab
+																						Temp
+																						Tab
 																					</span>
 																				)}
 																				{customer.customerMode ===
@@ -881,7 +890,7 @@ export function TabsClient({
 																				? "Not enforced"
 																				: formatZAR(
 																						customer.creditLimitCents,
-																				  )}
+																					)}
 																		</TableCell>
 																		<TableCell
 																			className={cn(
@@ -979,21 +988,17 @@ export function TabsClient({
 						) : (
 							<>
 								<div className="mb-4 hidden flex-wrap justify-end gap-2">
-										<Dialog
-											open={directSaleDialogOpen}
-											onOpenChange={
-												(next) => {
-													setDirectSaleDialogOpen(
-														next,
-													);
-													if (!next) {
-														setRepeatDirectSeed(
-															null,
-														);
-													}
-												}
+									<Dialog
+										open={directSaleDialogOpen}
+										onOpenChange={(next) => {
+											setDirectSaleDialogOpen(
+												next,
+											);
+											if (!next) {
+												setRepeatDirectSeed(null);
 											}
-										>
+										}}
+									>
 										<DialogTrigger asChild>
 											<Button
 												type="button"
@@ -1048,21 +1053,17 @@ export function TabsClient({
 										</DialogContent>
 									</Dialog>
 
-										<Dialog
-											open={saleDialogOpen}
-											onOpenChange={
-												(next) => {
-													setSaleDialogOpen(
-														next,
-													);
-													if (!next) {
-														setRepeatAccountSeed(
-															null,
-														);
-													}
-												}
+									<Dialog
+										open={saleDialogOpen}
+										onOpenChange={(next) => {
+											setSaleDialogOpen(next);
+											if (!next) {
+												setRepeatAccountSeed(
+													null,
+												);
 											}
-										>
+										}}
+									>
 										<DialogTrigger asChild>
 											<Button type="button">
 												Add Sale
@@ -1168,208 +1169,98 @@ export function TabsClient({
 							</>
 						)}
 
-						{!(productsLoading || customersLoading || productsError || customersError) && (
+						{!(
+							productsLoading ||
+							customersLoading ||
+							productsError ||
+							customersError
+						) && (
 							<Card className="shadow-md mt-6">
-							<CardHeader>
-								<div className="flex flex-wrap items-center justify-between gap-2">
-									<CardTitle>
-										Transaction History
-									</CardTitle>
-									<div className="w-full sm:w-[24rem]">
-										<Input
-											value={transactionQuery}
-											onChange={(e) =>
-												setTransactionQuery(
-													e.target.value,
-												)
-											}
-											list="transaction-search-options"
-											placeholder="Search/select/scan customer, product, reference, or barcode"
-										/>
-										<datalist id="transaction-search-options">
-											{transactionSearchOptions.map(
-												(option) => (
-													<option
-														key={option}
-														value={option}
-													/>
-												),
-											)}
-										</datalist>
-										<p className="mt-1 text-[11px] text-muted-foreground">
-											Type, pick from suggestions, or scan barcode.
-										</p>
-									</div>
-								</div>
-							</CardHeader>
-							<CardContent>
-								{transactionsLoading ? (
-									<LoadingTable />
-								) : !filteredTransactions.length ? (
-									<p className="text-sm text-muted-foreground">
-										No transactions saved for this
-										date yet.
-									</p>
-								) : (
-									<>
-										{(kindFilter !==
-											"all-transactions" ||
-											productFilter ||
-											parsedKindFromQuery !==
-												null) && (
-											<p className="mb-3 text-xs text-muted-foreground">
-												Showing filtered
-												transactions for this
-												view.
+								<CardHeader>
+									<div className="flex flex-wrap items-center justify-between gap-2">
+										<CardTitle>
+											Transaction History
+										</CardTitle>
+										<div className="w-full sm:w-[24rem]">
+											<Input
+												value={transactionQuery}
+												onChange={(e) =>
+													setTransactionQuery(
+														e.target.value,
+													)
+												}
+												list="transaction-search-options"
+												placeholder="Search/select/scan customer, product, reference, or barcode"
+											/>
+											<datalist id="transaction-search-options">
+												{transactionSearchOptions.map(
+													(option) => (
+														<option
+															key={option}
+															value={option}
+														/>
+													),
+												)}
+											</datalist>
+											<p className="mt-1 text-[11px] text-muted-foreground">
+												Type, pick from
+												suggestions, or scan
+												barcode.
 											</p>
-										)}
-										<div className="space-y-3 md:hidden">
-											{filteredTransactions.map(
-												(txn) => (
-													<div
-														key={txn.id}
-														className="rounded-lg border p-3"
-													>
-														<div className="flex items-start justify-between gap-2">
-															<div>
-																<p className="font-medium">
-																	{
-																		txn.customerName
-																	}
-																</p>
-																<p className="text-xs text-muted-foreground">
-																	{txn.createdAt
-																		? new Date(
-																				txn.createdAt,
-																			).toLocaleTimeString()
-																		: "-"}
+										</div>
+									</div>
+								</CardHeader>
+								<CardContent>
+									{transactionsLoading ? (
+										<LoadingTable />
+									) : !filteredTransactions.length ? (
+										<p className="text-sm text-muted-foreground">
+											No transactions saved for
+											this date yet.
+										</p>
+									) : (
+										<>
+											{(kindFilter !==
+												"all-transactions" ||
+												productFilter ||
+												parsedKindFromQuery !==
+													null) && (
+												<p className="mb-3 text-xs text-muted-foreground">
+													Showing filtered
+													transactions for this
+													view.
+												</p>
+											)}
+											<div className="space-y-3 md:hidden">
+												{filteredTransactions.map(
+													(txn) => (
+														<div
+															key={txn.id}
+															className="rounded-lg border p-3"
+														>
+															<div className="flex items-start justify-between gap-2">
+																<div>
+																	<p className="font-medium">
+																		{
+																			txn.customerName
+																		}
+																	</p>
+																	<p className="text-xs text-muted-foreground">
+																		{txn.createdAt
+																			? new Date(
+																					txn.createdAt,
+																				).toLocaleTimeString()
+																			: "-"}
+																	</p>
+																</div>
+																<p className="font-semibold">
+																	{formatZAR(
+																		txn.amountCents,
+																	)}
 																</p>
 															</div>
-															<p className="font-semibold">
-																{formatZAR(
-																	txn.amountCents,
-																)}
-															</p>
-														</div>
-														<div className="mt-2 flex items-center justify-between text-sm">
-															<span className="text-muted-foreground">
-																{txn.type ===
-																"DIRECT_SALE"
-																	? "Direct Sale"
-																	: txn.type ===
-																		  "CHARGE"
-																		? "Sale"
-																		: txn.type ===
-																			  "PAYMENT"
-																			? "Payment"
-																			: "Adjustment"}
-															</span>
-															<span className="text-muted-foreground">
-																{txn.paymentMethod ??
-																	"-"}
-															</span>
-														</div>
-															<div className="mt-3 flex items-center justify-end gap-2">
-															{txn.isReversal && (
-																<span className="rounded px-2 py-1 text-xs bg-muted text-muted-foreground">
-																	Reversal
-																</span>
-															)}
-															{txn.isReversed && (
-																<span className="rounded px-2 py-1 text-xs bg-amber-500/10 text-amber-700">
-																	Reversed
-																</span>
-															)}
-															{!txn.isReversal &&
-																!txn.isReversed &&
-																(txn.type ===
-																	"DIRECT_SALE" ||
-																	txn.type ===
-																		"CHARGE") && (
-																	<Button
-																		type="button"
-																		size="sm"
-																		variant="secondary"
-																		onClick={() =>
-																			repeatSaleFromHistory(
-																				txn,
-																			)
-																		}
-																	>
-																		Repeat
-																	</Button>
-																)}
-															{!txn.isReversal &&
-																!txn.isReversed &&
-																(txn.type ===
-																	"DIRECT_SALE" ||
-																	txn.type ===
-																		"CHARGE" ||
-																	txn.type ===
-																		"PAYMENT") && (
-																	<Button
-																		type="button"
-																		size="sm"
-																		variant="outline"
-																		onClick={() =>
-																			setReversingTxn(
-																				txn,
-																			)
-																		}
-																	>
-																		<RotateCcw className="mr-2 h-3.5 w-3.5" />
-																		Reverse
-																	</Button>
-																)}
-														</div>
-													</div>
-												),
-											)}
-										</div>
-
-										<div className="hidden md:block">
-											<Table>
-												<TableHeader>
-													<TableRow>
-														<TableHead>
-															Time
-														</TableHead>
-														<TableHead>
-															Customer
-														</TableHead>
-														<TableHead>
-															Type
-														</TableHead>
-														<TableHead className="text-right">
-															Amount
-														</TableHead>
-														<TableHead>
-															Details
-														</TableHead>
-														<TableHead className="text-right">
-															Actions
-														</TableHead>
-													</TableRow>
-												</TableHeader>
-												<TableBody>
-													{filteredTransactions.map(
-														(txn) => (
-															<TableRow
-																key={txn.id}
-															>
-																<TableCell className="text-muted-foreground">
-																	{txn.createdAt
-																		? new Date(
-																				txn.createdAt,
-																			).toLocaleTimeString()
-																		: "-"}
-																</TableCell>
-																<TableCell>
-																	{
-																		txn.customerName
-																	}
-																</TableCell>
-																<TableCell>
+															<div className="mt-2 flex items-center justify-between text-sm">
+																<span className="text-muted-foreground">
 																	{txn.type ===
 																	"DIRECT_SALE"
 																		? "Direct Sale"
@@ -1380,79 +1271,196 @@ export function TabsClient({
 																				  "PAYMENT"
 																				? "Payment"
 																				: "Adjustment"}
-																</TableCell>
-																<TableCell className="text-right">
-																	{formatZAR(
-																		txn.amountCents,
-																	)}
-																</TableCell>
-																<TableCell className="text-muted-foreground">
+																</span>
+																<span className="text-muted-foreground">
 																	{txn.paymentMethod ??
-																		txn.reference ??
-																		txn.note ??
 																		"-"}
-																</TableCell>
-																<TableCell className="text-right">
-																	{txn.isReversal ? (
-																		<span className="rounded px-2 py-1 text-xs bg-muted text-muted-foreground">
-																			Reversal
-																		</span>
-																	) : txn.isReversed ? (
-																		<span className="rounded px-2 py-1 text-xs bg-amber-500/10 text-amber-700">
-																			Reversed
-																		</span>
-																	) : txn.type ===
-																			"DIRECT_SALE" ||
+																</span>
+															</div>
+															<div className="mt-3 flex items-center justify-end gap-2">
+																{txn.isReversal && (
+																	<span className="rounded px-2 py-1 text-xs bg-muted text-muted-foreground">
+																		Reversal
+																	</span>
+																)}
+																{txn.isReversed && (
+																	<span className="rounded px-2 py-1 text-xs bg-amber-500/10 text-amber-700">
+																		Reversed
+																	</span>
+																)}
+																{!txn.isReversal &&
+																	!txn.isReversed &&
+																	(txn.type ===
+																		"DIRECT_SALE" ||
+																		txn.type ===
+																			"CHARGE") && (
+																		<Button
+																			type="button"
+																			size="sm"
+																			variant="secondary"
+																			onClick={() =>
+																				repeatSaleFromHistory(
+																					txn,
+																				)
+																			}
+																		>
+																			Repeat
+																		</Button>
+																	)}
+																{!txn.isReversal &&
+																	!txn.isReversed &&
+																	(txn.type ===
+																		"DIRECT_SALE" ||
 																		txn.type ===
 																			"CHARGE" ||
 																		txn.type ===
-																			"PAYMENT" ? (
-																		<div className="inline-flex items-center gap-2">
-																			{(txn.type ===
+																			"PAYMENT") && (
+																		<Button
+																			type="button"
+																			size="sm"
+																			variant="outline"
+																			onClick={() =>
+																				setReversingTxn(
+																					txn,
+																				)
+																			}
+																		>
+																			<RotateCcw className="mr-2 h-3.5 w-3.5" />
+																			Reverse
+																		</Button>
+																	)}
+															</div>
+														</div>
+													),
+												)}
+											</div>
+
+											<div className="hidden md:block">
+												<Table>
+													<TableHeader>
+														<TableRow>
+															<TableHead>
+																Time
+															</TableHead>
+															<TableHead>
+																Customer
+															</TableHead>
+															<TableHead>
+																Type
+															</TableHead>
+															<TableHead className="text-right">
+																Amount
+															</TableHead>
+															<TableHead>
+																Details
+															</TableHead>
+															<TableHead className="text-right">
+																Actions
+															</TableHead>
+														</TableRow>
+													</TableHeader>
+													<TableBody>
+														{filteredTransactions.map(
+															(txn) => (
+																<TableRow
+																	key={txn.id}
+																>
+																	<TableCell className="text-muted-foreground">
+																		{txn.createdAt
+																			? new Date(
+																					txn.createdAt,
+																				).toLocaleTimeString()
+																			: "-"}
+																	</TableCell>
+																	<TableCell>
+																		{
+																			txn.customerName
+																		}
+																	</TableCell>
+																	<TableCell>
+																		{txn.type ===
+																		"DIRECT_SALE"
+																			? "Direct Sale"
+																			: txn.type ===
+																				  "CHARGE"
+																				? "Sale"
+																				: txn.type ===
+																					  "PAYMENT"
+																					? "Payment"
+																					: "Adjustment"}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{formatZAR(
+																			txn.amountCents,
+																		)}
+																	</TableCell>
+																	<TableCell className="text-muted-foreground">
+																		{txn.paymentMethod ??
+																			txn.reference ??
+																			txn.note ??
+																			"-"}
+																	</TableCell>
+																	<TableCell className="text-right">
+																		{txn.isReversal ? (
+																			<span className="rounded px-2 py-1 text-xs bg-muted text-muted-foreground">
+																				Reversal
+																			</span>
+																		) : txn.isReversed ? (
+																			<span className="rounded px-2 py-1 text-xs bg-amber-500/10 text-amber-700">
+																				Reversed
+																			</span>
+																		) : txn.type ===
 																				"DIRECT_SALE" ||
-																				txn.type ===
-																					"CHARGE") && (
+																		  txn.type ===
+																				"CHARGE" ||
+																		  txn.type ===
+																				"PAYMENT" ? (
+																			<div className="inline-flex items-center gap-2">
+																				{(txn.type ===
+																					"DIRECT_SALE" ||
+																					txn.type ===
+																						"CHARGE") && (
+																					<Button
+																						type="button"
+																						size="sm"
+																						variant="secondary"
+																						onClick={() =>
+																							repeatSaleFromHistory(
+																								txn,
+																							)
+																						}
+																					>
+																						Repeat
+																					</Button>
+																				)}
 																				<Button
 																					type="button"
 																					size="sm"
-																					variant="secondary"
+																					variant="outline"
 																					onClick={() =>
-																						repeatSaleFromHistory(
+																						setReversingTxn(
 																							txn,
 																						)
 																					}
 																				>
-																					Repeat
+																					<RotateCcw className="mr-2 h-3.5 w-3.5" />
+																					Reverse
 																				</Button>
-																			)}
-																			<Button
-																				type="button"
-																				size="sm"
-																				variant="outline"
-																				onClick={() =>
-																					setReversingTxn(
-																						txn,
-																					)
-																				}
-																			>
-																				<RotateCcw className="mr-2 h-3.5 w-3.5" />
-																				Reverse
-																			</Button>
-																		</div>
-																	) : (
-																		"-"
-																	)}
-																</TableCell>
-															</TableRow>
-														),
-													)}
-												</TableBody>
-											</Table>
-										</div>
-									</>
-								)}
-							</CardContent>
-						</Card>
+																			</div>
+																		) : (
+																			"-"
+																		)}
+																	</TableCell>
+																</TableRow>
+															),
+														)}
+													</TableBody>
+												</Table>
+											</div>
+										</>
+									)}
+								</CardContent>
+							</Card>
 						)}
 					</TabsContent>
 				)}
@@ -1486,8 +1494,7 @@ export function TabsClient({
 							<p className="text-muted-foreground">
 								Amount:{" "}
 								{formatZAR(
-									reversingTxn?.amountCents ??
-										0,
+									reversingTxn?.amountCents ?? 0,
 								)}
 							</p>
 						</div>
@@ -1496,9 +1503,7 @@ export function TabsClient({
 							<Textarea
 								value={reverseReason}
 								onChange={(e) =>
-									setReverseReason(
-										e.target.value,
-									)
+									setReverseReason(e.target.value)
 								}
 								placeholder="Reason for reversal..."
 								rows={3}
@@ -1569,13 +1574,11 @@ function AddCustomerDialog({
 					note: formData.note || undefined,
 					customerMode: formData.customerMode,
 					creditLimitCents:
-						formData.customerMode ===
-						"ACCOUNT"
+						formData.customerMode === "ACCOUNT"
 							? formData.creditLimitCents
 							: 0,
 					dueDays: formData.dueDays
-						? formData.customerMode ===
-							"ACCOUNT"
+						? formData.customerMode === "ACCOUNT"
 							? parseInt(formData.dueDays)
 							: undefined
 						: undefined,
@@ -1678,7 +1681,8 @@ function AddCustomerDialog({
 							placeholder="072 123 4567"
 						/>
 					</div>
-					{formData.customerMode === "ACCOUNT" && (
+					{formData.customerMode ===
+						"ACCOUNT" && (
 						<>
 							<MoneyInput
 								label="Credit Limit"
@@ -1806,17 +1810,13 @@ function EditCustomerDialog({
 						note: formData.note || undefined,
 						customerMode: formData.customerMode,
 						creditLimitCents:
-							formData.customerMode ===
-							"ACCOUNT"
+							formData.customerMode === "ACCOUNT"
 								? formData.creditLimitCents
 								: 0,
 						dueDays: formData.dueDays
 							? formData.customerMode ===
 								"ACCOUNT"
-								? parseInt(
-										formData.dueDays,
-										10,
-								  )
+								? parseInt(formData.dueDays, 10)
 								: undefined
 							: undefined,
 					}),
@@ -1917,7 +1917,8 @@ function EditCustomerDialog({
 							}
 						/>
 					</div>
-					{formData.customerMode === "ACCOUNT" && (
+					{formData.customerMode ===
+						"ACCOUNT" && (
 						<>
 							<MoneyInput
 								label="Credit Limit"
@@ -1941,8 +1942,7 @@ function EditCustomerDialog({
 									onChange={(e) =>
 										setFormData((prev) => ({
 											...prev,
-											dueDays:
-												e.target.value,
+											dueDays: e.target.value,
 										}))
 									}
 								/>
@@ -2014,9 +2014,7 @@ function TabChargeForm({
 	const [loading, setLoading] =
 		React.useState(false);
 	const [customerId, setCustomerId] =
-		React.useState(
-			initialData?.customerId ?? "",
-		);
+		React.useState(initialData?.customerId ?? "");
 	const [items, setItems] = React.useState<
 		ChargeItem[]
 	>(
@@ -2043,10 +2041,9 @@ function TabChargeForm({
 		React.useState("");
 	const [tempTabNote, setTempTabNote] =
 		React.useState("");
-	const [showNote, setShowNote] =
-		React.useState(
-			Boolean(initialData?.note),
-		);
+	const [showNote, setShowNote] = React.useState(
+		Boolean(initialData?.note),
+	);
 	const productPriceById = React.useMemo(
 		() =>
 			new Map(
@@ -2063,12 +2060,12 @@ function TabChargeForm({
 		setItems(
 			initialData.items.length > 0
 				? initialData.items
-			: [
-					{
-						productId: "",
-						units: "",
-					},
-				],
+				: [
+						{
+							productId: "",
+							units: "",
+						},
+					],
 		);
 		setNote(initialData.note);
 		setShowNote(Boolean(initialData.note));
@@ -2127,13 +2124,13 @@ function TabChargeForm({
 				date,
 				customerId,
 				items: validItems,
-				note:
-					showNote && note ? note : undefined,
+				note: showNote && note ? note : undefined,
 			};
-			const queueResult = await postSaleWithOfflineQueue(
-				"/api/tabs/charge",
-				payload,
-			);
+			const queueResult =
+				await postSaleWithOfflineQueue(
+					"/api/tabs/charge",
+					payload,
+				);
 			if (queueResult.queued) {
 				toast.success(
 					"Offline: account sale queued and will sync automatically.",
@@ -2230,8 +2227,12 @@ function TabChargeForm({
 				);
 			}
 
-			const createdId = body?.data?.id ?? body?.id;
-			if (typeof createdId === "string" && createdId) {
+			const createdId =
+				body?.data?.id ?? body?.id;
+			if (
+				typeof createdId === "string" &&
+				createdId
+			) {
 				setCustomerId(createdId);
 			}
 			onCustomerCreated?.();
@@ -2312,7 +2313,8 @@ function TabChargeForm({
 										)}
 									</div>
 									<p className="text-[11px] text-muted-foreground">
-										Subtotal {formatZAR(subtotalCents)}
+										Subtotal{" "}
+										{formatZAR(subtotalCents)}
 									</p>
 								</div>
 							);
@@ -2347,12 +2349,15 @@ function TabChargeForm({
 									Open Temporary Tab
 								</DialogTitle>
 								<DialogDescription>
-									Create a temporary running tab for this session.
-									It auto-closes after full payment.
+									Create a temporary running tab
+									for this session. It auto-closes
+									after full payment.
 								</DialogDescription>
 							</DialogHeader>
 							<form
-								onSubmit={handleCreateTemporaryTab}
+								onSubmit={
+									handleCreateTemporaryTab
+								}
 								className="space-y-3"
 							>
 								<div className="space-y-2">
@@ -2369,9 +2374,7 @@ function TabChargeForm({
 									/>
 								</div>
 								<div className="space-y-2">
-									<Label>
-										Phone (optional)
-									</Label>
+									<Label>Phone (optional)</Label>
 									<Input
 										type="tel"
 										value={tempTabPhone}
@@ -2650,9 +2653,7 @@ function TabPaymentForm({
 								<Input
 									value={reference}
 									onChange={(e) =>
-										setReference(
-											e.target.value,
-										)
+										setReference(e.target.value)
 									}
 									placeholder="e.g. Receipt #123"
 								/>
@@ -2726,10 +2727,9 @@ function DirectSaleForm({
 	const [note, setNote] = React.useState(
 		initialData?.note ?? "",
 	);
-	const [showNote, setShowNote] =
-		React.useState(
-			Boolean(initialData?.note),
-		);
+	const [showNote, setShowNote] = React.useState(
+		Boolean(initialData?.note),
+	);
 	const productPriceById = React.useMemo(
 		() =>
 			new Map(
@@ -2745,12 +2745,12 @@ function DirectSaleForm({
 		setItems(
 			initialData.items.length > 0
 				? initialData.items
-			: [
-					{
-						productId: "",
-						units: "",
-					},
-				],
+				: [
+						{
+							productId: "",
+							units: "",
+						},
+					],
 		);
 		setPaymentMethod(initialData.paymentMethod);
 		setNote(initialData.note);
@@ -2811,13 +2811,13 @@ function DirectSaleForm({
 				date,
 				paymentMethod,
 				items: validItems,
-				note:
-					showNote && note ? note : undefined,
+				note: showNote && note ? note : undefined,
 			};
-			const queueResult = await postSaleWithOfflineQueue(
-				"/api/sales",
-				payload,
-			);
+			const queueResult =
+				await postSaleWithOfflineQueue(
+					"/api/sales",
+					payload,
+				);
 			if (queueResult.queued) {
 				toast.success(
 					"Offline: direct sale queued and will sync automatically.",
@@ -2929,7 +2929,8 @@ function DirectSaleForm({
 										)}
 									</div>
 									<p className="text-[11px] text-muted-foreground">
-										Subtotal {formatZAR(subtotalCents)}
+										Subtotal{" "}
+										{formatZAR(subtotalCents)}
 									</p>
 								</div>
 							);
