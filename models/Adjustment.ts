@@ -6,7 +6,8 @@ export type AdjustmentReason =
 	| "BREAKAGE"
 	| "FREEBIES"
 	| "THEFT_SUSPECTED"
-	| "COUNT_CORRECTION";
+	| "COUNT_CORRECTION"
+	| "OPENING_STOCK";
 
 export interface AdjustmentItem {
 	productId: string;

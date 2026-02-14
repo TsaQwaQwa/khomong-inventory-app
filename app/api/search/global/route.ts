@@ -161,8 +161,8 @@ export async function GET(req: Request) {
 				title: "Direct Sale",
 				description: `${txn.note ?? "(no reference)"}${date ? ` | ${date}` : ""}`,
 				href: date
-					? `/transactions?date=${date}&kind=direct`
-					: "/transactions?kind=direct",
+					? `/transactions?date=${date}&kind=direct-sales`
+					: "/transactions?kind=direct-sales",
 			});
 		}
 
@@ -174,4 +174,3 @@ export async function GET(req: Request) {
 		});
 	}
 }
-

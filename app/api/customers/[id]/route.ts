@@ -47,6 +47,10 @@ export async function PATCH(
 			customerPatch.phone = input.phone;
 		if (input.note !== undefined)
 			customerPatch.note = input.note;
+		if (input.customerMode !== undefined)
+			customerPatch.customerMode = input.customerMode;
+		if (input.isTemporaryTab !== undefined)
+			customerPatch.isTemporaryTab = input.isTemporaryTab;
 
 		const accountPatch: Record<
 			string,

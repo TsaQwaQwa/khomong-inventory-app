@@ -308,26 +308,6 @@ export function Header() {
 							<SheetTitle className="text-left">
 								Kgomong
 							</SheetTitle>
-							{lowStockCount > 0 && (
-								<Link
-									href="/dashboard"
-									onClick={() => setOpen(false)}
-									className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800"
-								>
-									{outOfStockCount > 0
-											? `${outOfStockCount} out`
-											: `${lowStockCount} low`}
-									</Link>
-								)}
-							{unreadAlertCount > 0 && (
-								<Link
-									href="/alerts"
-									onClick={() => setOpen(false)}
-									className="rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-800"
-								>
-									{unreadAlertCount} alerts
-								</Link>
-							)}
 						</div>
 						<nav className="flex flex-col space-y-1">
 							{visibleNavItems.map((item) => {

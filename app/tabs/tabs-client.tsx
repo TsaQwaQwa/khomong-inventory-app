@@ -164,6 +164,77 @@ interface TabsClientProps {
 	view?: "both" | "accounts" | "transactions";
 }
 
+type TransactionKindFilter =
+	| "all-transactions"
+	| "direct-sales"
+	| "account-sales"
+	| "account-payments"
+	| "reversal-transactions";
+
+const normalizeTransactionKind = (
+	value: string | null | undefined,
+): TransactionKindFilter => {
+	switch ((value ?? "").toLowerCase()) {
+		case "direct":
+		case "direct-sales":
+			return "direct-sales";
+		case "account":
+		case "account-sales":
+			return "account-sales";
+		case "payment":
+		case "account-payments":
+			return "account-payments";
+		case "reversals":
+		case "reversal-transactions":
+			return "reversal-transactions";
+		default:
+			return "all-transactions";
+	}
+};
+
+const SEARCH_KIND_OPTIONS: Array<{
+	kind: TransactionKindFilter;
+	label: string;
+	aliases: string[];
+}> = [
+	{
+		kind: "all-transactions",
+		label: "All transactions",
+		aliases: [
+			"all",
+			"all transactions",
+			"all-transactions",
+		],
+	},
+	{
+		kind: "direct-sales",
+		label: "Direct sales",
+		aliases: ["direct sales", "direct-sales"],
+	},
+	{
+		kind: "account-sales",
+		label: "Account sales",
+		aliases: ["account sales", "account-sales"],
+	},
+	{
+		kind: "account-payments",
+		label: "Account payments",
+		aliases: [
+			"account payments",
+			"account-payments",
+		],
+	},
+	{
+		kind: "reversal-transactions",
+		label: "Reversal transactions",
+		aliases: [
+			"reversal transactions",
+			"reversal-transactions",
+			"reversals",
+		],
+	},
+];
+
 export function TabsClient({
 	view = "both",
 }: TabsClientProps) {
@@ -256,8 +327,9 @@ export function TabsClient({
 		items: ChargeItem[];
 		note: string;
 	} | null>(null);
-	const kindFilter =
-		searchParams.get("kind") ?? "all";
+	const kindFilter = normalizeTransactionKind(
+		searchParams.get("kind"),
+	);
 	const productFilter =
 		searchParams.get("productId");
 	const action = searchParams.get("action");
@@ -320,27 +392,25 @@ export function TabsClient({
 		[normalizedProducts],
 	);
 	const parsedKindFromQuery = React.useMemo(() => {
-		const match = transactionQuery.match(
-			/\bkind:(all|direct|account|payment|reversals)\b/i,
+		const normalizedQuery =
+			transactionQuery.trim().toLowerCase();
+		if (!normalizedQuery) return null;
+		const option = SEARCH_KIND_OPTIONS.find(
+			(entry) =>
+				entry.aliases.includes(
+					normalizedQuery,
+				),
 		);
-		if (!match) return null;
-		return match[1].toLowerCase() as
-			| "all"
-			| "direct"
-			| "account"
-			| "payment"
-			| "reversals";
+		return option?.kind ?? null;
 	}, [transactionQuery]);
 	const freeTextQuery = React.useMemo(
-		() =>
-			transactionQuery
-				.replace(
-					/\bkind:(all|direct|account|payment|reversals)\b/gi,
-					"",
-				)
+		() => {
+			if (parsedKindFromQuery) return "";
+			return transactionQuery
 				.trim()
-				.toLowerCase(),
-		[transactionQuery],
+				.toLowerCase();
+		},
+		[parsedKindFromQuery, transactionQuery],
 	);
 	const filteredTransactions = React.useMemo(() => {
 		const effectiveKind =
@@ -350,13 +420,15 @@ export function TabsClient({
 			: undefined;
 		return (transactionsHistory ?? []).filter((txn) => {
 			const kindMatch =
-				effectiveKind === "direct"
+				effectiveKind === "direct-sales"
 					? txn.type === "DIRECT_SALE"
-					: effectiveKind === "account"
+					: effectiveKind === "account-sales"
 						? txn.type === "CHARGE"
-						: effectiveKind === "payment"
+						: effectiveKind ===
+							  "account-payments"
 							? txn.type === "PAYMENT"
-							: effectiveKind === "reversals"
+							: effectiveKind ===
+								  "reversal-transactions"
 								? Boolean(txn.isReversal)
 								: true;
 			if (!kindMatch) return false;
@@ -408,13 +480,11 @@ export function TabsClient({
 		productNameById,
 	]);
 	const transactionSearchOptions = React.useMemo(() => {
-		const options = new Set<string>([
-			"kind:all",
-			"kind:direct",
-			"kind:account",
-			"kind:payment",
-			"kind:reversals",
-		]);
+		const options = new Set<string>(
+			SEARCH_KIND_OPTIONS.map(
+				(option) => option.label,
+			),
+		);
 		for (const customer of normalizedCustomers) {
 			options.add(customer.name);
 		}
@@ -640,11 +710,24 @@ export function TabsClient({
 															>
 																<div className="flex items-start justify-between gap-2">
 																	<div>
-																		<p className="font-medium">
-																			{
-																				customer.name
-																			}
-																		</p>
+																		<div className="flex items-center gap-2">
+																			<p className="font-medium">
+																				{
+																					customer.name
+																				}
+																			</p>
+																			{customer.isTemporaryTab && (
+																				<span className="rounded border border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-sky-700">
+																					Temp Tab
+																				</span>
+																			)}
+																			{customer.customerMode ===
+																				"DEBT_ONLY" && (
+																				<span className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700">
+																					Debt-only
+																				</span>
+																			)}
+																		</div>
 																		<p className="text-xs text-muted-foreground">
 																			{customer.phone ??
 																				"No phone"}
@@ -670,9 +753,12 @@ export function TabsClient({
 																			Limit
 																		</p>
 																		<p>
-																			{formatZAR(
-																				customer.creditLimitCents,
-																			)}
+																			{customer.customerMode ===
+																			"DEBT_ONLY"
+																				? "Not enforced"
+																				: formatZAR(
+																						customer.creditLimitCents,
+																				  )}
 																		</p>
 																	</div>
 																	<div className="text-right">
@@ -759,18 +845,34 @@ export function TabsClient({
 																		}
 																	>
 																		<TableCell className="font-medium">
-																			{
-																				customer.name
-																			}
+																			<div className="flex items-center gap-2">
+																				{
+																					customer.name
+																				}
+																				{customer.isTemporaryTab && (
+																					<span className="rounded border border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-sky-700">
+																						Temp Tab
+																					</span>
+																				)}
+																				{customer.customerMode ===
+																					"DEBT_ONLY" && (
+																					<span className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700">
+																						Debt-only
+																					</span>
+																				)}
+																			</div>
 																		</TableCell>
 																		<TableCell>
 																			{customer.phone ??
 																				"-"}
 																		</TableCell>
 																		<TableCell className="text-right">
-																			{formatZAR(
-																				customer.creditLimitCents,
-																			)}
+																			{customer.customerMode ===
+																			"DEBT_ONLY"
+																				? "Not enforced"
+																				: formatZAR(
+																						customer.creditLimitCents,
+																				  )}
 																		</TableCell>
 																		<TableCell
 																			className={cn(
@@ -993,6 +1095,9 @@ export function TabsClient({
 													repeatAccountSeed ??
 													undefined
 												}
+												onCustomerCreated={() => {
+													mutateCustomers();
+												}}
 												onSuccess={() => {
 													mutateCustomers();
 													mutateTransactions();
@@ -1069,7 +1174,7 @@ export function TabsClient({
 												)
 											}
 											list="transaction-search-options"
-											placeholder="Search/select/scan (use kind:direct etc.)"
+											placeholder="Search/select/scan customer, product, reference, or barcode"
 										/>
 										<datalist id="transaction-search-options">
 											{transactionSearchOptions.map(
@@ -1097,8 +1202,11 @@ export function TabsClient({
 									</p>
 								) : (
 									<>
-										{(kindFilter !== "all" ||
-											productFilter) && (
+										{(kindFilter !==
+											"all-transactions" ||
+											productFilter ||
+											parsedKindFromQuery !==
+												null) && (
 											<p className="mb-3 text-xs text-muted-foreground">
 												Showing filtered
 												transactions for this
@@ -1425,6 +1533,9 @@ function AddCustomerDialog({
 		name: "",
 		phone: "",
 		note: "",
+		customerMode: "ACCOUNT" as
+			| "ACCOUNT"
+			| "DEBT_ONLY",
 		creditLimitCents: 0,
 		dueDays: "",
 	});
@@ -1445,10 +1556,17 @@ function AddCustomerDialog({
 					name: formData.name,
 					phone: formData.phone || undefined,
 					note: formData.note || undefined,
+					customerMode: formData.customerMode,
 					creditLimitCents:
-						formData.creditLimitCents,
+						formData.customerMode ===
+						"ACCOUNT"
+							? formData.creditLimitCents
+							: 0,
 					dueDays: formData.dueDays
-						? parseInt(formData.dueDays)
+						? formData.customerMode ===
+							"ACCOUNT"
+							? parseInt(formData.dueDays)
+							: undefined
 						: undefined,
 				}),
 			});
@@ -1505,6 +1623,34 @@ function AddCustomerDialog({
 						/>
 					</div>
 					<div className="space-y-2">
+						<Label htmlFor="customerMode">
+							Customer Type
+						</Label>
+						<Select
+							value={formData.customerMode}
+							onValueChange={(value) =>
+								setFormData({
+									...formData,
+									customerMode: value as
+										| "ACCOUNT"
+										| "DEBT_ONLY",
+								})
+							}
+						>
+							<SelectTrigger id="customerMode">
+								<SelectValue placeholder="Select customer type" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="ACCOUNT">
+									Account Customer
+								</SelectItem>
+								<SelectItem value="DEBT_ONLY">
+									Debt-only Customer
+								</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+					<div className="space-y-2">
 						<Label htmlFor="phone">
 							Phone (optional)
 						</Label>
@@ -1521,34 +1667,38 @@ function AddCustomerDialog({
 							placeholder="072 123 4567"
 						/>
 					</div>
-					<MoneyInput
-						label="Credit Limit"
-						value={formData.creditLimitCents}
-						onChange={(v) =>
-							setFormData({
-								...formData,
-								creditLimitCents: v,
-							})
-						}
-					/>
-					<div className="space-y-2">
-						<Label htmlFor="dueDays">
-							Payment Due Days (optional)
-						</Label>
-						<Input
-							id="dueDays"
-							type="number"
-							min="1"
-							value={formData.dueDays}
-							onChange={(e) =>
-								setFormData({
-									...formData,
-									dueDays: e.target.value,
-								})
-							}
-							placeholder="30"
-						/>
-					</div>
+					{formData.customerMode === "ACCOUNT" && (
+						<>
+							<MoneyInput
+								label="Credit Limit"
+								value={formData.creditLimitCents}
+								onChange={(v) =>
+									setFormData({
+										...formData,
+										creditLimitCents: v,
+									})
+								}
+							/>
+							<div className="space-y-2">
+								<Label htmlFor="dueDays">
+									Payment Due Days (optional)
+								</Label>
+								<Input
+									id="dueDays"
+									type="number"
+									min="1"
+									value={formData.dueDays}
+									onChange={(e) =>
+										setFormData({
+											...formData,
+											dueDays: e.target.value,
+										})
+									}
+									placeholder="30"
+								/>
+							</div>
+						</>
+					)}
 					<div className="space-y-2">
 						<Label htmlFor="note">
 							Note (optional)
@@ -1601,6 +1751,8 @@ function EditCustomerDialog({
 		name: customer.name ?? "",
 		phone: customer.phone ?? "",
 		note: customer.note ?? "",
+		customerMode:
+			customer.customerMode ?? "ACCOUNT",
 		creditLimitCents:
 			customer.creditLimitCents ?? 0,
 		dueDays: customer.dueDays
@@ -1613,6 +1765,8 @@ function EditCustomerDialog({
 			name: customer.name ?? "",
 			phone: customer.phone ?? "",
 			note: customer.note ?? "",
+			customerMode:
+				customer.customerMode ?? "ACCOUNT",
 			creditLimitCents:
 				customer.creditLimitCents ?? 0,
 			dueDays: customer.dueDays
@@ -1639,10 +1793,20 @@ function EditCustomerDialog({
 						name: formData.name,
 						phone: formData.phone || undefined,
 						note: formData.note || undefined,
+						customerMode: formData.customerMode,
 						creditLimitCents:
-							formData.creditLimitCents,
+							formData.customerMode ===
+							"ACCOUNT"
+								? formData.creditLimitCents
+								: 0,
 						dueDays: formData.dueDays
-							? parseInt(formData.dueDays, 10)
+							? formData.customerMode ===
+								"ACCOUNT"
+								? parseInt(
+										formData.dueDays,
+										10,
+								  )
+								: undefined
 							: undefined,
 					}),
 				},
@@ -1700,6 +1864,34 @@ function EditCustomerDialog({
 						/>
 					</div>
 					<div className="space-y-2">
+						<Label htmlFor="edit-customer-mode">
+							Customer Type
+						</Label>
+						<Select
+							value={formData.customerMode}
+							onValueChange={(value) =>
+								setFormData((prev) => ({
+									...prev,
+									customerMode: value as
+										| "ACCOUNT"
+										| "DEBT_ONLY",
+								}))
+							}
+						>
+							<SelectTrigger id="edit-customer-mode">
+								<SelectValue placeholder="Select customer type" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="ACCOUNT">
+									Account Customer
+								</SelectItem>
+								<SelectItem value="DEBT_ONLY">
+									Debt-only Customer
+								</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+					<div className="space-y-2">
 						<Label htmlFor="edit-phone">
 							Phone (optional)
 						</Label>
@@ -1714,33 +1906,38 @@ function EditCustomerDialog({
 							}
 						/>
 					</div>
-					<MoneyInput
-						label="Credit Limit"
-						value={formData.creditLimitCents}
-						onChange={(value) =>
-							setFormData((prev) => ({
-								...prev,
-								creditLimitCents: value,
-							}))
-						}
-					/>
-					<div className="space-y-2">
-						<Label htmlFor="edit-dueDays">
-							Payment Due Days (optional)
-						</Label>
-						<Input
-							id="edit-dueDays"
-							type="number"
-							min="1"
-							value={formData.dueDays}
-							onChange={(e) =>
-								setFormData((prev) => ({
-									...prev,
-									dueDays: e.target.value,
-								}))
-							}
-						/>
-					</div>
+					{formData.customerMode === "ACCOUNT" && (
+						<>
+							<MoneyInput
+								label="Credit Limit"
+								value={formData.creditLimitCents}
+								onChange={(value) =>
+									setFormData((prev) => ({
+										...prev,
+										creditLimitCents: value,
+									}))
+								}
+							/>
+							<div className="space-y-2">
+								<Label htmlFor="edit-dueDays">
+									Payment Due Days (optional)
+								</Label>
+								<Input
+									id="edit-dueDays"
+									type="number"
+									min="1"
+									value={formData.dueDays}
+									onChange={(e) =>
+										setFormData((prev) => ({
+											...prev,
+											dueDays:
+												e.target.value,
+										}))
+									}
+								/>
+							</div>
+						</>
+					)}
 					<div className="space-y-2">
 						<Label htmlFor="edit-note">
 							Note (optional)
@@ -1789,6 +1986,7 @@ function TabChargeForm({
 	products,
 	date,
 	initialData,
+	onCustomerCreated,
 	onSuccess,
 }: {
 	customers: Customer[];
@@ -1799,6 +1997,7 @@ function TabChargeForm({
 		items: ChargeItem[];
 		note: string;
 	};
+	onCustomerCreated?: () => void;
 	onSuccess?: () => void;
 }) {
 	const [loading, setLoading] =
@@ -1823,6 +2022,16 @@ function TabChargeForm({
 	const [note, setNote] = React.useState(
 		initialData?.note ?? "",
 	);
+	const [tempTabOpen, setTempTabOpen] =
+		React.useState(false);
+	const [tempTabLoading, setTempTabLoading] =
+		React.useState(false);
+	const [tempTabName, setTempTabName] =
+		React.useState("");
+	const [tempTabPhone, setTempTabPhone] =
+		React.useState("");
+	const [tempTabNote, setTempTabNote] =
+		React.useState("");
 	const [showNote, setShowNote] =
 		React.useState(
 			Boolean(initialData?.note),
@@ -1971,6 +2180,66 @@ function TabChargeForm({
 		}
 	};
 
+	const handleCreateTemporaryTab = async (
+		e: React.FormEvent,
+	) => {
+		e.preventDefault();
+		if (!tempTabName.trim()) {
+			toast.error(
+				"Temporary tab name is required",
+			);
+			return;
+		}
+
+		setTempTabLoading(true);
+		try {
+			const res = await fetch("/api/customers", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					name: tempTabName.trim(),
+					phone: tempTabPhone.trim() || undefined,
+					note: tempTabNote.trim() || undefined,
+					customerMode: "DEBT_ONLY",
+					isTemporaryTab: true,
+					creditLimitCents: 0,
+				}),
+			});
+			const body = await res
+				.json()
+				.catch(() => ({}));
+			if (!res.ok) {
+				throw new Error(
+					getApiErrorMessage(
+						body,
+						"Failed to open temporary tab",
+					),
+				);
+			}
+
+			const createdId = body?.data?.id ?? body?.id;
+			if (typeof createdId === "string" && createdId) {
+				setCustomerId(createdId);
+			}
+			onCustomerCreated?.();
+			toast.success("Temporary tab opened");
+			setTempTabOpen(false);
+			setTempTabName("");
+			setTempTabPhone("");
+			setTempTabNote("");
+		} catch (err) {
+			toast.error(
+				err instanceof Error
+					? err.message
+					: "Failed to open temporary tab",
+			);
+		} finally {
+			setTempTabLoading(false);
+		}
+	};
+
 	return (
 		<form
 			onSubmit={handleSubmit}
@@ -2045,8 +2314,101 @@ function TabChargeForm({
 						customers={customers}
 						value={customerId}
 						onChange={setCustomerId}
-						label="Customer Account"
+						label="Tab Holder"
 					/>
+					<Dialog
+						open={tempTabOpen}
+						onOpenChange={setTempTabOpen}
+					>
+						<DialogTrigger asChild>
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="w-full"
+							>
+								Open Temporary Tab
+							</Button>
+						</DialogTrigger>
+						<DialogContent>
+							<DialogHeader>
+								<DialogTitle>
+									Open Temporary Tab
+								</DialogTitle>
+								<DialogDescription>
+									Create a temporary running tab for this session.
+									It auto-closes after full payment.
+								</DialogDescription>
+							</DialogHeader>
+							<form
+								onSubmit={handleCreateTemporaryTab}
+								className="space-y-3"
+							>
+								<div className="space-y-2">
+									<Label>Tab Name</Label>
+									<Input
+										value={tempTabName}
+										onChange={(e) =>
+											setTempTabName(
+												e.target.value,
+											)
+										}
+										placeholder="e.g. Blue Jacket"
+										required
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label>
+										Phone (optional)
+									</Label>
+									<Input
+										type="tel"
+										value={tempTabPhone}
+										onChange={(e) =>
+											setTempTabPhone(
+												e.target.value,
+											)
+										}
+										placeholder="072 123 4567"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label>Note (optional)</Label>
+									<Textarea
+										value={tempTabNote}
+										onChange={(e) =>
+											setTempTabNote(
+												e.target.value,
+											)
+										}
+										rows={2}
+										placeholder="Quick identifier or context..."
+									/>
+								</div>
+								<DialogFooter>
+									<DialogClose asChild>
+										<Button
+											type="button"
+											variant="outline"
+										>
+											Cancel
+										</Button>
+									</DialogClose>
+									<Button
+										type="submit"
+										disabled={
+											tempTabLoading ||
+											!tempTabName.trim()
+										}
+									>
+										{tempTabLoading
+											? "Opening..."
+											: "Open Tab"}
+									</Button>
+								</DialogFooter>
+							</form>
+						</DialogContent>
+					</Dialog>
 				</div>
 				<div className="space-y-2">
 					<div className="grid grid-cols-2 gap-2">
@@ -2202,7 +2564,7 @@ function TabPaymentForm({
 						customers={customers}
 						value={customerId}
 						onChange={setCustomerId}
-						label="Customer Account"
+						label="Tab Holder"
 					/>
 
 					<MoneyInput

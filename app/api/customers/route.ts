@@ -166,6 +166,9 @@ export async function GET() {
 
 			return {
 				...customer,
+				customerMode:
+					customer.customerMode ??
+					"ACCOUNT",
 				creditLimitCents:
 					account?.creditLimitCents ?? 0,
 				balanceCents: balance,
@@ -207,6 +210,8 @@ export async function POST(req: Request) {
 			name: input.name,
 			phone: input.phone,
 			note: input.note,
+			customerMode: input.customerMode,
+			isTemporaryTab: input.isTemporaryTab,
 			isActive: true,
 		});
 

@@ -12,12 +12,8 @@ const isProtectedRoute = createRouteMatcher([
 	"/transactions(.*)",
 	"/tabs(.*)",
 ]);
-const isPublicWebhookRoute = createRouteMatcher([
-	"/api/whatsapp/webhook(.*)",
-]);
 
 export default clerkMiddleware(async (auth, req) => {
-	if (isPublicWebhookRoute(req)) return;
 	if (!isProtectedRoute(req)) return;
 
 	await auth.protect();

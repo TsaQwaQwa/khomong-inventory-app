@@ -35,6 +35,8 @@ export interface Customer {
 	name: string;
 	phone?: string;
 	note?: string;
+	customerMode?: "ACCOUNT" | "DEBT_ONLY";
+	isTemporaryTab?: boolean;
 	creditLimitCents: number;
 	dueDays?: number;
 	balanceCents?: number;
@@ -75,7 +77,8 @@ export type AdjustmentReason =
 	| "BREAKAGE"
 	| "FREEBIES"
 	| "THEFT_SUSPECTED"
-	| "COUNT_CORRECTION";
+	| "COUNT_CORRECTION"
+	| "OPENING_STOCK";
 
 export interface AdjustmentItem {
 	productId: string;

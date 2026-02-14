@@ -113,6 +113,10 @@ const ADJUSTMENT_REASONS: {
 	value: AdjustmentReason;
 	label: string;
 }[] = [
+	{
+		value: "OPENING_STOCK",
+		label: "Existing Stock",
+	},
 	{ value: "SPILLAGE", label: "Spillage" },
 	{ value: "BREAKAGE", label: "Breakage" },
 	{ value: "FREEBIES", label: "Freebies" },

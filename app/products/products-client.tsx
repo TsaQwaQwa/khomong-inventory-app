@@ -55,6 +55,7 @@ import { MoneyInput } from "@/components/money-input";
 import { formatZAR } from "@/lib/money";
 import { getTodayJHB } from "@/lib/date-utils";
 import { jsonFetcher } from "@/lib/swr";
+import { cn } from "@/lib/utils";
 import type { Product } from "@/lib/types";
 
 const CATEGORIES = [
@@ -75,6 +76,13 @@ const INITIAL_FORM_STATE = {
 	reorderLevelUnits: "",
 };
 
+interface CurrentStockRow {
+	productId: string;
+	currentUnits: number;
+	reorderLevelUnits: number;
+	status: "OUT" | "LOW" | "OK";
+}
+
 export function ProductsClient() {
 	const {
 		data: products,
@@ -84,6 +92,25 @@ export function ProductsClient() {
 	} = useSWR<Product[]>("/api/products", {
 		onError: (err) => toast.error(err.message),
 	});
+	const { data: currentStock = [] } = useSWR<
+		CurrentStockRow[]
+	>("/api/stock/current", jsonFetcher, {
+		onError: (err) =>
+			toast.error(
+				err?.message ??
+					"Failed to load current stock",
+			),
+	});
+	const stockByProductId = React.useMemo(
+		() =>
+			new Map(
+				currentStock.map((row) => [
+					row.productId,
+					row,
+				]),
+			),
+		[currentStock],
+	);
 
 	const [addDialogOpen, setAddDialogOpen] =
 		React.useState(false);
@@ -149,6 +176,10 @@ export function ProductsClient() {
 												product.currentPriceCents,
 										  )
 										: "-";
+								const stock =
+									stockByProductId.get(
+										product.id,
+									);
 								return (
 									<div
 										key={product.id}
@@ -182,6 +213,24 @@ export function ProductsClient() {
 													{
 														product.reorderLevelUnits
 													}
+												</p>
+											</div>
+											<div>
+												<p className="text-muted-foreground">
+													Current Stock
+												</p>
+												<p
+													className={cn(
+														stock?.status ===
+															"OUT" &&
+															"text-destructive font-semibold",
+														stock?.status ===
+															"LOW" &&
+															"text-amber-700 font-medium",
+													)}
+												>
+													{stock?.currentUnits ??
+														0}
 												</p>
 											</div>
 										</div>
@@ -229,6 +278,9 @@ export function ProductsClient() {
 											Reorder Level
 										</TableHead>
 										<TableHead className="text-right">
+											Current Stock
+										</TableHead>
+										<TableHead className="text-right">
 											Current Price
 										</TableHead>
 										<TableHead className="text-right">
@@ -244,6 +296,10 @@ export function ProductsClient() {
 														product.currentPriceCents,
 												  )
 												: "-";
+										const stock =
+											stockByProductId.get(
+												product.id,
+											);
 										return (
 											<TableRow
 												key={product.id}
@@ -259,6 +315,20 @@ export function ProductsClient() {
 												</TableCell>
 												<TableCell className="text-right">
 													{product.reorderLevelUnits}
+												</TableCell>
+												<TableCell
+													className={cn(
+														"text-right",
+														stock?.status ===
+															"OUT" &&
+															"text-destructive font-semibold",
+														stock?.status ===
+															"LOW" &&
+															"text-amber-700 font-medium",
+													)}
+												>
+													{stock?.currentUnits ??
+														0}
 												</TableCell>
 												<TableCell className="text-right">
 													{priceDisplay}

@@ -60,6 +60,32 @@ import type {
 	Supplier,
 } from "@/lib/types";
 
+declare global {
+	interface Window {
+		__quickAddLogs?: unknown[];
+	}
+}
+
+function pushQuickAddDebugLog(
+	event: string,
+	meta?: Record<string, unknown>,
+) {
+	if (typeof window === "undefined") return;
+	if (!Array.isArray(window.__quickAddLogs)) {
+		window.__quickAddLogs = [];
+	}
+	const payload = {
+		at: new Date().toISOString(),
+		event,
+		meta: meta ?? {},
+	};
+	window.__quickAddLogs.push(payload);
+	if (window.__quickAddLogs.length > 500) {
+		window.__quickAddLogs.shift();
+	}
+	console.log("[QuickAddDebug]", payload);
+}
+
 const ENABLED_PATHS = [
 	"/dashboard",
 	"/reports",
@@ -79,10 +105,10 @@ type QuickAction =
 	| "quick-checkout"
 	| "quick-top-sellers"
 	| "quick-fast-repeat"
-	| "direct-sale"
 	| "account-sale"
 	| "account-payment"
 	| "restock"
+	| "opening-stock"
 	| "customer"
 	| "supplier"
 	| "supplier-price"
@@ -96,10 +122,10 @@ const QUICK_ACTION_ALL: QuickAction[] = [
 	"quick-checkout",
 	"quick-top-sellers",
 	"quick-fast-repeat",
-	"direct-sale",
 	"account-sale",
 	"account-payment",
 	"restock",
+	"opening-stock",
 	"customer",
 	"supplier",
 	"supplier-price",
@@ -110,7 +136,6 @@ const QUICK_ACTION_ALL: QuickAction[] = [
 const QUICK_ACTION_DEFAULT_FAVORITES: QuickAction[] = [
 	"quick-checkout",
 	"quick-fast-repeat",
-	"direct-sale",
 	"account-sale",
 	"purchase",
 ];
@@ -124,7 +149,7 @@ interface PurchaseItemForm {
 	productId: string;
 	cases: string;
 	singles: string;
-	unitCostCents: number;
+	lineSubtotalCents: number;
 	discountCents: number;
 }
 
@@ -182,6 +207,10 @@ const ADJUSTMENT_REASONS: {
 	{
 		value: "THEFT_SUSPECTED",
 		label: "Theft (Suspected)",
+	},
+	{
+		value: "OPENING_STOCK",
+		label: "Existing Stock",
 	},
 	{
 		value: "COUNT_CORRECTION",
@@ -262,14 +291,14 @@ const getQuickActionLabel = (
 			return "Top Sellers Sale";
 		case "quick-fast-repeat":
 			return "Fast Repeat Sale";
-		case "direct-sale":
-			return "Add Direct Sale";
 		case "account-sale":
 			return "Add Sale to Account";
 		case "account-payment":
 			return "Add Account Payment";
 		case "restock":
 			return `Restock Low Stock (${restockCount})`;
+		case "opening-stock":
+			return "Add Existing Stock";
 		case "customer":
 			return "Add Customer";
 		case "supplier":
@@ -292,7 +321,6 @@ const getQuickActionIcon = (
 		case "quick-checkout":
 		case "quick-top-sellers":
 		case "quick-fast-repeat":
-		case "direct-sale":
 		case "account-sale":
 			return <Receipt className="mr-2 h-4 w-4" />;
 		case "account-payment":
@@ -300,6 +328,8 @@ const getQuickActionIcon = (
 		case "restock":
 		case "purchase":
 			return <ShoppingCart className="mr-2 h-4 w-4" />;
+		case "opening-stock":
+			return <Box className="mr-2 h-4 w-4" />;
 		case "customer":
 			return <Users className="mr-2 h-4 w-4" />;
 		case "supplier":
@@ -331,6 +361,17 @@ export function GlobalQuickActions() {
 		);
 	const date = React.useMemo(() => getTodayJHB(), []);
 	const { mutate } = useSWRConfig();
+
+	React.useEffect(() => {
+		if (typeof window === "undefined") return;
+		pushQuickAddDebugLog("global_quick_actions_mounted", {
+			pathname,
+			innerWidth: window.innerWidth,
+			innerHeight: window.innerHeight,
+			devicePixelRatio: window.devicePixelRatio,
+			userAgent: navigator.userAgent,
+		});
+	}, [pathname]);
 
 	const { data: products = [] } = useSWR<
 		Product[]
@@ -458,8 +499,13 @@ export function GlobalQuickActions() {
 							singles > 0
 								? String(singles)
 								: "",
-						unitCostCents:
-							selectedMeta?.unitCostCents ?? 0,
+						lineSubtotalCents:
+							Math.max(
+								0,
+								recommendedUnits *
+									(selectedMeta?.unitCostCents ??
+										0),
+							),
 						discountCents: 0,
 						suggestedSupplierId:
 							selectedMeta?.supplierId ?? "",
@@ -583,10 +629,14 @@ export function GlobalQuickActions() {
 
 	const openAction = React.useCallback(
 		(action: QuickAction) => {
+			pushQuickAddDebugLog("open_action_clicked", {
+				action,
+				pathname,
+			});
 			setActiveAction(action);
 			setOpen(false);
 		},
-		[],
+		[pathname],
 	);
 
 	const toggleFavoriteAction = React.useCallback(
@@ -629,6 +679,8 @@ export function GlobalQuickActions() {
 			}
 		/>
 	);
+	const showInMoreActions = (action: QuickAction) =>
+		!favoriteActions.includes(action);
 
 	if (!show) return null;
 
@@ -764,21 +816,30 @@ export function GlobalQuickActions() {
 											Sales
 										</p>
 										<div className="space-y-2">
-											{renderQuickActionButton(
+											{showInMoreActions(
 												"quick-checkout",
-											)}
-											{renderQuickActionButton(
+											) &&
+												renderQuickActionButton(
+													"quick-checkout",
+												)}
+											{showInMoreActions(
 												"quick-top-sellers",
-											)}
-											{renderQuickActionButton(
+											) &&
+												renderQuickActionButton(
+													"quick-top-sellers",
+												)}
+											{showInMoreActions(
 												"quick-fast-repeat",
-											)}
-											{renderQuickActionButton(
-												"direct-sale",
-											)}
-											{renderQuickActionButton(
+											) &&
+												renderQuickActionButton(
+													"quick-fast-repeat",
+												)}
+											{showInMoreActions(
 												"account-sale",
-											)}
+											) &&
+												renderQuickActionButton(
+													"account-sale",
+												)}
 										</div>
 									</div>
 									<div className="space-y-2">
@@ -786,12 +847,18 @@ export function GlobalQuickActions() {
 											Customers
 										</p>
 										<div className="space-y-2">
-											{renderQuickActionButton(
+											{showInMoreActions(
 												"customer",
-											)}
-											{renderQuickActionButton(
+											) &&
+												renderQuickActionButton(
+													"customer",
+												)}
+											{showInMoreActions(
 												"account-payment",
-											)}
+											) &&
+												renderQuickActionButton(
+													"account-payment",
+												)}
 										</div>
 									</div>
 									<div className="space-y-2 pt-1">
@@ -799,12 +866,18 @@ export function GlobalQuickActions() {
 											Suppliers
 										</p>
 										<div className="space-y-2">
-											{renderQuickActionButton(
+											{showInMoreActions(
 												"supplier",
-											)}
-											{renderQuickActionButton(
+											) &&
+												renderQuickActionButton(
+													"supplier",
+												)}
+											{showInMoreActions(
 												"supplier-price",
-											)}
+											) &&
+												renderQuickActionButton(
+													"supplier-price",
+												)}
 										</div>
 									</div>
 									<div className="space-y-2 pt-1">
@@ -812,12 +885,24 @@ export function GlobalQuickActions() {
 											Inventory
 										</p>
 										<div className="space-y-2">
-											{renderQuickActionButton(
+											{showInMoreActions(
+												"opening-stock",
+											) &&
+												renderQuickActionButton(
+													"opening-stock",
+												)}
+											{showInMoreActions(
 												"product",
-											)}
-											{renderQuickActionButton(
+											) &&
+												renderQuickActionButton(
+													"product",
+												)}
+											{showInMoreActions(
 												"adjustment",
-											)}
+											) &&
+												renderQuickActionButton(
+													"adjustment",
+												)}
 										</div>
 									</div>
 								</div>
@@ -944,18 +1029,6 @@ export function GlobalQuickActions() {
 						/>
 					</ActionDialog>
 				)}
-				{activeAction === "direct-sale" && (
-					<ActionDialog
-						title="Add Direct Sale"
-						description={`Record an immediate paid sale for ${formatDateDisplay(date)}.`}
-					>
-						<DirectSaleForm
-							products={products}
-							date={date}
-							onSuccess={onSaved}
-						/>
-					</ActionDialog>
-				)}
 				{activeAction === "account-sale" && (
 					<ActionDialog
 						title="Add Sale to Account"
@@ -1061,6 +1134,21 @@ export function GlobalQuickActions() {
 						/>
 					</ActionDialog>
 				)}
+				{activeAction === "opening-stock" && (
+					<ActionDialog
+						title="Add Existing Stock"
+						description={`Capture existing on-hand stock for ${formatDateDisplay(date)}.`}
+					>
+						<AddAdjustmentForm
+							products={products}
+							date={date}
+							fixedReason="OPENING_STOCK"
+							positiveOnly
+							successMessage="Existing stock captured successfully"
+							onSuccess={onSaved}
+						/>
+					</ActionDialog>
+				)}
 			</Dialog>
 		</>
 	);
@@ -1156,6 +1244,8 @@ function QuickCheckoutForm({
 		React.useState(false);
 	const [scanInput, setScanInput] =
 		React.useState("");
+	const [isMobilePicker, setIsMobilePicker] =
+		React.useState(false);
 	const [items, setItems] = React.useState<
 		ChargeItem[]
 	>([]);
@@ -1174,6 +1264,13 @@ function QuickCheckoutForm({
 		`/api/transactions?date=${date}&limit=60`,
 		fetcher,
 	);
+	React.useEffect(() => {
+		pushQuickAddDebugLog("quick_checkout_form_mounted", {
+			mode,
+			date,
+			productsCount: products.length,
+		});
+	}, [mode, date, products.length]);
 
 	const productMap = React.useMemo(
 		() => new Map(products.map((p) => [p.id, p])),
@@ -1315,6 +1412,22 @@ function QuickCheckoutForm({
 		},
 		[products, productByBarcode],
 	);
+	const resolveExactProductId = React.useCallback(
+		(rawInput: string) => {
+			const query = rawInput.trim().toLowerCase();
+			if (!query) return null;
+			const barcodeMatch = productByBarcode.get(query);
+			if (barcodeMatch) return barcodeMatch;
+			const exactNameMatch = products.find(
+				(product) =>
+					product.name.trim().toLowerCase() ===
+						query ||
+					product.id.toLowerCase() === query,
+			);
+			return exactNameMatch?.id ?? null;
+		},
+		[products, productByBarcode],
+	);
 	const matchedProductId = React.useMemo(
 		() => resolveProductIdFromInput(scanInput),
 		[resolveProductIdFromInput, scanInput],
@@ -1328,10 +1441,18 @@ function QuickCheckoutForm({
 		(rawInput: string, unitsToAdd?: number) => {
 			const productId =
 				resolveProductIdFromInput(rawInput);
+			pushQuickAddDebugLog("quick_checkout_add_by_input", {
+				rawInput,
+				resolvedProductId: productId,
+				unitsToAdd: unitsToAdd ?? 1,
+			});
 			if (!productId) {
 				toast.error(
 					`No product match for "${rawInput.trim()}"`,
 				);
+				pushQuickAddDebugLog("quick_checkout_no_match", {
+					rawInput,
+				});
 				return;
 			}
 			const qty =
@@ -1373,6 +1494,54 @@ function QuickCheckoutForm({
 		},
 		[resolveProductIdFromInput],
 	);
+	React.useEffect(() => {
+		if (typeof window === "undefined") return;
+		const mq = window.matchMedia(
+			"(max-width: 768px), (pointer: coarse)",
+		);
+		const apply = () => {
+			setIsMobilePicker(mq.matches);
+			pushQuickAddDebugLog("quick_checkout_mobile_state", {
+				matches: mq.matches,
+				innerWidth: window.innerWidth,
+				innerHeight: window.innerHeight,
+				devicePixelRatio: window.devicePixelRatio,
+				userAgent: navigator.userAgent,
+			});
+		};
+		apply();
+		mq.addEventListener("change", apply);
+		return () =>
+			mq.removeEventListener("change", apply);
+	}, []);
+	React.useEffect(() => {
+		if (!isMobilePicker) return;
+		if (!scanInput.trim()) return;
+		const exactProductId =
+			resolveExactProductId(scanInput);
+		pushQuickAddDebugLog("quick_checkout_mobile_debounce_check", {
+			scanInput,
+			exactProductId,
+			isMobilePicker,
+		});
+		if (!exactProductId) return;
+		const timer = setTimeout(() => {
+			pushQuickAddDebugLog(
+				"quick_checkout_mobile_debounce_auto_add",
+				{
+					scanInput,
+					exactProductId,
+				},
+			);
+			addByInput(scanInput);
+		}, 120);
+		return () => clearTimeout(timer);
+	}, [
+		isMobilePicker,
+		scanInput,
+		resolveExactProductId,
+		addByInput,
+	]);
 
 	const adjustUnits = (
 		productId: string,
@@ -1719,10 +1888,45 @@ function QuickCheckoutForm({
 							onChange={(e) => {
 								const nextValue =
 									e.target.value;
+								const nativeEvent =
+									e.nativeEvent as Event & {
+										inputType?: string;
+									};
+								const inputType =
+									nativeEvent.inputType ?? "";
 								const now = Date.now();
 								const addedChars =
 									nextValue.length -
 									scanInput.length;
+								const exactProductId =
+									resolveExactProductId(
+										nextValue,
+									);
+								const cameFromPickerLikeAction =
+									inputType ===
+										"insertReplacementText" ||
+									inputType ===
+										"insertFromPaste" ||
+									addedChars > 1 ||
+									(scanInput.length > 0 &&
+										nextValue.length > 0 &&
+										!nextValue.startsWith(
+											scanInput,
+										));
+								pushQuickAddDebugLog(
+									"quick_checkout_input_change",
+									{
+										prevValue: scanInput,
+										nextValue,
+										inputType,
+										addedChars,
+										exactProductId,
+										isMobilePicker,
+										cameFromPickerLikeAction,
+										fastKeyStreak:
+											fastKeyStreakRef.current,
+									},
+								);
 
 								if (addedChars === 1) {
 									const delta =
@@ -1739,6 +1943,14 @@ function QuickCheckoutForm({
 										nextValue.trim().length >=
 											6
 									) {
+										pushQuickAddDebugLog(
+											"quick_checkout_scan_burst_detected",
+											{
+												nextValue,
+												fastKeyStreak:
+													fastKeyStreakRef.current,
+											},
+										);
 										scheduleAutoAdd(
 											nextValue,
 										);
@@ -1751,10 +1963,31 @@ function QuickCheckoutForm({
 
 								lastScanKeyTsRef.current = now;
 								setScanInput(nextValue);
+								if (
+									(isMobilePicker ||
+										cameFromPickerLikeAction) &&
+									exactProductId &&
+									nextValue.trim().length > 0
+								) {
+									pushQuickAddDebugLog(
+										"quick_checkout_immediate_auto_add",
+										{
+											nextValue,
+											exactProductId,
+											isMobilePicker,
+											cameFromPickerLikeAction,
+										},
+									);
+									addByInput(nextValue);
+								}
 							}}
 							onKeyDown={(e) => {
 								if (e.key !== "Enter") return;
 								e.preventDefault();
+								pushQuickAddDebugLog(
+									"quick_checkout_enter_pressed",
+									{ scanInput },
+								);
 								addByInput(scanInput);
 							}}
 							placeholder="Type name or scan barcode, then Enter"
@@ -1964,6 +2197,8 @@ function QuickAddSaleItems({
 }) {
 	const [scanInput, setScanInput] =
 		React.useState("");
+	const [isMobilePicker, setIsMobilePicker] =
+		React.useState(false);
 	const lastScanKeyTsRef =
 		React.useRef<number>(0);
 	const fastKeyStreakRef =
@@ -1973,6 +2208,21 @@ function QuickAddSaleItems({
 	>(undefined);
 	const scanInputRef =
 		React.useRef<HTMLInputElement | null>(null);
+	const logQuickAdd = React.useCallback(
+		(
+			event: string,
+			meta?: Record<string, unknown>,
+		) => {
+			pushQuickAddDebugLog(event, meta);
+		},
+		[],
+	);
+	React.useEffect(() => {
+		logQuickAdd("quick_add_sale_items_mounted", {
+			productsCount: products.length,
+			itemsCount: items.length,
+		});
+	}, [logQuickAdd, products.length, items.length]);
 
 	const productMap = React.useMemo(
 		() => new Map(products.map((p) => [p.id, p])),
@@ -1996,6 +2246,10 @@ function QuickAddSaleItems({
 	const addUnits = React.useCallback(
 		(productId: string, unitsToAdd: number) => {
 			if (!productId || unitsToAdd <= 0) return;
+			logQuickAdd("add_units_called", {
+				productId,
+				unitsToAdd,
+			});
 			setItems((prev) => {
 				const existingIndex = prev.findIndex(
 					(item) => item.productId === productId,
@@ -2024,7 +2278,7 @@ function QuickAddSaleItems({
 				];
 			});
 		},
-		[setItems],
+		[setItems, logQuickAdd],
 	);
 
 	const resolveProductIdFromInput = React.useCallback(
@@ -2051,6 +2305,22 @@ function QuickAddSaleItems({
 		},
 		[products, productByBarcode],
 	);
+	const resolveExactProductId = React.useCallback(
+		(rawInput: string) => {
+			const query = rawInput.trim().toLowerCase();
+			if (!query) return null;
+			const barcodeMatch = productByBarcode.get(query);
+			if (barcodeMatch) return barcodeMatch;
+			const exactNameMatch = products.find(
+				(product) =>
+					product.name.trim().toLowerCase() ===
+						query ||
+					product.id.toLowerCase() === query,
+			);
+			return exactNameMatch?.id ?? null;
+		},
+		[products, productByBarcode],
+	);
 	const matchedProductId = React.useMemo(
 		() => resolveProductIdFromInput(scanInput),
 		[resolveProductIdFromInput, scanInput],
@@ -2064,10 +2334,17 @@ function QuickAddSaleItems({
 		(rawInput: string) => {
 			const productId =
 				resolveProductIdFromInput(rawInput);
+			logQuickAdd("add_by_input_attempt", {
+				rawInput,
+				resolvedProductId: productId,
+			});
 			if (!productId) {
 				toast.error(
 					`No product match for "${rawInput.trim()}"`,
 				);
+				logQuickAdd("add_by_input_no_match", {
+					rawInput,
+				});
 				return;
 			}
 			const qty =
@@ -2079,7 +2356,11 @@ function QuickAddSaleItems({
 				scanInputRef.current?.focus(),
 			);
 		},
-		[addUnits, resolveProductIdFromInput],
+		[
+			addUnits,
+			resolveProductIdFromInput,
+			logQuickAdd,
+		],
 	);
 
 	React.useEffect(() => {
@@ -2089,6 +2370,65 @@ function QuickAddSaleItems({
 			}
 		};
 	}, []);
+	React.useEffect(() => {
+		if (typeof window === "undefined") return;
+		const mq = window.matchMedia(
+			"(max-width: 768px), (pointer: coarse)",
+		);
+		const apply = () => {
+			setIsMobilePicker(mq.matches);
+			logQuickAdd("mobile_picker_state", {
+				matches: mq.matches,
+				innerWidth: window.innerWidth,
+				innerHeight: window.innerHeight,
+				screenWidth: window.screen.width,
+				screenHeight: window.screen.height,
+				devicePixelRatio:
+					window.devicePixelRatio,
+				maxTouchPoints:
+					navigator.maxTouchPoints,
+				userAgent: navigator.userAgent,
+			});
+		};
+		logQuickAdd("mobile_picker_init", {
+			query:
+				"(max-width: 768px), (pointer: coarse)",
+		});
+		apply();
+		mq.addEventListener("change", apply);
+		return () =>
+			mq.removeEventListener("change", apply);
+	}, [logQuickAdd]);
+	React.useEffect(() => {
+		if (!isMobilePicker) return;
+		if (!scanInput.trim()) return;
+		const exactProductId =
+			resolveExactProductId(scanInput);
+		logQuickAdd("mobile_debounce_check", {
+			isMobilePicker,
+			scanInput,
+			exactProductId,
+		});
+		if (!exactProductId) return;
+
+		const timer = setTimeout(() => {
+			logQuickAdd("mobile_debounce_auto_add", {
+				scanInput,
+				exactProductId,
+			});
+			addUnits(exactProductId, 1);
+			setScanInput("");
+			fastKeyStreakRef.current = 0;
+		}, 120);
+
+		return () => clearTimeout(timer);
+	}, [
+		isMobilePicker,
+		scanInput,
+		resolveExactProductId,
+		addUnits,
+		logQuickAdd,
+	]);
 
 	const scheduleAutoAdd = React.useCallback(
 		(rawCode: string) => {
@@ -2156,10 +2496,47 @@ function QuickAddSaleItems({
 						onChange={(e) => {
 							const nextValue =
 								e.target.value;
+							const nativeEvent =
+								e.nativeEvent as Event & {
+									inputType?: string;
+								};
+							const inputType =
+								nativeEvent.inputType ?? "";
 							const now = Date.now();
 							const addedChars =
 								nextValue.length -
 								scanInput.length;
+							const exactProductId =
+								resolveExactProductId(
+									nextValue,
+								);
+							const cameFromPickerLikeAction =
+								inputType ===
+									"insertReplacementText" ||
+								inputType ===
+									"insertFromPaste" ||
+								addedChars > 1 ||
+								(scanInput.length > 0 &&
+									nextValue.length > 0 &&
+									!nextValue.startsWith(
+										scanInput,
+									));
+							logQuickAdd("input_change", {
+								prevValue: scanInput,
+								nextValue,
+								inputType,
+								addedChars,
+								exactProductId,
+								isMobilePicker,
+								cameFromPickerLikeAction,
+								fastKeyStreak:
+									fastKeyStreakRef.current,
+								lastScanDeltaMs:
+									lastScanKeyTsRef.current > 0
+										? now -
+											lastScanKeyTsRef.current
+										: null,
+							});
 
 							if (addedChars === 1) {
 								const delta =
@@ -2175,6 +2552,14 @@ function QuickAddSaleItems({
 										5 &&
 									nextValue.trim().length >= 6
 								) {
+									logQuickAdd(
+										"scan_burst_detected",
+										{
+											nextValue,
+											fastKeyStreak:
+												fastKeyStreakRef.current,
+										},
+									);
 									scheduleAutoAdd(
 										nextValue,
 									);
@@ -2187,10 +2572,32 @@ function QuickAddSaleItems({
 
 							lastScanKeyTsRef.current = now;
 							setScanInput(nextValue);
+							if (
+								(isMobilePicker ||
+									cameFromPickerLikeAction) &&
+								exactProductId &&
+								nextValue.trim().length > 0
+							) {
+								logQuickAdd(
+									"immediate_auto_add_from_picker",
+									{
+										nextValue,
+										exactProductId,
+										isMobilePicker,
+										cameFromPickerLikeAction,
+									},
+								);
+								addUnits(exactProductId, 1);
+								setScanInput("");
+								fastKeyStreakRef.current = 0;
+							}
 						}}
 						onKeyDown={(e) => {
 							if (e.key !== "Enter") return;
 							e.preventDefault();
+							logQuickAdd("enter_pressed", {
+								scanInput,
+							});
 							addByInput(scanInput);
 						}}
 						placeholder="Type name or scan barcode, then Enter"
@@ -2366,7 +2773,9 @@ function DirectSaleForm({
 			}))
 			.filter((item) => item.units > 0);
 		if (!validItems.length) {
-			toast.error("Please add at least one item");
+			toast.error(
+				"Please add at least one item with quantities and line total price",
+			);
 			setLoading(false);
 			return;
 		}
@@ -2506,6 +2915,84 @@ function AccountSaleForm({
 	const [note, setNote] = React.useState("");
 	const [showNote, setShowNote] =
 		React.useState(false);
+	const [tempTabOpen, setTempTabOpen] =
+		React.useState(false);
+	const [tempTabLoading, setTempTabLoading] =
+		React.useState(false);
+	const [tempTabName, setTempTabName] =
+		React.useState("");
+	const [tempTabPhone, setTempTabPhone] =
+		React.useState("");
+	const [tempTabNote, setTempTabNote] =
+		React.useState("");
+	const { mutate } = useSWRConfig();
+	React.useEffect(() => {
+		pushQuickAddDebugLog("account_sale_form_mounted", {
+			date,
+			customersCount: customers.length,
+			productsCount: products.length,
+		});
+	}, [date, customers.length, products.length]);
+
+	const handleCreateTemporaryTab = async (
+		e: React.FormEvent,
+	) => {
+		e.preventDefault();
+		if (!tempTabName.trim()) {
+			toast.error(
+				"Temporary tab name is required",
+			);
+			return;
+		}
+
+		setTempTabLoading(true);
+		try {
+			const res = await fetch("/api/customers", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					name: tempTabName.trim(),
+					phone: tempTabPhone.trim() || undefined,
+					note: tempTabNote.trim() || undefined,
+					customerMode: "DEBT_ONLY",
+					isTemporaryTab: true,
+					creditLimitCents: 0,
+				}),
+			});
+			const body = await res
+				.json()
+				.catch(() => ({}));
+			if (!res.ok) {
+				throw new Error(
+					getApiErrorMessage(
+						body,
+						"Failed to open temporary tab",
+					),
+				);
+			}
+
+			const createdId = body?.data?.id ?? body?.id;
+			if (typeof createdId === "string" && createdId) {
+				setCustomerId(createdId);
+			}
+			await mutate("/api/customers");
+			toast.success("Temporary tab opened");
+			setTempTabOpen(false);
+			setTempTabName("");
+			setTempTabPhone("");
+			setTempTabNote("");
+		} catch (err) {
+			toast.error(
+				err instanceof Error
+					? err.message
+					: "Failed to open temporary tab",
+			);
+		} finally {
+			setTempTabLoading(false);
+		}
+	};
 
 	const handleSubmit = async (
 		e: React.FormEvent,
@@ -2588,8 +3075,101 @@ function AccountSaleForm({
 						customers={customers}
 						value={customerId}
 						onChange={setCustomerId}
-						label="Customer Account"
+						label="Tab Holder"
 					/>
+					<Dialog
+						open={tempTabOpen}
+						onOpenChange={setTempTabOpen}
+					>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="w-full"
+							onClick={() => setTempTabOpen(true)}
+						>
+							Open Temporary Tab
+						</Button>
+						<DialogContent>
+							<DialogHeader>
+								<DialogTitle>
+									Open Temporary Tab
+								</DialogTitle>
+								<DialogDescription>
+									Create a temporary running tab for this session.
+									It auto-closes after full payment.
+								</DialogDescription>
+							</DialogHeader>
+							<form
+								onSubmit={handleCreateTemporaryTab}
+								className="space-y-3"
+							>
+								<div className="space-y-2">
+									<Label>Tab Name</Label>
+									<Input
+										value={tempTabName}
+										onChange={(e) =>
+											setTempTabName(
+												e.target.value,
+											)
+										}
+										placeholder="e.g. Blue Jacket"
+										required
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label>
+										Phone (optional)
+									</Label>
+									<Input
+										type="tel"
+										value={tempTabPhone}
+										onChange={(e) =>
+											setTempTabPhone(
+												e.target.value,
+											)
+										}
+										placeholder="072 123 4567"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label>Note (optional)</Label>
+									<Textarea
+										value={tempTabNote}
+										onChange={(e) =>
+											setTempTabNote(
+												e.target.value,
+											)
+										}
+										rows={2}
+										placeholder="Quick identifier or context..."
+									/>
+								</div>
+								<div className="flex justify-end gap-2">
+									<Button
+										type="button"
+										variant="outline"
+										onClick={() =>
+											setTempTabOpen(false)
+										}
+									>
+										Cancel
+									</Button>
+									<Button
+										type="submit"
+										disabled={
+											tempTabLoading ||
+											!tempTabName.trim()
+										}
+									>
+										{tempTabLoading
+											? "Opening..."
+											: "Open Tab"}
+									</Button>
+								</div>
+							</form>
+						</DialogContent>
+					</Dialog>
 				</div>
 				<div className="space-y-2">
 					<Button
@@ -2716,7 +3296,7 @@ function AccountPaymentForm({
 						customers={customers}
 						value={customerId}
 						onChange={setCustomerId}
-						label="Customer Account"
+						label="Tab Holder"
 					/>
 					<MoneyInput
 						label="Amount"
@@ -2826,6 +3406,10 @@ function AddCustomerForm({
 	const [name, setName] = React.useState("");
 	const [phone, setPhone] = React.useState("");
 	const [note, setNote] = React.useState("");
+	const [customerMode, setCustomerMode] =
+		React.useState<"ACCOUNT" | "DEBT_ONLY">(
+			"ACCOUNT",
+		);
 	const [creditLimitCents, setCreditLimitCents] =
 		React.useState(0);
 	const [dueDays, setDueDays] =
@@ -2846,9 +3430,15 @@ function AddCustomerForm({
 					name,
 					phone: phone || undefined,
 					note: note || undefined,
-					creditLimitCents,
+					customerMode,
+					creditLimitCents:
+						customerMode === "ACCOUNT"
+							? creditLimitCents
+							: 0,
 					dueDays: dueDays
-						? parseInt(dueDays, 10)
+						? customerMode === "ACCOUNT"
+							? parseInt(dueDays, 10)
+							: undefined
 						: undefined,
 				}),
 			});
@@ -2896,6 +3486,31 @@ function AddCustomerForm({
 					/>
 				</div>
 				<div className="space-y-2">
+					<Label>Customer Type</Label>
+					<Select
+						value={customerMode}
+						onValueChange={(value) =>
+							setCustomerMode(
+								value as
+									| "ACCOUNT"
+									| "DEBT_ONLY",
+							)
+						}
+					>
+						<SelectTrigger>
+							<SelectValue placeholder="Select type" />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="ACCOUNT">
+								Account Customer
+							</SelectItem>
+							<SelectItem value="DEBT_ONLY">
+								Debt-only Customer
+							</SelectItem>
+						</SelectContent>
+					</Select>
+				</div>
+				<div className="space-y-2">
 					<Label>Phone (optional)</Label>
 					<Input
 						type="tel"
@@ -2906,25 +3521,29 @@ function AddCustomerForm({
 						placeholder="072 123 4567"
 					/>
 				</div>
-				<MoneyInput
-					label="Credit Limit"
-					value={creditLimitCents}
-					onChange={setCreditLimitCents}
-				/>
-				<div className="space-y-2">
-					<Label>
-						Payment Due Days (optional)
-					</Label>
-					<Input
-						type="number"
-						min="1"
-						value={dueDays}
-						onChange={(e) =>
-							setDueDays(e.target.value)
-						}
-						placeholder="30"
-					/>
-				</div>
+				{customerMode === "ACCOUNT" && (
+					<>
+						<MoneyInput
+							label="Credit Limit"
+							value={creditLimitCents}
+							onChange={setCreditLimitCents}
+						/>
+						<div className="space-y-2">
+							<Label>
+								Payment Due Days (optional)
+							</Label>
+							<Input
+								type="number"
+								min="1"
+								value={dueDays}
+								onChange={(e) =>
+									setDueDays(e.target.value)
+								}
+								placeholder="30"
+							/>
+						</div>
+					</>
+				)}
 				<div className="space-y-2">
 					<Label>Note (optional)</Label>
 					<Textarea
@@ -3408,7 +4027,7 @@ function AddPurchaseForm({
 						productId: "",
 						cases: "",
 						singles: "",
-						unitCostCents: 0,
+						lineSubtotalCents: 0,
 						discountCents: 0,
 					},
 				],
@@ -3425,7 +4044,7 @@ function AddPurchaseForm({
 				productId: "",
 				cases: "",
 				singles: "",
-				unitCostCents: 0,
+				lineSubtotalCents: 0,
 				discountCents: 0,
 			},
 		]);
@@ -3471,15 +4090,18 @@ function AddPurchaseForm({
 			.filter(
 				(item) =>
 					item.productId &&
-					(item.cases || item.singles),
+					(item.cases || item.singles) &&
+					item.lineSubtotalCents > 0,
 			)
 			.map((item) => ({
 				productId: item.productId,
 				cases: parseInt(item.cases, 10) || 0,
 				singles: parseInt(item.singles, 10) || 0,
 				units: calculateUnits(item),
-				unitCostCents:
-					item.unitCostCents || undefined,
+				lineSubtotalCents:
+					item.lineSubtotalCents > 0
+						? item.lineSubtotalCents
+						: undefined,
 				discountCents:
 					item.discountCents > 0
 						? item.discountCents
@@ -3585,8 +4207,13 @@ function AddPurchaseForm({
 								const units =
 									calculateUnits(item);
 								const subtotalCents =
-									units *
-									(item.unitCostCents ?? 0);
+									item.lineSubtotalCents ?? 0;
+								const estimatedUnitCost =
+									units > 0
+										? Math.round(
+												subtotalCents / units,
+										  )
+										: 0;
 								const netCents = Math.max(
 									0,
 									subtotalCents -
@@ -3648,15 +4275,15 @@ function AddPurchaseForm({
 											<div className="col-span-8 flex items-end gap-1 sm:col-span-2">
 												<div className="min-w-0 flex-1 space-y-1">
 													<Label className="text-xs">
-														Unit Cost
+														Line Total Price
 													</Label>
 														<MoneyInput
 															value={
-																item.unitCostCents
+																item.lineSubtotalCents
 															}
 															onChange={(v) =>
 																updateItem(index, {
-																	unitCostCents: v,
+																	lineSubtotalCents: v,
 															})
 														}
 														placeholder="0.00"
@@ -3704,6 +4331,10 @@ function AddPurchaseForm({
 											Subtotal {formatZAR(subtotalCents)} | Net{" "}
 											{formatZAR(netCents)}
 										</p>
+										<p className="text-[11px] text-muted-foreground">
+											Estimated unit cost:{" "}
+											{formatZAR(estimatedUnitCost)}
+										</p>
 									</div>
 								);
 							})}
@@ -3723,7 +4354,7 @@ function AddPurchaseForm({
 									productId: "",
 									cases: "",
 									singles: "",
-									unitCostCents: 0,
+									lineSubtotalCents: 0,
 									discountCents: 0,
 								},
 							])
@@ -3745,10 +4376,16 @@ function AddPurchaseForm({
 function AddAdjustmentForm({
 	products,
 	date,
+	fixedReason,
+	positiveOnly = false,
+	successMessage = "Adjustments submitted successfully",
 	onSuccess,
 }: {
 	products: Product[];
 	date: string;
+	fixedReason?: AdjustmentReason;
+	positiveOnly?: boolean;
+	successMessage?: string;
 	onSuccess: () => void;
 }) {
 	const [loading, setLoading] =
@@ -3759,7 +4396,7 @@ function AddAdjustmentForm({
 		{
 			productId: "",
 			unitsDelta: "",
-			reason: "",
+			reason: fixedReason ?? "",
 			note: "",
 		},
 	]);
@@ -3787,18 +4424,27 @@ function AddAdjustmentForm({
 				(item) =>
 					item.productId &&
 					item.unitsDelta &&
-					item.reason,
+					(item.reason || fixedReason),
 			)
-			.map((item) => ({
-				productId: item.productId,
-				unitsDelta:
-					parseInt(item.unitsDelta, 10) || 0,
-				reason: item.reason as AdjustmentReason,
-				note: item.note || undefined,
-			}));
+			.map((item) => {
+				const parsedUnits =
+					parseInt(item.unitsDelta, 10) || 0;
+				return {
+					productId: item.productId,
+					unitsDelta: parsedUnits,
+					reason: (fixedReason ??
+						item.reason) as AdjustmentReason,
+					note: item.note || undefined,
+				};
+			})
+			.filter((item) =>
+				positiveOnly ? item.unitsDelta > 0 : true,
+			);
 		if (!validItems.length) {
 			toast.error(
-				"Please add at least one valid adjustment item",
+				positiveOnly
+					? "Please add at least one item with units greater than 0"
+					: "Please add at least one valid adjustment item",
 			);
 			setLoading(false);
 			return;
@@ -3828,9 +4474,7 @@ function AddAdjustmentForm({
 					),
 				);
 			}
-			toast.success(
-				"Adjustments submitted successfully",
-			);
+			toast.success(successMessage);
 			onSuccess();
 		} catch (err) {
 			toast.error(
@@ -3886,32 +4530,38 @@ function AddAdjustmentForm({
 								)}
 							</div>
 							<div className="grid grid-cols-2 gap-2">
-								<Select
-									value={item.reason}
-									onValueChange={(
-										v: AdjustmentReason | "",
-									) =>
-										updateItem(index, {
-											reason: v,
-										})
-									}
-								>
-									<SelectTrigger>
-										<SelectValue placeholder="Reason" />
-									</SelectTrigger>
-									<SelectContent>
-										{ADJUSTMENT_REASONS.map(
-											(reason) => (
-												<SelectItem
-													key={reason.value}
-													value={reason.value}
-												>
-													{reason.label}
-												</SelectItem>
-											),
-										)}
-									</SelectContent>
-								</Select>
+								{fixedReason ? (
+									<div className="flex items-center rounded-md border px-3 text-sm text-muted-foreground">
+										Reason: Existing Stock
+									</div>
+								) : (
+									<Select
+										value={item.reason}
+										onValueChange={(
+											v: AdjustmentReason | "",
+										) =>
+											updateItem(index, {
+												reason: v,
+											})
+										}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Reason" />
+										</SelectTrigger>
+										<SelectContent>
+											{ADJUSTMENT_REASONS.map(
+												(reason) => (
+													<SelectItem
+														key={reason.value}
+														value={reason.value}
+													>
+														{reason.label}
+													</SelectItem>
+												),
+											)}
+										</SelectContent>
+									</Select>
+								)}
 								<Input
 									type="number"
 									value={item.unitsDelta}
@@ -3920,7 +4570,11 @@ function AddAdjustmentForm({
 											unitsDelta: e.target.value,
 										})
 									}
-									placeholder="Units (+/-)"
+									placeholder={
+										positiveOnly
+											? "Units (>0)"
+											: "Units (+/-)"
+									}
 								/>
 							</div>
 							<Textarea
@@ -3948,7 +4602,7 @@ function AddAdjustmentForm({
 								{
 									productId: "",
 									unitsDelta: "",
-									reason: "",
+									reason: fixedReason ?? "",
 									note: "",
 								},
 							])

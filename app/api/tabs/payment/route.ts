@@ -7,6 +7,8 @@ import { parseJson } from "@/lib/validate";
 import { tabPaymentSchema } from "@/lib/schemas";
 import { getOrCreateDay } from "@/lib/businessDay";
 import { TabTransaction } from "@/models/TabTransaction";
+import { Customer } from "@/models/Customer";
+import { TabAccount } from "@/models/TabAccount";
 import { todayYMD } from "@/lib/dates";
 import { serializeDoc } from "@/lib/serialize";
 import {
@@ -48,6 +50,91 @@ export async function POST(req: Request) {
 			note: input.note,
 			createdByUserId: a.userId!,
 		});
+
+		const [customer, agg] = await Promise.all([
+			Customer.findById(input.customerId)
+				.select({
+					isTemporaryTab: 1,
+					isActive: 1,
+				})
+				.lean(),
+			TabTransaction.aggregate([
+				{
+					$match: {
+						customerId: input.customerId,
+					},
+				},
+				{
+					$group: {
+						_id: null,
+						charges: {
+							$sum: {
+								$cond: [
+									{
+										$eq: [
+											"$type",
+											"CHARGE",
+										],
+									},
+									"$amountCents",
+									0,
+								],
+							},
+						},
+						payments: {
+							$sum: {
+								$cond: [
+									{
+										$eq: [
+											"$type",
+											"PAYMENT",
+										],
+									},
+									"$amountCents",
+									0,
+								],
+							},
+						},
+						adjustments: {
+							$sum: {
+								$cond: [
+									{
+										$eq: [
+											"$type",
+											"ADJUSTMENT",
+										],
+									},
+									"$amountCents",
+									0,
+								],
+							},
+						},
+					},
+				},
+			]).then((rows) => rows?.[0]),
+		]);
+
+		const balance =
+			(agg?.charges ?? 0) -
+			(agg?.payments ?? 0) +
+			(agg?.adjustments ?? 0);
+		if (
+			customer?.isTemporaryTab &&
+			customer?.isActive &&
+			balance <= 0
+		) {
+			await Promise.all([
+				Customer.updateOne(
+					{ _id: input.customerId },
+					{ $set: { isActive: false } },
+				),
+				TabAccount.updateOne(
+					{ customerId: input.customerId },
+					{ $set: { status: "BLOCKED" } },
+				),
+			]);
+		}
+
 		await writeAuditLog({
 			scopeId: getScopeIdFromAuth(a),
 			actorUserId: a.userId ?? undefined,

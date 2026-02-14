@@ -119,7 +119,11 @@ interface DashboardTransactionEntry {
 interface TransactionDrilldownState {
 	open: boolean;
 	title: string;
-	kind?: "direct" | "account" | "payment" | "all";
+	kind?:
+		| "all-transactions"
+		| "direct-sales"
+		| "account-sales"
+		| "account-payments";
 	productId?: string;
 }
 
@@ -229,11 +233,13 @@ export function DashboardClient() {
 		const sign = changePct > 0 ? "+" : "";
 		return `${sign}${changePct.toFixed(1)}%`;
 	}, [report]);
+	const stockRecommendations =
+		report?.stockRecommendations ?? [];
 	const [txDrilldown, setTxDrilldown] =
 		React.useState<TransactionDrilldownState>({
 			open: false,
 			title: "Transactions",
-			kind: "all",
+			kind: "all-transactions",
 		});
 
 	const openTxDrilldown = React.useCallback(
@@ -243,13 +249,13 @@ export function DashboardClient() {
 			productId,
 		}: {
 			title: string;
-			kind?: "direct" | "account" | "payment" | "all";
+			kind?: TransactionDrilldownState["kind"];
 			productId?: string;
 		}) => {
 			setTxDrilldown({
 				open: true,
 				title,
-				kind: kind ?? "all",
+				kind: kind ?? "all-transactions",
 				productId,
 			});
 		},
@@ -267,13 +273,16 @@ export function DashboardClient() {
 	const filteredTransactions = React.useMemo(
 		() =>
 			(transactions ?? []).filter((txn) => {
-				const kind = txDrilldown.kind ?? "all";
+				const kind =
+					txDrilldown.kind ??
+					"all-transactions";
 				const kindMatch =
-					kind === "direct"
+					kind === "direct-sales"
 						? txn.type === "DIRECT_SALE"
-						: kind === "account"
+						: kind === "account-sales"
 							? txn.type === "CHARGE"
-							: kind === "payment"
+							: kind ===
+								  "account-payments"
 								? txn.type === "PAYMENT"
 								: true;
 				if (!kindMatch) return false;
@@ -311,17 +320,27 @@ export function DashboardClient() {
 						{error.message}
 					</AlertDescription>
 				</Alert>
-			) : !report || !report.byProduct?.length ? (
+			) : !report ? (
 				<EmptyState
 					title="No data for this date"
 					description="No sales or stock activity has been recorded for this date yet."
 				/>
 			) : (
-				<Tabs
-					value={activeTab}
-					onValueChange={onTabChange}
-					className="space-y-6"
-				>
+				<>
+					<StockAlertsPanel
+						rows={stockRecommendations}
+					/>
+					{!report.byProduct?.length ? (
+						<EmptyState
+							title="No data for this date"
+							description="No sales or stock activity has been recorded for this date yet."
+						/>
+					) : (
+						<Tabs
+							value={activeTab}
+							onValueChange={onTabChange}
+							className="space-y-6"
+						>
 					<TabsList className="flex w-full items-center gap-1 overflow-x-auto">
 						<TabsTrigger
 							value="overview"
@@ -423,7 +442,7 @@ export function DashboardClient() {
 								onClick={() =>
 									openTxDrilldown({
 										title: "Expected Sales",
-										kind: "all",
+										kind: "all-transactions",
 									})
 								}
 							/>
@@ -433,7 +452,7 @@ export function DashboardClient() {
 								onClick={() =>
 									openTxDrilldown({
 										title: "Collected Sales",
-										kind: "direct",
+										kind: "direct-sales",
 									})
 								}
 							/>
@@ -443,7 +462,7 @@ export function DashboardClient() {
 								onClick={() =>
 									openTxDrilldown({
 										title: "Account Sales",
-										kind: "account",
+										kind: "account-sales",
 									})
 								}
 							/>
@@ -453,7 +472,7 @@ export function DashboardClient() {
 								onClick={() =>
 									openTxDrilldown({
 										title: "Sales Accounted For",
-										kind: "all",
+										kind: "all-transactions",
 									})
 								}
 							/>
@@ -470,7 +489,7 @@ export function DashboardClient() {
 								onClick={() =>
 									openTxDrilldown({
 										title: "Sales Difference",
-										kind: "all",
+										kind: "all-transactions",
 									})
 								}
 							/>
@@ -564,7 +583,7 @@ export function DashboardClient() {
 																			title: `${item.productName} Transactions`,
 																			productId:
 																				item.productId,
-																			kind: "all",
+																			kind: "all-transactions",
 																		},
 																	)
 																}
@@ -697,7 +716,7 @@ export function DashboardClient() {
 																				title: `${item.productName} Transactions`,
 																				productId:
 																					item.productId,
-																				kind: "all",
+																				kind: "all-transactions",
 																			},
 																		)
 																	}
@@ -997,7 +1016,9 @@ export function DashboardClient() {
 							/>
 						</div>
 					</TabsContent>
-				</Tabs>
+						</Tabs>
+					)}
+				</>
 			)}
 			<Dialog
 				open={txDrilldown.open}
@@ -1119,6 +1140,78 @@ export function DashboardClient() {
 				</DialogContent>
 			</Dialog>
 		</PageWrapper>
+	);
+}
+
+function StockAlertsPanel({
+	rows,
+}: {
+	rows: DailyReport["stockRecommendations"];
+}) {
+	if (rows.length === 0) return null;
+	const outOfStock = rows.filter(
+		(item) =>
+			item.priority === "HIGH" ||
+			item.currentUnits <= 0,
+	);
+	const lowStock = rows.filter(
+		(item) =>
+			item.priority !== "HIGH" &&
+			item.currentUnits > 0,
+	);
+
+	return (
+		<Card className="border-destructive/30 bg-destructive/5 shadow-md">
+			<CardHeader className="pb-3">
+				<CardTitle className="flex items-center gap-2 text-base">
+					<AlertCircle className="h-4 w-4 text-destructive" />
+					Stock Alerts
+				</CardTitle>
+			</CardHeader>
+			<CardContent className="space-y-3">
+				<div className="flex flex-wrap items-center gap-2 text-xs">
+					<span className="rounded bg-destructive/10 px-2 py-1 font-medium text-destructive">
+						{outOfStock.length} out of stock
+					</span>
+					<span className="rounded bg-amber-500/10 px-2 py-1 font-medium text-amber-700">
+						{lowStock.length} low stock
+					</span>
+				</div>
+				<div className="space-y-2">
+					{rows.slice(0, 5).map((item) => (
+						<div
+							key={item.productId}
+							className="flex items-center justify-between gap-3 rounded-lg border bg-background p-2"
+						>
+							<div className="min-w-0">
+								<p className="truncate text-sm font-medium">
+									{item.productName}
+								</p>
+								<p className="text-xs text-muted-foreground">
+									Current: {item.currentUnits} | Reorder:{" "}
+									{item.reorderLevelUnits}
+								</p>
+							</div>
+							<span
+								className={cn(
+									"rounded px-2 py-0.5 text-xs font-medium",
+									item.priority === "HIGH"
+										? "bg-destructive/10 text-destructive"
+										: "bg-amber-500/10 text-amber-700",
+								)}
+							>
+								{item.priority}
+							</span>
+						</div>
+					))}
+					{rows.length > 5 && (
+						<p className="text-xs text-muted-foreground">
+							+{rows.length - 5} more in Trends & Recommendations.
+						</p>
+					)}
+				</div>
+			</CardContent>
+		</Card>
 	);
 }
 

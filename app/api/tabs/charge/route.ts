@@ -8,6 +8,7 @@ import { tabChargeSchema } from "@/lib/schemas";
 import { getOrCreateDay } from "@/lib/businessDay";
 import { TabAccount } from "@/models/TabAccount";
 import { TabTransaction } from "@/models/TabTransaction";
+import { Customer } from "@/models/Customer";
 import { Product } from "@/models/Product";
 import { Price } from "@/models/Price";
 import { todayYMD } from "@/lib/dates";
@@ -63,6 +64,11 @@ export async function POST(req: Request) {
 		const account = await TabAccount.findOne({
 			customerId: input.customerId,
 		}).lean();
+		const customer = await Customer.findById(
+			input.customerId,
+		)
+			.select({ customerMode: 1 })
+			.lean();
 		if (!account)
 			return fail("Tab account not found", {
 				status: 404,
@@ -172,7 +178,10 @@ export async function POST(req: Request) {
 			(agg.charges ?? 0) -
 			(agg.payments ?? 0) +
 			(agg.adjustments ?? 0);
+		const enforceCreditLimit =
+			customer?.customerMode !== "DEBT_ONLY";
 		if (
+			enforceCreditLimit &&
 			balance + totals.amountCents >
 			account.creditLimitCents
 		) {

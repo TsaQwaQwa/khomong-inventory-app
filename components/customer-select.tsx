@@ -54,7 +54,20 @@ export function CustomerSelect({
 							value={customer.id}
 						>
 							<span className="flex items-center justify-between gap-2">
-								<span>{customer.name}</span>
+								<span className="flex items-center gap-2">
+									<span>{customer.name}</span>
+									{customer.isTemporaryTab && (
+										<span className="rounded border border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-sky-700">
+											Temp
+										</span>
+									)}
+									{customer.customerMode ===
+										"DEBT_ONLY" && (
+										<span className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700">
+											Debt-only
+										</span>
+									)}
+								</span>
 								{showBalance &&
 									customer.balanceCents !==
 										undefined && (

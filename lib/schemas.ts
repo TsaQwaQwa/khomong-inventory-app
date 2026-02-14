@@ -45,6 +45,7 @@ export const purchaseCreateSchema = z.object({
       singles: z.number().int().min(0).default(0),
       units: z.number().int().min(0),
       unitCostCents: z.number().int().min(0).optional(),
+      lineSubtotalCents: z.number().int().min(0).optional(),
       discountCents: z.number().int().min(0).optional(),
     })
   ).min(1),
@@ -74,6 +75,7 @@ export const adjustmentSchema = z.object({
         'FREEBIES',
         'THEFT_SUSPECTED',
         'COUNT_CORRECTION',
+        'OPENING_STOCK',
       ]),
       note: z.string().optional(),
       attachmentId: z.string().optional(),
@@ -81,18 +83,31 @@ export const adjustmentSchema = z.object({
   ).min(1),
 });
 
+const optionalPhoneSchema = z.preprocess(
+	(value) => {
+		if (typeof value !== "string") return value;
+		const trimmed = value.trim();
+		return trimmed === "" ? undefined : trimmed;
+	},
+	z.string().min(7).optional(),
+);
+
 export const customerCreateSchema = z.object({
   name: z.string().min(2),
-  phone: z.string().min(7),
+  phone: optionalPhoneSchema,
   note: z.string().optional(),
+  customerMode: z.enum(["ACCOUNT", "DEBT_ONLY"]).default("ACCOUNT"),
+  isTemporaryTab: z.boolean().optional().default(false),
   creditLimitCents: z.number().int().min(0).default(0),
   dueDays: z.number().int().min(1).max(365).optional(),
 });
 
 export const customerUpdateSchema = z.object({
   name: z.string().min(2).optional(),
-  phone: z.string().min(7).optional(),
+  phone: optionalPhoneSchema,
   note: z.string().optional(),
+  customerMode: z.enum(["ACCOUNT", "DEBT_ONLY"]).optional(),
+  isTemporaryTab: z.boolean().optional(),
   creditLimitCents: z.number().int().min(0).optional(),
   dueDays: z.number().int().min(1).max(365).optional(),
 });
