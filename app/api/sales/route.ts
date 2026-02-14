@@ -12,6 +12,7 @@ import { SaleTransaction } from "@/models/SaleTransaction";
 import { todayYMD } from "@/lib/dates";
 import { serializeDoc } from "@/lib/serialize";
 import { calculateSaleTotals } from "@/lib/sales-pricing";
+import { getCurrentStockByProductIds } from "@/lib/stock-availability";
 import {
 	getScopeIdFromAuth,
 	toAuditObject,
@@ -74,6 +75,54 @@ export async function POST(req: Request) {
 					status: 400,
 					code: "INVALID_PRODUCT",
 				});
+		}
+		const requestedUnitsByProduct = new Map<
+			string,
+			number
+		>();
+		for (const item of input.items) {
+			requestedUnitsByProduct.set(
+				item.productId,
+				(requestedUnitsByProduct.get(
+					item.productId,
+				) ?? 0) + item.units,
+			);
+		}
+		const stockByProduct =
+			await getCurrentStockByProductIds(
+				Array.from(requestedUnitsByProduct.keys()),
+			);
+		const productNameById = new Map(
+			products.map((product) => [
+				String(product._id),
+				product.name,
+			]),
+		);
+		const insufficient = Array.from(
+			requestedUnitsByProduct.entries(),
+		).filter(([productId, requestedUnits]) => {
+			const availableUnits =
+				stockByProduct.get(productId) ?? 0;
+			return requestedUnits > availableUnits;
+		});
+		if (insufficient.length > 0) {
+			const detail = insufficient
+				.map(([productId, requestedUnits]) => {
+					const availableUnits =
+						stockByProduct.get(productId) ?? 0;
+					const productName =
+						productNameById.get(productId) ??
+						"Unknown product";
+					return `${productName} (available ${availableUnits}, requested ${requestedUnits})`;
+				})
+				.join("; ");
+			return fail(
+				`Insufficient stock: ${detail}`,
+				{
+					status: 409,
+					code: "INSUFFICIENT_STOCK",
+				},
+			);
 		}
 
 		const itemsWithPrice = [];

@@ -124,13 +124,13 @@ export function PurchaseAssistantClient() {
 		fetcher,
 	);
 	const { data: purchases = [] } = useSWR<Purchase[]>(
-		`/api/purchases?date=${date}&lookbackDays=90`,
+		`/api/purchases?date=${date}&lookbackDays=90&fields=lite`,
 		fetcher,
 	);
 	const { data: supplierPrices = [] } = useSWR<
 		SupplierPrice[]
 	>(
-		`/api/supplier-prices?asOf=${date}`,
+		`/api/supplier-prices?asOf=${date}&fields=lite`,
 		fetcher,
 	);
 
@@ -600,4 +600,3 @@ export function PurchaseAssistantClient() {
 		</PageWrapper>
 	);
 }
-

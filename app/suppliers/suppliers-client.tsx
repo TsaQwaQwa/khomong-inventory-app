@@ -165,18 +165,20 @@ export function SuppliersClient() {
 		fetcher,
 	);
 	const { data: report } = useSWR<DailyReport>(
-		`/api/reports/daily?date=${date}`,
+		activeTab === "restock"
+			? `/api/reports/daily?date=${date}`
+			: null,
 		fetcher,
 	);
 	const { data: purchases = [] } = useSWR<Purchase[]>(
-		`/api/purchases?date=${date}&lookbackDays=90`,
+		`/api/purchases?date=${date}&lookbackDays=90&fields=lite`,
 		fetcher,
 	);
 	const {
 		data: supplierPrices = [],
 		mutate: mutateSupplierPrices,
 	} = useSWR<SupplierPrice[]>(
-		`/api/supplier-prices?asOf=${date}`,
+		`/api/supplier-prices?asOf=${date}&fields=lite`,
 		fetcher,
 	);
 

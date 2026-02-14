@@ -30,6 +30,14 @@ export async function GET() {
 	const docs = await Customer.find({
 		isActive: true,
 	})
+		.select({
+			name: 1,
+			phone: 1,
+			note: 1,
+			customerMode: 1,
+			isTemporaryTab: 1,
+			isActive: 1,
+		})
 		.sort({ name: 1 })
 		.lean();
 
@@ -37,78 +45,82 @@ export async function GET() {
 		doc._id ? String(doc._id) : "",
 	);
 
-	const accounts = await TabAccount.find({
-		customerId: { $in: customerIds },
-	}).lean();
-
-	const balanceAgg =
+	const [accounts, balanceAgg, latestChargeAgg] =
 		customerIds.length > 0
-			? await TabTransaction.aggregate([
-					{
-						$match: {
-							customerId: { $in: customerIds },
-						},
-					},
-					{
-						$group: {
-							_id: "$customerId",
-							charges: {
-								$sum: {
-									$cond: [
-										{
-											$eq: ["$type", "CHARGE"],
-										},
-										"$amountCents",
-										0,
-									],
-								},
-							},
-							payments: {
-								$sum: {
-									$cond: [
-										{
-											$eq: ["$type", "PAYMENT"],
-										},
-										"$amountCents",
-										0,
-									],
-								},
-							},
-							adjustments: {
-								$sum: {
-									$cond: [
-										{
-											$eq: ["$type", "ADJUSTMENT"],
-										},
-										"$amountCents",
-										0,
-									],
-								},
+			? await Promise.all([
+					TabAccount.find({
+						customerId: { $in: customerIds },
+					})
+						.select({
+							customerId: 1,
+							creditLimitCents: 1,
+							status: 1,
+							dueDays: 1,
+						})
+						.lean(),
+					TabTransaction.aggregate([
+						{
+							$match: {
+								customerId: { $in: customerIds },
 							},
 						},
-					},
+						{
+							$group: {
+								_id: "$customerId",
+								charges: {
+									$sum: {
+										$cond: [
+											{
+												$eq: ["$type", "CHARGE"],
+											},
+											"$amountCents",
+											0,
+										],
+									},
+								},
+								payments: {
+									$sum: {
+										$cond: [
+											{
+												$eq: ["$type", "PAYMENT"],
+											},
+											"$amountCents",
+											0,
+										],
+									},
+								},
+								adjustments: {
+									$sum: {
+										$cond: [
+											{
+												$eq: ["$type", "ADJUSTMENT"],
+											},
+											"$amountCents",
+											0,
+										],
+									},
+								},
+							},
+						},
+					]),
+					TabTransaction.aggregate([
+						{
+							$match: {
+								customerId: { $in: customerIds },
+								type: "CHARGE",
+							},
+						},
+						{
+							$group: {
+								_id: "$customerId",
+								latestChargeAt: {
+									$max: "$createdAt",
+								},
+							},
+						},
+					]),
 			  ])
-			: [];
-	const latestChargeAgg =
-		customerIds.length > 0
-			? await TabTransaction.aggregate([
-					{
-						$match: {
-							customerId: { $in: customerIds },
-							type: "CHARGE",
-						},
-					},
-					{ $sort: { createdAt: -1 } },
-					{
-						$group: {
-							_id: "$customerId",
-							latestChargeAt: {
-								$first: "$createdAt",
-							},
-						},
-					},
-			  ])
-			: [];
+			: [[], [], []];
 
 	const accountMap = new Map(
 		accounts.map((account) => [

@@ -77,11 +77,10 @@ const INITIAL_FORM_STATE = {
 };
 
 interface CurrentStockRow {
-	productId: string;
-	currentUnits: number;
-	reorderLevelUnits: number;
-	status: "OUT" | "LOW" | "OK";
+	currentUnits?: number;
+	stockStatus?: "OUT" | "LOW" | "OK";
 }
+type ProductWithStock = Product & CurrentStockRow;
 
 export function ProductsClient() {
 	const {
@@ -89,27 +88,11 @@ export function ProductsClient() {
 		error,
 		isLoading,
 		mutate,
-	} = useSWR<Product[]>("/api/products", {
+	} = useSWR<ProductWithStock[]>(
+		"/api/products?includeStock=1",
+		{
 		onError: (err) => toast.error(err.message),
-	});
-	const { data: currentStock = [] } = useSWR<
-		CurrentStockRow[]
-	>("/api/stock/current", jsonFetcher, {
-		onError: (err) =>
-			toast.error(
-				err?.message ??
-					"Failed to load current stock",
-			),
-	});
-	const stockByProductId = React.useMemo(
-		() =>
-			new Map(
-				currentStock.map((row) => [
-					row.productId,
-					row,
-				]),
-			),
-		[currentStock],
+		},
 	);
 
 	const [addDialogOpen, setAddDialogOpen] =
@@ -176,10 +159,6 @@ export function ProductsClient() {
 												product.currentPriceCents,
 										  )
 										: "-";
-								const stock =
-									stockByProductId.get(
-										product.id,
-									);
 								return (
 									<div
 										key={product.id}
@@ -221,18 +200,18 @@ export function ProductsClient() {
 												</p>
 												<p
 													className={cn(
-														stock?.status ===
+														product.stockStatus ===
 															"OUT" &&
 															"text-destructive font-semibold",
-														stock?.status ===
+														product.stockStatus ===
 															"LOW" &&
 															"text-amber-700 font-medium",
-														stock?.status ===
+														product.stockStatus ===
 															"OK" &&
 															"text-emerald-700 font-medium",
 													)}
 												>
-													{stock?.currentUnits ??
+													{product.currentUnits ??
 														0}
 												</p>
 											</div>
@@ -299,10 +278,6 @@ export function ProductsClient() {
 														product.currentPriceCents,
 												  )
 												: "-";
-										const stock =
-											stockByProductId.get(
-												product.id,
-											);
 										return (
 											<TableRow
 												key={product.id}
@@ -322,18 +297,18 @@ export function ProductsClient() {
 												<TableCell
 													className={cn(
 														"text-right",
-														stock?.status ===
+														product.stockStatus ===
 															"OUT" &&
 															"text-destructive font-semibold",
-														stock?.status ===
+														product.stockStatus ===
 															"LOW" &&
 															"text-amber-700 font-medium",
-														stock?.status ===
+														product.stockStatus ===
 															"OK" &&
 															"text-emerald-700 font-medium",
 													)}
 												>
-													{stock?.currentUnits ??
+													{product.currentUnits ??
 														0}
 												</TableCell>
 												<TableCell className="text-right">
@@ -419,7 +394,7 @@ function AddProductDialog({
 	mutateProducts,
 	onSuccess,
 }: {
-	mutateProducts: KeyedMutator<Product[]>;
+	mutateProducts: KeyedMutator<ProductWithStock[]>;
 	onSuccess: () => void;
 }) {
 	const [loading, setLoading] =
@@ -636,7 +611,7 @@ function EditProductDialog({
 	onSuccess,
 }: {
 	product: Product;
-	mutateProducts: KeyedMutator<Product[]>;
+	mutateProducts: KeyedMutator<ProductWithStock[]>;
 	onSuccess: () => void;
 }) {
 	const initialForm = React.useMemo(

@@ -87,6 +87,10 @@ SaleTransactionSchema.index({
 	createdAt: -1,
 });
 SaleTransactionSchema.index(
+	{ reversalOfId: 1 },
+	{ sparse: true },
+);
+SaleTransactionSchema.index(
 	{ note: 1 },
 	{ sparse: true },
 );

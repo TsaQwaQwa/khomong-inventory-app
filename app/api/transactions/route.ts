@@ -25,6 +25,25 @@ export async function GET(req: Request) {
 	const date = url.searchParams.get("date");
 	const customerId =
 		url.searchParams.get("customerId");
+	const typeParam = (
+		url.searchParams.get("type") ?? "ALL"
+	).toUpperCase();
+	const fieldsParam = (
+		url.searchParams.get("fields") ?? ""
+	).toLowerCase();
+	const fieldsQuick = fieldsParam === "quick";
+	const requestedType:
+		| "ALL"
+		| "CHARGE"
+		| "PAYMENT"
+		| "ADJUSTMENT"
+		| "DIRECT_SALE" =
+		typeParam === "CHARGE" ||
+		typeParam === "PAYMENT" ||
+		typeParam === "ADJUSTMENT" ||
+		typeParam === "DIRECT_SALE"
+			? typeParam
+			: "ALL";
 	const limitParam = Number(
 		url.searchParams.get("limit") ?? "100",
 	);
@@ -35,6 +54,19 @@ export async function GET(req: Request) {
 	try {
 		const tabMatch: Record<string, unknown> = {};
 		if (customerId) tabMatch.customerId = customerId;
+		if (
+			requestedType !== "ALL" &&
+			requestedType !== "DIRECT_SALE"
+		) {
+			tabMatch.type = requestedType;
+		}
+		const shouldLoadTabTransactions =
+			requestedType === "ALL" ||
+			requestedType !== "DIRECT_SALE";
+		const shouldLoadDirectSales =
+			!customerId &&
+			(requestedType === "ALL" ||
+				requestedType === "DIRECT_SALE");
 
 		let businessDayIdForDate: string | null = null;
 		if (date) {
@@ -48,11 +80,29 @@ export async function GET(req: Request) {
 
 		const [tabDocs, directSalesDocs] =
 			await Promise.all([
-				TabTransaction.find(tabMatch)
-					.sort({ createdAt: -1 })
-					.limit(limit)
-					.lean(),
-				customerId
+				shouldLoadTabTransactions
+					? TabTransaction.find(tabMatch)
+							.sort({ createdAt: -1 })
+							.limit(limit)
+							.select(
+								fieldsQuick
+									? {
+											_id: 1,
+											customerId: 1,
+											businessDayId: 1,
+											type: 1,
+											amountCents: 1,
+											paymentMethod: 1,
+											reference: 1,
+											note: 1,
+											createdAt: 1,
+											reversalOfId: 1,
+									  }
+									: {},
+							)
+							.lean()
+					: Promise.resolve([]),
+				!shouldLoadDirectSales
 					? Promise.resolve([])
 					: SaleTransaction.find(
 							businessDayIdForDate
@@ -64,19 +114,35 @@ export async function GET(req: Request) {
 					  )
 							.sort({ createdAt: -1 })
 							.limit(limit)
+							.select(
+								fieldsQuick
+									? {
+											_id: 1,
+											businessDayId: 1,
+											paymentMethod: 1,
+											discountCents: 1,
+											items: 1,
+											createdAt: 1,
+											reversalOfId: 1,
+									  }
+									: {},
+							)
 							.lean(),
 			]);
 
-		const businessDayIds = Array.from(
-			new Set([
-				...tabDocs.map(
-					(doc) => doc.businessDayId,
-				),
-				...directSalesDocs.map(
-					(doc) => doc.businessDayId,
-				),
-			]),
-		);
+		const businessDayIds =
+			date !== null
+				? []
+				: Array.from(
+						new Set([
+							...tabDocs.map(
+								(doc) => doc.businessDayId,
+							),
+							...directSalesDocs.map(
+								(doc) => doc.businessDayId,
+							),
+						]),
+				  );
 		const customerIds = Array.from(
 			new Set(
 				tabDocs.map((doc) => doc.customerId),
@@ -87,12 +153,16 @@ export async function GET(req: Request) {
 			businessDayIds.length > 0
 				? BusinessDay.find({
 						_id: { $in: businessDayIds },
-				  }).lean()
+				  })
+						.select({ _id: 1, date: 1 })
+						.lean()
 				: [],
 			customerIds.length > 0
 				? Customer.find({
 						_id: { $in: customerIds },
-				  }).lean()
+				  })
+						.select({ _id: 1, name: 1 })
+						.lean()
 				: [],
 		]);
 
@@ -110,6 +180,7 @@ export async function GET(req: Request) {
 			...tabDocs.map((doc) => ({
 				...serializeDoc(doc),
 				date:
+					date ??
 					dayById.get(doc.businessDayId) ??
 					null,
 				customerName:
@@ -122,6 +193,7 @@ export async function GET(req: Request) {
 				customerId: null,
 				customerName: "Walk-in Sale",
 				date:
+					date ??
 					dayById.get(doc.businessDayId) ??
 					null,
 			})),
@@ -148,16 +220,28 @@ export async function GET(req: Request) {
 		const [tabReversals, saleReversals] =
 			originalIds.length > 0
 				? await Promise.all([
-						TabTransaction.find({
-							reversalOfId: { $in: originalIds },
-						})
-							.select({ reversalOfId: 1 })
-							.lean(),
-						SaleTransaction.find({
-							reversalOfId: { $in: originalIds },
-						})
-							.select({ reversalOfId: 1 })
-							.lean(),
+						shouldLoadTabTransactions
+							? TabTransaction.find({
+									reversalOfId: {
+										$in: originalIds,
+									},
+							  })
+									.select({
+										reversalOfId: 1,
+									})
+									.lean()
+							: Promise.resolve([]),
+						shouldLoadDirectSales
+							? SaleTransaction.find({
+									reversalOfId: {
+										$in: originalIds,
+									},
+							  })
+									.select({
+										reversalOfId: 1,
+									})
+									.lean()
+							: Promise.resolve([]),
 				  ])
 				: [[], []];
 

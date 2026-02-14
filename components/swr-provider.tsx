@@ -14,8 +14,9 @@ export function SwrProvider({
 			value={{
 				fetcher: jsonFetcher,
 				revalidateOnFocus: false,
-				revalidateOnReconnect: true,
-				dedupingInterval: 2000,
+				revalidateOnReconnect: false,
+				revalidateIfStale: false,
+				dedupingInterval: 10000,
 				errorRetryInterval: 2000,
 				errorRetryCount: 1,
 			}}

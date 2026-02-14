@@ -265,7 +265,9 @@ export function DashboardClient() {
 	const { data: transactions = [], isLoading: txLoading } =
 		useSWR<DashboardTransactionEntry[]>(
 			txDrilldown.open
-				? `/api/transactions?date=${date}&limit=200`
+				? txDrilldown.productId
+					? `/api/transactions?date=${date}&limit=200`
+					: `/api/transactions?date=${date}&limit=200&fields=quick`
 				: null,
 			fetcher,
 		);

@@ -25,6 +25,10 @@ export async function GET(req: Request) {
 	const url = new URL(req.url);
 	const date =
 		url.searchParams.get("date") ?? todayYMD();
+	const fieldsParam = (
+		url.searchParams.get("fields") ?? ""
+	).toLowerCase();
+	const fieldsLite = fieldsParam === "lite";
 	const lookbackDaysParam =
 		url.searchParams.get("lookbackDays");
 	const lookbackDays = lookbackDaysParam
@@ -45,8 +49,21 @@ export async function GET(req: Request) {
 	const docs = await Purchase.find({
 		purchaseDate: purchaseDateFilter,
 	})
+		.select(
+			fieldsLite
+				? {
+						supplierId: 1,
+						purchaseDate: 1,
+						items: 1,
+				  }
+				: {},
+		)
 		.sort({ createdAt: -1 })
 		.lean();
+
+	if (fieldsLite) {
+		return ok(serializeDocs(docs));
+	}
 
 	const supplierIds = Array.from(
 		new Set(

@@ -32,7 +32,6 @@ import {
 	History,
 	Menu,
 } from "lucide-react";
-import { getTodayJHB } from "@/lib/date-utils";
 
 const navItems = [
 	{
@@ -98,66 +97,39 @@ const navItems = [
 	},
 ];
 
-interface HeaderReport {
-	stockRecommendations: {
-		priority: "HIGH" | "MEDIUM";
-	}[];
-}
-interface AccessData {
+interface HeaderSummary {
 	isAdmin: boolean;
-}
-interface HeaderAlert {
-	id: string;
-	status: "UNREAD" | "READ";
+	unreadCount: number;
+	todayOutOfStockCount: number;
 }
 
-const reportFetcher = async (url: string) => {
+const headerSummaryFetcher = async (url: string) => {
 	const res = await fetch(url);
 	const json = await res.json().catch(() => ({}));
-	if (!res.ok) return null;
-	return (json?.data ?? json) as HeaderReport;
-};
-
-const alertsFetcher = async (url: string) => {
-	const res = await fetch(url);
-	const json = await res.json().catch(() => ({}));
-	if (!res.ok) return [];
-	return (json?.data ?? json) as HeaderAlert[];
-};
-
-const accessFetcher = async (url: string) => {
-	const res = await fetch(url);
-	const json = await res.json().catch(() => ({}));
-	if (!res.ok) return { isAdmin: false } as AccessData;
-	return (json?.data ?? json) as AccessData;
+	if (!res.ok)
+		return {
+			isAdmin: false,
+			unreadCount: 0,
+			todayOutOfStockCount: 0,
+		} as HeaderSummary;
+	return (json?.data ?? json) as HeaderSummary;
 };
 
 export function Header() {
 	const pathname = usePathname();
 	const [open, setOpen] = React.useState(false);
-	const today = React.useMemo(() => getTodayJHB(), []);
-	const { data: report } = useSWR<HeaderReport | null>(
-		`/api/reports/daily?date=${today}`,
-		reportFetcher,
-	);
-	const lowStockCount =
-		report?.stockRecommendations?.length ?? 0;
-	const outOfStockCount =
-		report?.stockRecommendations?.filter(
-			(item) => item.priority === "HIGH",
-		).length ?? 0;
-	const { data: unreadAlerts = [] } = useSWR<
-		HeaderAlert[]
+	const { data: headerSummary } = useSWR<
+		HeaderSummary
 	>(
-		"/api/alerts?status=UNREAD&limit=100",
-		alertsFetcher,
+		"/api/header/summary",
+		headerSummaryFetcher,
 	);
-	const unreadAlertCount = unreadAlerts.length;
-	const { data: access } = useSWR<AccessData>(
-		"/api/session/access",
-		accessFetcher,
-	);
-	const isAdmin = access?.isAdmin ?? false;
+	const unreadAlertCount =
+		headerSummary?.unreadCount ?? 0;
+	const outOfStockCount =
+		headerSummary?.todayOutOfStockCount ?? 0;
+	const isAdmin =
+		headerSummary?.isAdmin ?? false;
 	const visibleNavItems = React.useMemo(
 		() =>
 			navItems.filter(

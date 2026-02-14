@@ -22,6 +22,7 @@ export async function syncStockAlertsForDay({
 		priority: "HIGH" | "MEDIUM";
 		title: string;
 		detail: string;
+		affectedCount: number;
 		items: string[];
 	}> = [];
 
@@ -31,6 +32,7 @@ export async function syncStockAlertsForDay({
 			priority: "HIGH",
 			title: "Out of stock products",
 			detail: `${out.length} product(s) are out of stock.`,
+			affectedCount: out.length,
 			items: out.slice(0, 6).map((r) => r.productName),
 		});
 	}
@@ -40,6 +42,7 @@ export async function syncStockAlertsForDay({
 			priority: "MEDIUM",
 			title: "Low stock products",
 			detail: `${low.length} product(s) are below reorder level.`,
+			affectedCount: low.length,
 			items: low.slice(0, 6).map((r) => r.productName),
 		});
 	}
@@ -50,6 +53,7 @@ export async function syncStockAlertsForDay({
 			title: "Daily suggested purchase list",
 			detail:
 				"Suggested quantities based on recent sell-through and reorder levels.",
+			affectedCount: recs.length,
 			items: recs.slice(0, 8).map(
 				(rec) =>
 					`${rec.productName} (${rec.recommendedOrderUnits}u)`,
@@ -69,6 +73,7 @@ export async function syncStockAlertsForDay({
 					priority: definition.priority,
 					title: definition.title,
 					detail: definition.detail,
+					affectedCount: definition.affectedCount,
 				},
 				$setOnInsert: {
 					status: "UNREAD",

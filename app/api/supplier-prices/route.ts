@@ -23,6 +23,10 @@ export async function GET(req: Request) {
 	const productId =
 		url.searchParams.get("productId") ?? "";
 	const asOf = url.searchParams.get("asOf") ?? todayYMD();
+	const fieldsParam = (
+		url.searchParams.get("fields") ?? ""
+	).toLowerCase();
+	const fieldsLite = fieldsParam === "lite";
 
 	await connectDB();
 
@@ -38,6 +42,15 @@ export async function GET(req: Request) {
 	if (productId) where.productId = productId;
 
 	const docs = await SupplierProductPrice.find(where)
+		.select(
+			fieldsLite
+				? {
+						supplierId: 1,
+						productId: 1,
+						unitCostCents: 1,
+				  }
+				: {},
+		)
 		.sort({
 			effectiveFrom: -1,
 			createdAt: -1,

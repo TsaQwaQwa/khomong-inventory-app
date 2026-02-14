@@ -1159,7 +1159,8 @@ export function TabsClient({
 							</>
 						)}
 
-						<Card className="shadow-md mt-6">
+						{!(productsLoading || customersLoading || productsError || customersError) && (
+							<Card className="shadow-md mt-6">
 							<CardHeader>
 								<div className="flex flex-wrap items-center justify-between gap-2">
 									<CardTitle>
@@ -1443,6 +1444,7 @@ export function TabsClient({
 								)}
 							</CardContent>
 						</Card>
+						)}
 					</TabsContent>
 				)}
 			</Tabs>

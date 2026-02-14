@@ -7,6 +7,10 @@ import { parseJson } from "@/lib/validate";
 import { productCreateSchema } from "@/lib/schemas";
 import { Product } from "@/models/Product";
 import { Price } from "@/models/Price";
+import { Purchase } from "@/models/Purchase";
+import { Adjustment } from "@/models/Adjustment";
+import { TabTransaction } from "@/models/TabTransaction";
+import { SaleTransaction } from "@/models/SaleTransaction";
 import { serializeDoc, serializeDocs } from "@/lib/serialize";
 import {
 	getScopeIdFromAuth,
@@ -14,10 +18,19 @@ import {
 	writeAuditLog,
 } from "@/lib/audit";
 
-export async function GET() {
+type TotalsRow = {
+	_id: string;
+	units: number;
+};
+
+export async function GET(req: Request) {
 	await requireOrgAuth().catch(() => null);
 
 	await connectDB();
+	const url = new URL(req.url);
+	const includeStock =
+		url.searchParams.get("includeStock") === "1";
+
 	const products = await Product.find({
 		isActive: true,
 	})
@@ -44,7 +57,116 @@ export async function GET() {
 			),
 		}),
 	);
-	return ok(serializeDocs(productsWithPrice));
+
+	if (!includeStock) {
+		return ok(serializeDocs(productsWithPrice));
+	}
+
+	const [
+		purchasedTotals,
+		adjustmentTotals,
+		tabSoldTotals,
+		directSoldTotals,
+	] = await Promise.all([
+		Purchase.aggregate<TotalsRow>([
+			{ $unwind: "$items" },
+			{
+				$group: {
+					_id: "$items.productId",
+					units: {
+						$sum: {
+							$ifNull: ["$items.units", 0],
+						},
+					},
+				},
+			},
+		]),
+		Adjustment.aggregate<TotalsRow>([
+			{ $unwind: "$items" },
+			{
+				$group: {
+					_id: "$items.productId",
+					units: {
+						$sum: {
+							$ifNull: [
+								"$items.unitsDelta",
+								0,
+							],
+						},
+					},
+				},
+			},
+		]),
+		TabTransaction.aggregate<TotalsRow>([
+			{ $match: { type: "CHARGE" } },
+			{ $unwind: "$items" },
+			{
+				$group: {
+					_id: "$items.productId",
+					units: {
+						$sum: {
+							$ifNull: ["$items.units", 0],
+						},
+					},
+				},
+			},
+		]),
+		SaleTransaction.aggregate<TotalsRow>([
+			{ $unwind: "$items" },
+			{
+				$group: {
+					_id: "$items.productId",
+					units: {
+						$sum: {
+							$ifNull: ["$items.units", 0],
+						},
+					},
+				},
+			},
+		]),
+	]);
+
+	const purchasedByProduct = new Map(
+		purchasedTotals.map((row) => [row._id, row.units]),
+	);
+	const adjustedByProduct = new Map(
+		adjustmentTotals.map((row) => [row._id, row.units]),
+	);
+	const tabSoldByProduct = new Map(
+		tabSoldTotals.map((row) => [row._id, row.units]),
+	);
+	const directSoldByProduct = new Map(
+		directSoldTotals.map((row) => [row._id, row.units]),
+	);
+
+	const productsWithPriceAndStock = productsWithPrice.map(
+		(product) => {
+			const productId = String(product._id);
+			const purchased =
+				purchasedByProduct.get(productId) ?? 0;
+			const adjusted =
+				adjustedByProduct.get(productId) ?? 0;
+			const sold =
+				(tabSoldByProduct.get(productId) ?? 0) +
+				(directSoldByProduct.get(productId) ?? 0);
+			const currentUnits =
+				purchased + adjusted - sold;
+			const reorderLevelUnits =
+				product.reorderLevelUnits ?? 0;
+			const stockStatus =
+				currentUnits <= 0
+					? "OUT"
+					: currentUnits <= reorderLevelUnits
+						? "LOW"
+						: "OK";
+			return {
+				...product,
+				currentUnits,
+				stockStatus,
+			};
+		},
+	);
+	return ok(serializeDocs(productsWithPriceAndStock));
 }
 
 export async function POST(req: Request) {

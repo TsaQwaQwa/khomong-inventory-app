@@ -361,6 +361,8 @@ export function GlobalQuickActions() {
 		);
 	const date = React.useMemo(() => getTodayJHB(), []);
 	const { mutate } = useSWRConfig();
+	const enableQuickData =
+		show && (open || activeAction !== null);
 
 	React.useEffect(() => {
 		if (typeof window === "undefined") return;
@@ -375,27 +377,42 @@ export function GlobalQuickActions() {
 
 	const { data: products = [] } = useSWR<
 		Product[]
-	>("/api/products", fetcher);
+	>(
+		enableQuickData ? "/api/products" : null,
+		fetcher,
+	);
 	const { data: customers = [] } = useSWR<
 		Customer[]
-	>("/api/customers", fetcher);
+	>(
+		enableQuickData ? "/api/customers" : null,
+		fetcher,
+	);
 	const { data: suppliers = [] } = useSWR<
 		Supplier[]
-	>("/api/suppliers", fetcher);
+	>(
+		enableQuickData ? "/api/suppliers" : null,
+		fetcher,
+	);
 	const { data: report } = useSWR<DailyReportLite>(
-		`/api/reports/daily?date=${date}`,
+		enableQuickData
+			? `/api/reports/daily?date=${date}`
+			: null,
 		fetcher,
 	);
 	const { data: purchaseHistory = [] } = useSWR<
 		PurchaseHistoryLite[]
 	>(
-		`/api/purchases?date=${date}&lookbackDays=60`,
+		enableQuickData
+			? `/api/purchases?date=${date}&lookbackDays=60&fields=lite`
+			: null,
 		fetcher,
 	);
 	const { data: supplierPrices = [] } = useSWR<
 		SupplierPriceLite[]
 	>(
-		`/api/supplier-prices?asOf=${date}`,
+		enableQuickData
+			? `/api/supplier-prices?asOf=${date}&fields=lite`
+			: null,
 		fetcher,
 	);
 	const restockSeed = React.useMemo(
@@ -1261,7 +1278,7 @@ function QuickCheckoutForm({
 	const { data: txnHistory = [] } = useSWR<
 		DirectSaleHistoryLite[]
 	>(
-		`/api/transactions?date=${date}&limit=60`,
+		`/api/transactions?date=${date}&limit=60&type=DIRECT_SALE&fields=quick`,
 		fetcher,
 	);
 	React.useEffect(() => {

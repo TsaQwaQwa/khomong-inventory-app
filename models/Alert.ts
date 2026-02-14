@@ -18,6 +18,7 @@ export interface AlertDoc {
 	priority: AlertPriority;
 	title: string;
 	detail: string;
+	affectedCount?: number;
 	dedupeKey: string;
 	status: AlertStatus;
 	createdAt: Date;
@@ -36,6 +37,7 @@ const AlertSchema = new Schema<AlertDoc>(
 		priority: { type: String, required: true },
 		title: { type: String, required: true },
 		detail: { type: String, required: true },
+		affectedCount: { type: Number },
 		dedupeKey: {
 			type: String,
 			required: true,
@@ -54,6 +56,11 @@ AlertSchema.index({
 	scopeId: 1,
 	status: 1,
 	createdAt: -1,
+});
+AlertSchema.index({
+	scopeId: 1,
+	date: 1,
+	type: 1,
 });
 
 export const Alert = getModel<AlertDoc>(
