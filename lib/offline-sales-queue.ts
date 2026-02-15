@@ -18,6 +18,7 @@ interface FlushResult {
 	synced: number;
 	dropped: number;
 	remaining: number;
+	authBlocked: boolean;
 }
 
 type PostSaleResult =
@@ -161,6 +162,7 @@ export async function flushOfflineSalesQueue(): Promise<FlushResult> {
 	let queue = readQueue();
 	let synced = 0;
 	let dropped = 0;
+	let authBlocked = false;
 
 	while (queue.length > 0) {
 		const item = queue[0];
@@ -177,20 +179,26 @@ export async function flushOfflineSalesQueue(): Promise<FlushResult> {
 				(typeof body?.error === "string" ? body.error : body?.error?.message) ??
 				`HTTP_${response.status}`;
 
-				// Permanent invalid payload cases:
-				// drop from queue to avoid infinite loop.
-				// Keep auth failures (401/403) queued
-				// so user can re-auth and retry.
-				if (
-					response.status >= 400 &&
-					response.status < 500 &&
-					response.status !== 401 &&
-					response.status !== 403 &&
-					response.status !== 429
-				) {
+			// Permanent invalid payload cases:
+			// drop from queue to avoid infinite loop.
+			// Keep auth failures (401/403) queued
+			// so user can re-auth and retry.
+			if (
+				response.status >= 400 &&
+				response.status < 500 &&
+				response.status !== 401 &&
+				response.status !== 403 &&
+				response.status !== 429
+			) {
 				dropped += 1;
 				queue.shift();
 				continue;
+			}
+			if (
+				response.status === 401 ||
+				response.status === 403
+			) {
+				authBlocked = true;
 			}
 
 			item.attempts += 1;
@@ -213,5 +221,6 @@ export async function flushOfflineSalesQueue(): Promise<FlushResult> {
 		synced,
 		dropped,
 		remaining: queue.length,
+		authBlocked,
 	};
 }
