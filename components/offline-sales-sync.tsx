@@ -9,7 +9,6 @@ import {
 } from "@/lib/offline-sales-queue";
 
 let isFlushing = false;
-let hasShownAuthBlockedToast = false;
 
 export function OfflineSalesSync() {
 	const { mutate } = useSWRConfig();
@@ -42,18 +41,6 @@ export function OfflineSalesSync() {
 					toast.error(
 						`${result.dropped} queued action${result.dropped === 1 ? "" : "s"} failed validation and was dropped.`,
 					);
-				}
-				if (result.authBlocked) {
-					if (!hasShownAuthBlockedToast) {
-						toast.error(
-							"Queued actions need authentication to sync. Please sign in again.",
-						);
-						hasShownAuthBlockedToast = true;
-					}
-					return;
-				}
-				if (result.synced > 0 || result.remaining === 0) {
-					hasShownAuthBlockedToast = false;
 				}
 				if (source === "online" && result.remaining > 0 && result.synced === 0) {
 					toast.error(

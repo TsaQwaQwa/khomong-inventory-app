@@ -1,7 +1,18 @@
-const SHELL_CACHE = "kgomong-shell-v1";
-const API_CACHE = "kgomong-api-v1";
-const STATIC_CACHE = "kgomong-static-v1";
-const SHELL_URLS = ["/", "/dashboard", "/manifest.webmanifest", "/icon.svg", "/icon-maskable.svg"];
+const SHELL_CACHE = "kgomong-shell-v2";
+const API_CACHE = "kgomong-api-v2";
+const STATIC_CACHE = "kgomong-static-v2";
+const SHELL_URLS = [
+	"/",
+	"/dashboard",
+	"/manifest.webmanifest",
+	"/icon.svg",
+	"/icon-maskable.svg",
+];
+const AUTH_PATH_PREFIXES = [
+	"/sign-in",
+	"/sign-up",
+	"/sso-callback",
+];
 
 self.addEventListener("install", (event) => {
 	event.waitUntil(
@@ -21,7 +32,11 @@ self.addEventListener("activate", (event) => {
 				keys
 					.filter(
 						(key) =>
-							![SHELL_CACHE, API_CACHE, STATIC_CACHE].includes(key),
+							![
+								SHELL_CACHE,
+								API_CACHE,
+								STATIC_CACHE,
+							].includes(key),
 					)
 					.map((key) => caches.delete(key)),
 			);
@@ -36,14 +51,27 @@ self.addEventListener("fetch", (event) => {
 
 	const url = new URL(request.url);
 	if (url.origin !== self.location.origin) return;
+	const isAuthRoute = AUTH_PATH_PREFIXES.some((prefix) =>
+		url.pathname.startsWith(prefix),
+	);
 
 	if (request.mode === "navigate") {
+		if (isAuthRoute) {
+			event.respondWith(fetch(request));
+			return;
+		}
 		event.respondWith(
 			(async () => {
 				try {
 					const network = await fetch(request);
-					const cache = await caches.open(SHELL_CACHE);
-					cache.put(request, network.clone());
+					const shouldCacheNavigation =
+						network.ok &&
+						!network.redirected &&
+						!network.url.includes("/sign-in");
+					if (shouldCacheNavigation) {
+						const cache = await caches.open(SHELL_CACHE);
+						cache.put(request, network.clone());
+					}
 					return network;
 				} catch {
 					const cache = await caches.open(SHELL_CACHE);
@@ -64,7 +92,10 @@ self.addEventListener("fetch", (event) => {
 				const cache = await caches.open(API_CACHE);
 				try {
 					const network = await fetch(request);
-					if (network.ok) {
+					const isAuthError =
+						network.status === 401 ||
+						network.status === 403;
+					if (network.ok && !isAuthError) {
 						cache.put(request, network.clone());
 					}
 					return network;
