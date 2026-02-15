@@ -29,7 +29,7 @@ interface DateRangeControlsProps {
 	from: string;
 	to: string;
 	preset: RangePreset;
-	onPresetChange: (preset: string) => void;
+	onPresetChange: (preset: RangePreset) => void;
 	onFromChange: (value: string) => void;
 	onToChange: (value: string) => void;
 	onRangeChange?: (from: string, to: string) => void;
@@ -87,7 +87,9 @@ export function DateRangeControls({
 		>
 			<Select
 				value={preset}
-				onValueChange={onPresetChange}
+				onValueChange={(value) =>
+					onPresetChange(value as RangePreset)
+				}
 			>
 				<SelectTrigger className="w-[170px]">
 					<SelectValue placeholder="Range preset" />

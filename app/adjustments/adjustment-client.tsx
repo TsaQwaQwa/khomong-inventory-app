@@ -195,8 +195,7 @@ export function AdjustmentsClient() {
 		`/api/adjustments?from=${from}&to=${date}`,
 		fetcher,
 		{
-			onError: (err) =>
-				toast.error(err.message),
+			onError: (err) => toast.error(err.message),
 		},
 	);
 
@@ -296,10 +295,7 @@ export function AdjustmentsClient() {
 				forEdit: false,
 			});
 			toast.success("Last adjustment copied");
-		}, [
-			adjustmentsHistory,
-			openHistoryInForm,
-		]);
+		}, [adjustmentsHistory, openHistoryInForm]);
 
 	const removeItem = (index: number) => {
 		setItems(items.filter((_, i) => i !== index));
@@ -486,9 +482,8 @@ export function AdjustmentsClient() {
 					<AlertCircle className="h-4 w-4" />
 					<AlertTitle>Error</AlertTitle>
 					<AlertDescription>
-						{(
-							error ?? adjustmentsError
-						)?.message ??
+						{(error ?? adjustmentsError)
+							?.message ??
 							"Failed to load adjustments"}
 					</AlertDescription>
 				</Alert>
@@ -538,9 +533,7 @@ export function AdjustmentsClient() {
 															variant="ghost"
 															size="sm"
 															onClick={() =>
-																removeItem(
-																	index,
-																)
+																removeItem(index)
 															}
 														>
 															<Trash2 className="h-4 w-4" />
@@ -550,7 +543,9 @@ export function AdjustmentsClient() {
 
 												<div className="grid gap-4 sm:grid-cols-2">
 													<ProductSelect
-														products={products || []}
+														products={
+															products || []
+														}
 														value={item.productId}
 														onChange={(v) =>
 															updateItem(index, {
@@ -569,15 +564,16 @@ export function AdjustmentsClient() {
 																	| AdjustmentReason
 																	| "",
 															) =>
-																updateItem(index, {
-																	reason: v,
-																})
+																updateItem(
+																	index,
+																	{
+																		reason: v,
+																	},
+																)
 															}
 														>
 															<SelectTrigger>
-																<SelectValue
-																	placeholder="Select reason"
-																/>
+																<SelectValue placeholder="Select reason" />
 															</SelectTrigger>
 															<SelectContent>
 																{
@@ -591,24 +587,29 @@ export function AdjustmentsClient() {
 												<div className="grid gap-4 sm:grid-cols-2">
 													<div className="space-y-2">
 														<Label>
-															Stock Change
-															(Units)
+															Stock Change (Units)
 														</Label>
 														<Input
 															type="number"
-															value={item.unitsDelta}
+															value={
+																item.unitsDelta
+															}
 															onChange={(e) =>
-																updateItem(index, {
-																	unitsDelta:
-																		e.target
-																			.value,
-																})
+																updateItem(
+																	index,
+																	{
+																		unitsDelta:
+																			e.target
+																				.value,
+																	},
+																)
 															}
 															placeholder="-5 for loss, +3 for gain"
 														/>
 														<p className="text-xs text-muted-foreground">
-															Use a minus for losses
-															and a plus for gains.
+															Use a minus for
+															losses and a plus
+															for gains.
 														</p>
 													</div>
 
@@ -619,10 +620,13 @@ export function AdjustmentsClient() {
 														<Textarea
 															value={item.note}
 															onChange={(e) =>
-																updateItem(index, {
-																	note: e.target
-																		.value,
-																})
+																updateItem(
+																	index,
+																	{
+																		note: e.target
+																			.value,
+																	},
+																)
 															}
 															placeholder="Additional details..."
 															rows={2}
@@ -667,18 +671,18 @@ export function AdjustmentsClient() {
 					</Dialog>
 
 					{!adjustmentsHistory?.length ? (
-				<EmptyState
-					title="No adjustments for this date"
-					description="Add an adjustment to track stock losses or corrections."
-				/>
+						<EmptyState
+							title="No adjustments for this date"
+							description="Add an adjustment to track stock losses or corrections."
+						/>
 					) : (
-					<Card className="shadow-md">
-						<CardHeader>
-							<CardTitle>
-								Adjustment History
-							</CardTitle>
-						</CardHeader>
-						<CardContent>
+						<Card className="shadow-md">
+							<CardHeader>
+								<CardTitle>
+									Adjustment History
+								</CardTitle>
+							</CardHeader>
+							<CardContent>
 								<>
 									<div className="space-y-3 md:hidden">
 										{adjustmentsHistory.map(
@@ -702,11 +706,15 @@ export function AdjustmentsClient() {
 																	{history.createdAt
 																		? new Date(
 																				history.createdAt,
-																		  ).toLocaleTimeString()
+																			).toLocaleTimeString()
 																		: "-"}
 																</p>
 																<p className="text-xs text-muted-foreground">
-																	{history.items.length} items
+																	{
+																		history.items
+																			.length
+																	}{" "}
+																	items
 																</p>
 															</div>
 															<p
@@ -731,17 +739,24 @@ export function AdjustmentsClient() {
 																		)?.name ??
 																		item.productId;
 																	const signedUnits =
-																		item.unitsDelta > 0
+																		item.unitsDelta >
+																		0
 																			? `+${item.unitsDelta}`
 																			: String(
 																					item.unitsDelta,
-																			  );
+																				);
 																	return (
 																		<p
 																			key={`${history.id}-${index}`}
 																		>
-																			{productName}:{" "}
-																			{signedUnits} (
+																			{
+																				productName
+																			}
+																			:{" "}
+																			{
+																				signedUnits
+																			}{" "}
+																			(
 																			{item.reason
 																				.replaceAll(
 																					"_",
@@ -777,100 +792,111 @@ export function AdjustmentsClient() {
 
 									<div className="hidden md:block">
 										<Table>
-									<TableHeader>
-										<TableRow>
-											<TableHead>Time</TableHead>
-											<TableHead>Items</TableHead>
-											<TableHead className="text-right">
-												Net Units
-											</TableHead>
-											<TableHead>Details</TableHead>
-											<TableHead className="text-right">
-												Actions
-											</TableHead>
-										</TableRow>
-									</TableHeader>
-									<TableBody>
-										{adjustmentsHistory.map(
-											(history) => {
-												const netUnits =
-													history.items.reduce(
-														(sum, item) =>
-															sum +
-															item.unitsDelta,
-														0,
-													);
-												const details =
-													history.items
-														.map((item) => {
-															const productName =
-																productMap.get(
-																	item.productId,
-																)?.name ??
-																item.productId;
-															const signedUnits =
-																item.unitsDelta > 0
-																	? `+${item.unitsDelta}`
-																	: String(
-																			item.unitsDelta,
-																	  );
-															return `${productName}: ${signedUnits}`;
-														})
-														.join(", ");
+											<TableHeader>
+												<TableRow>
+													<TableHead>
+														Time
+													</TableHead>
+													<TableHead>
+														Items
+													</TableHead>
+													<TableHead className="text-right">
+														Net Units
+													</TableHead>
+													<TableHead>
+														Details
+													</TableHead>
+													<TableHead className="text-right">
+														Actions
+													</TableHead>
+												</TableRow>
+											</TableHeader>
+											<TableBody>
+												{adjustmentsHistory.map(
+													(history) => {
+														const netUnits =
+															history.items.reduce(
+																(sum, item) =>
+																	sum +
+																	item.unitsDelta,
+																0,
+															);
+														const details =
+															history.items
+																.map((item) => {
+																	const productName =
+																		productMap.get(
+																			item.productId,
+																		)?.name ??
+																		item.productId;
+																	const signedUnits =
+																		item.unitsDelta >
+																		0
+																			? `+${item.unitsDelta}`
+																			: String(
+																					item.unitsDelta,
+																				);
+																	return `${productName}: ${signedUnits}`;
+																})
+																.join(", ");
 
-												return (
-													<TableRow
-														key={history.id}
-													>
-														<TableCell className="text-muted-foreground">
-															{history.createdAt
-																? new Date(
-																		history.createdAt,
-																  ).toLocaleTimeString()
-																: "-"}
-														</TableCell>
-														<TableCell>
-															{history.items.length}
-														</TableCell>
-														<TableCell
-															className={cn(
-																"text-right",
-																netUnits < 0 &&
-																	"text-destructive",
-															)}
-														>
-															{netUnits > 0
-																? `+${netUnits}`
-																: netUnits}
-														</TableCell>
-														<TableCell className="text-muted-foreground max-w-[420px] truncate">
-															{details || "-"}
-														</TableCell>
-														<TableCell className="text-right">
-															<Button
-																type="button"
-																size="sm"
-																variant="outline"
-																onClick={() =>
-																	handleEditHistory(
-																		history,
-																	)
-																}
+														return (
+															<TableRow
+																key={history.id}
 															>
-																<Pencil className="mr-2 h-3.5 w-3.5" />
-																Edit
-															</Button>
-														</TableCell>
-													</TableRow>
-												);
-											},
-										)}
-									</TableBody>
+																<TableCell className="text-muted-foreground">
+																	{history.createdAt
+																		? new Date(
+																				history.createdAt,
+																			).toLocaleTimeString()
+																		: "-"}
+																</TableCell>
+																<TableCell>
+																	{
+																		history.items
+																			.length
+																	}
+																</TableCell>
+																<TableCell
+																	className={cn(
+																		"text-right",
+																		netUnits <
+																			0 &&
+																			"text-destructive",
+																	)}
+																>
+																	{netUnits > 0
+																		? `+${netUnits}`
+																		: netUnits}
+																</TableCell>
+																<TableCell className="text-muted-foreground max-w-105 truncate">
+																	{details || "-"}
+																</TableCell>
+																<TableCell className="text-right">
+																	<Button
+																		type="button"
+																		size="sm"
+																		variant="outline"
+																		onClick={() =>
+																			handleEditHistory(
+																				history,
+																			)
+																		}
+																	>
+																		<Pencil className="mr-2 h-3.5 w-3.5" />
+																		Edit
+																	</Button>
+																</TableCell>
+															</TableRow>
+														);
+													},
+												)}
+											</TableBody>
 										</Table>
 									</div>
 								</>
-						</CardContent>
-					</Card>
+							</CardContent>
+						</Card>
 					)}
 				</div>
 			)}

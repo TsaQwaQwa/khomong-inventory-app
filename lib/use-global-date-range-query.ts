@@ -36,16 +36,13 @@ export function useGlobalDateRangeQuery(
 	const [preferenceLoaded, setPreferenceLoaded] =
 		React.useState(false);
 
-	const fromParam = isYmd(searchParams.get("from"))
-		? searchParams.get("from")
-		: null;
-	const toParam = isYmd(searchParams.get("to"))
-		? searchParams.get("to")
-		: null;
-	const rangeParam = isRangePreset(
-		searchParams.get("range"),
-	)
-		? searchParams.get("range")
+	const fromRaw = searchParams.get("from");
+	const toRaw = searchParams.get("to");
+	const rangeRaw = searchParams.get("range");
+	const fromParam = isYmd(fromRaw) ? fromRaw : null;
+	const toParam = isYmd(toRaw) ? toRaw : null;
+	const rangeParam = isRangePreset(rangeRaw)
+		? rangeRaw
 		: null;
 
 	const to = toParam ?? today;
@@ -130,8 +127,7 @@ export function useGlobalDateRangeQuery(
 		rangeParam ?? inferRangePreset(from, to);
 
 	const onPresetChange = React.useCallback(
-		(value: string) => {
-			if (!isRangePreset(value)) return;
+		(value: RangePreset) => {
 			if (value === "custom") {
 				updateQuery({ range: "custom" });
 				return;
