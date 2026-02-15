@@ -115,6 +115,8 @@ export const customerUpdateSchema = z.object({
 export const tabChargeSchema = z.object({
   date: ymdSchema.optional(),
   customerId: z.string().min(1),
+  belowCostApproved: z.boolean().optional(),
+  belowCostReason: z.string().max(300).optional(),
   discountCents: z.number().int().min(0).optional(),
   items: z.array(z.object({
     productId: z.string().min(1),
@@ -136,6 +138,8 @@ export const tabPaymentSchema = z.object({
 export const directSaleSchema = z.object({
   date: ymdSchema.optional(),
   paymentMethod: z.enum(['CASH', 'CARD', 'EFT']),
+  belowCostApproved: z.boolean().optional(),
+  belowCostReason: z.string().max(300).optional(),
   discountCents: z.number().int().min(0).optional(),
   items: z.array(z.object({
     productId: z.string().min(1),

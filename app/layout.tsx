@@ -9,6 +9,7 @@ import { Toaster } from "sonner";
 import { Header } from "@/components/header";
 import { GlobalQuickActions } from "@/components/global-quick-actions";
 import { OfflineSalesSync } from "@/components/offline-sales-sync";
+import { PwaRegister } from "@/components/pwa-register";
 import { ClerkProvider } from "@clerk/nextjs";
 import { SwrProvider } from "@/components/swr-provider";
 
@@ -24,22 +25,16 @@ export const metadata: Metadata = {
 	description:
 		"Simple stock, sales, and customer account tracking for Kgomong",
 	generator: "v0.app",
+	manifest: "/manifest.webmanifest",
+	themeColor: "#3b2f2f",
 	icons: {
 		icon: [
-			{
-				url: "/icon-light-32x32.png",
-				media: "(prefers-color-scheme: light)",
-			},
-			{
-				url: "/icon-dark-32x32.png",
-				media: "(prefers-color-scheme: dark)",
-			},
 			{
 				url: "/icon.svg",
 				type: "image/svg+xml",
 			},
 		],
-		apple: "/apple-icon.png",
+		apple: "/icon-maskable.svg",
 	},
 };
 
@@ -57,6 +52,7 @@ export default function RootLayout({
 				<ClerkProvider>
 					<Header />
 					<SwrProvider>
+						<PwaRegister />
 						<OfflineSalesSync />
 						<main className="flex-1 w-full">
 							{children}

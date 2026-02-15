@@ -11,7 +11,7 @@ import {
 	Edit,
 } from "lucide-react";
 import { PageWrapper } from "@/components/page-wrapper";
-import { DatePickerYMD } from "@/components/date-picker-ymd";
+import { DateRangeControls } from "@/components/date-range-controls";
 import { LoadingTable } from "@/components/loading-state";
 import { EmptyState } from "@/components/empty-state";
 import { ProductSelect } from "@/components/product-select";
@@ -56,7 +56,6 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import Image from "next/image";
-import { getTodayJHB } from "@/lib/date-utils";
 import { formatZAR } from "@/lib/money";
 import type {
 	Product,
@@ -65,6 +64,8 @@ import type {
 	PurchaseItem,
 } from "@/lib/types";
 import { jsonFetcher } from "@/lib/swr";
+import { useGlobalDateRangeQuery } from "@/lib/use-global-date-range-query";
+import { postPurchaseWithOfflineQueue } from "@/lib/offline-sales-queue";
 
 const fetcher = async (url: string) => {
 	const res = await fetch(url);
@@ -80,11 +81,19 @@ const fetcher = async (url: string) => {
 };
 
 export function PurchasesClient() {
-	const [date, setDate] = React.useState(
-		getTodayJHB(),
-	);
+	const {
+		from,
+		to: date,
+		preset,
+		onPresetChange,
+		onFromChange,
+		onToChange,
+		onRangeChange,
+	} = useGlobalDateRangeQuery();
 	const [recordDialogOpen, setRecordDialogOpen] =
 		React.useState(false);
+	const [repeatPurchaseSeed, setRepeatPurchaseSeed] =
+		React.useState<Purchase | null>(null);
 	const [editingPurchase, setEditingPurchase] =
 		React.useState<Purchase | null>(null);
 
@@ -94,7 +103,7 @@ export function PurchasesClient() {
 		isLoading,
 		mutate,
 	} = useSWR<Purchase[]>(
-		`/api/purchases?date=${date}`,
+		`/api/purchases?from=${from}&to=${date}`,
 		fetcher,
 		{
 			onError: (err) => toast.error(err.message),
@@ -117,20 +126,54 @@ export function PurchasesClient() {
 			Array.isArray(products) ? products : [],
 		[products],
 	);
+	const latestPurchase = React.useMemo(
+		() =>
+			Array.isArray(purchases) && purchases.length > 0
+				? purchases[0]
+				: null,
+		[purchases],
+	);
 
 	return (
 		<PageWrapper
 			title="Stock Purchases"
 			description="Record stock received from suppliers."
 			actions={
-				<div className="flex items-center gap-2">
-					<DatePickerYMD
-						value={date}
-						onChange={setDate}
+				<div className="flex flex-wrap items-start gap-2">
+					<DateRangeControls
+						from={from}
+						to={date}
+						preset={preset}
+						onPresetChange={onPresetChange}
+						onFromChange={onFromChange}
+						onToChange={onToChange}
+						onRangeChange={onRangeChange}
 					/>
+					<Button
+						type="button"
+						variant="outline"
+						className="self-start"
+						disabled={!latestPurchase}
+						onClick={() => {
+							if (!latestPurchase) return;
+							setRepeatPurchaseSeed(
+								latestPurchase,
+							);
+							setRecordDialogOpen(true);
+						}}
+					>
+						Repeat Last Purchase
+					</Button>
 					<Dialog
 						open={recordDialogOpen}
-						onOpenChange={setRecordDialogOpen}
+						onOpenChange={(open) => {
+							setRecordDialogOpen(open);
+							if (!open) {
+								setRepeatPurchaseSeed(
+									null,
+								);
+							}
+						}}
 					>
 						<DialogTrigger asChild>
 							<Button className="hidden">
@@ -139,11 +182,21 @@ export function PurchasesClient() {
 							</Button>
 						</DialogTrigger>
 						<RecordPurchaseDialog
+							key={
+								repeatPurchaseSeed
+									? `repeat-purchase-${repeatPurchaseSeed.id}`
+									: "purchase-default"
+							}
 							products={normalizedProducts}
 							suppliers={suppliers || []}
 							date={date}
+							initialData={
+								repeatPurchaseSeed ??
+								undefined
+							}
 							onSuccess={() => {
 								setRecordDialogOpen(false);
+								setRepeatPurchaseSeed(null);
 								mutate();
 							}}
 						/>
@@ -468,34 +521,54 @@ function RecordPurchaseDialog({
 	products,
 	suppliers,
 	date,
+	initialData,
 	onSuccess,
 }: {
 	products: Product[];
 	suppliers: Supplier[];
 	date: string;
+	initialData?: Purchase;
 	onSuccess: () => void;
 }) {
 	const [loading, setLoading] =
 		React.useState(false);
 	const [supplierId, setSupplierId] =
-		React.useState("");
+		React.useState(
+			initialData?.supplierId ?? "",
+		);
 	const [invoiceNo, setInvoiceNo] =
-		React.useState("");
+		React.useState(
+			initialData?.invoiceNo ?? "",
+		);
 	const [discountCents, setDiscountCents] =
-		React.useState(0);
+		React.useState(
+			initialData?.discountCents ?? 0,
+		);
 	const [scanBarcode, setScanBarcode] =
 		React.useState("");
 	const [items, setItems] = React.useState<
 		LineItem[]
-	>([
-		{
-			productId: "",
-			cases: "",
-			singles: "",
-			unitCostCents: 0,
-			discountCents: 0,
-		},
-	]);
+	>(
+		initialData?.items.length
+			? initialData.items.map((item) => ({
+					productId: item.productId,
+					cases: String(item.cases ?? 0),
+					singles: String(item.singles ?? 0),
+					unitCostCents:
+						item.unitCostCents ?? 0,
+					discountCents:
+						item.discountCents ?? 0,
+				}))
+			: [
+					{
+						productId: "",
+						cases: "",
+						singles: "",
+						unitCostCents: 0,
+						discountCents: 0,
+					},
+				],
+	);
 	const normalizedProducts = React.useMemo(
 		() =>
 			Array.isArray(products) ? products : [],
@@ -525,6 +598,32 @@ function RecordPurchaseDialog({
 				]),
 		);
 	}, [normalizedProducts]);
+	React.useEffect(() => {
+		setSupplierId(initialData?.supplierId ?? "");
+		setInvoiceNo(initialData?.invoiceNo ?? "");
+		setDiscountCents(initialData?.discountCents ?? 0);
+		setItems(
+			initialData?.items.length
+				? initialData.items.map((item) => ({
+						productId: item.productId,
+						cases: String(item.cases ?? 0),
+						singles: String(item.singles ?? 0),
+						unitCostCents:
+							item.unitCostCents ?? 0,
+						discountCents:
+							item.discountCents ?? 0,
+					}))
+				: [
+						{
+							productId: "",
+							cases: "",
+							singles: "",
+							unitCostCents: 0,
+							discountCents: 0,
+						},
+					],
+		);
+	}, [initialData]);
 
 	const addItem = () => {
 		setItems([
@@ -667,22 +766,28 @@ function RecordPurchaseDialog({
 		}
 
 		try {
-			const res = await fetch("/api/purchases", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					supplierId: supplierId || undefined,
-					invoiceNo: invoiceNo || undefined,
-					purchaseDate: date,
-					discountCents:
-						discountCents > 0
-							? discountCents
-							: undefined,
-					items: validItems,
-				}),
-			});
+			const payload = {
+				supplierId: supplierId || undefined,
+				invoiceNo: invoiceNo || undefined,
+				purchaseDate: date,
+				discountCents:
+					discountCents > 0
+						? discountCents
+						: undefined,
+				items: validItems,
+			};
+			const queueResult =
+				await postPurchaseWithOfflineQueue(
+					payload,
+				);
+			if (queueResult.queued) {
+				toast.success(
+					"Offline: purchase queued and will sync automatically.",
+				);
+				onSuccess();
+				return;
+			}
+			const res = queueResult.response;
 
 			if (!res.ok) {
 				const error = await res
@@ -714,9 +819,15 @@ function RecordPurchaseDialog({
 	return (
 		<DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
 			<DialogHeader>
-				<DialogTitle>Add Purchase</DialogTitle>
+				<DialogTitle>
+					{initialData
+						? "Repeat Purchase"
+						: "Add Purchase"}
+				</DialogTitle>
 				<DialogDescription>
-					Record a stock purchase for {date}.
+					{initialData
+						? `Loaded from your last purchase for ${date}.`
+						: `Record a stock purchase for ${date}.`}
 				</DialogDescription>
 			</DialogHeader>
 			<form onSubmit={handleSubmit}>

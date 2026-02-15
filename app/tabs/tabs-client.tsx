@@ -3,8 +3,6 @@
 
 import * as React from "react";
 import {
-	usePathname,
-	useRouter,
 	useSearchParams,
 } from "next/navigation";
 import useSWR from "swr";
@@ -19,7 +17,7 @@ import {
 	RotateCcw,
 } from "lucide-react";
 import { PageWrapper } from "@/components/page-wrapper";
-import { DatePickerYMD } from "@/components/date-picker-ymd";
+import { DateRangeControls } from "@/components/date-range-controls";
 import {
 	LoadingTable,
 	LoadingForm,
@@ -75,12 +73,15 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import {
-	getTodayJHB,
 	formatDateDisplay,
 } from "@/lib/date-utils";
-import { postSaleWithOfflineQueue } from "@/lib/offline-sales-queue";
+import {
+	postSaleWithOfflineQueue,
+	postTabPaymentWithOfflineQueue,
+} from "@/lib/offline-sales-queue";
 import { formatZAR } from "@/lib/money";
 import { cn } from "@/lib/utils";
+import { useGlobalDateRangeQuery } from "@/lib/use-global-date-range-query";
 import type {
 	Product,
 	Customer,
@@ -133,6 +134,31 @@ const getApiErrorMessage = (
 	return fallback;
 };
 
+const getApiErrorCode = (
+	payload: unknown,
+): string | null => {
+	if (!payload || typeof payload !== "object")
+		return null;
+	const maybePayload = payload as Record<
+		string,
+		unknown
+	>;
+	const maybeError = maybePayload.error;
+	if (
+		maybeError &&
+		typeof maybeError === "object"
+	) {
+		const maybeErrorObj = maybeError as Record<
+			string,
+			unknown
+		>;
+		return typeof maybeErrorObj.code === "string"
+			? maybeErrorObj.code
+			: null;
+	}
+	return null;
+};
+
 interface TabTransactionHistory {
 	id: string;
 	date: string | null;
@@ -162,6 +188,36 @@ interface TabTransactionHistory {
 
 interface TabsClientProps {
 	view?: "both" | "accounts" | "transactions";
+}
+
+interface CustomerStatementResponse {
+	customer: {
+		id: string;
+		name: string;
+		phone: string | null;
+	};
+	range: {
+		from: string;
+		to: string;
+	};
+	summary: {
+		chargesCents: number;
+		paymentsCents: number;
+		adjustmentsCents: number;
+		balanceCents: number;
+	};
+	ledger: Array<{
+		id: string;
+		date: string | null;
+		type: "CHARGE" | "PAYMENT" | "ADJUSTMENT";
+		amountCents: number;
+		signedAmountCents: number;
+		paymentMethod: PaymentMethod | null;
+		reference: string | null;
+		note: string | null;
+		createdAt: string | null;
+	}>;
+	reminderText: string;
 }
 
 type TransactionKindFilter =
@@ -238,12 +294,16 @@ const SEARCH_KIND_OPTIONS: Array<{
 export function TabsClient({
 	view = "both",
 }: TabsClientProps) {
-	const router = useRouter();
-	const pathname = usePathname();
 	const searchParams = useSearchParams();
-	const [date, setDate] = React.useState(
-		getTodayJHB(),
-	);
+	const {
+		from,
+		to: date,
+		preset,
+		onPresetChange,
+		onFromChange,
+		onToChange,
+		onRangeChange,
+	} = useGlobalDateRangeQuery();
 	const isAccountsOnly = view === "accounts";
 	const isTransactionsOnly =
 		view === "transactions";
@@ -271,7 +331,7 @@ export function TabsClient({
 		isLoading: transactionsLoading,
 		mutate: mutateTransactions,
 	} = useSWR<TabTransactionHistory[]>(
-		`/api/transactions?date=${date}&limit=200`,
+		`/api/transactions?from=${from}&to=${date}&limit=200`,
 		fetcher,
 		{
 			onError: (err) => toast.error(err.message),
@@ -289,17 +349,29 @@ export function TabsClient({
 	);
 	const selectedCustomerId =
 		searchParams.get("customerId");
+	const customerFilter =
+		searchParams.get("customerFilter");
 	const displayedCustomers = React.useMemo(() => {
-		if (!selectedCustomerId)
-			return normalizedCustomers;
+		const baseList =
+			customerFilter === "overdue"
+				? normalizedCustomers.filter(
+						(customer) =>
+							Boolean(customer.isOverdue),
+				  )
+				: normalizedCustomers;
+		if (!selectedCustomerId) return baseList;
 		const selected = normalizedCustomers.find(
 			(customer) =>
 				customer.id === selectedCustomerId,
 		);
 		return selected
 			? [selected]
-			: normalizedCustomers;
-	}, [normalizedCustomers, selectedCustomerId]);
+			: baseList;
+	}, [
+		customerFilter,
+		normalizedCustomers,
+		selectedCustomerId,
+	]);
 	const [addCustomerOpen, setAddCustomerOpen] =
 		React.useState(false);
 	const [editingCustomer, setEditingCustomer] =
@@ -344,16 +416,40 @@ export function TabsClient({
 	const action = searchParams.get("action");
 	const [transactionQuery, setTransactionQuery] =
 		React.useState("");
-
-	React.useEffect(() => {
-		const qsDate = searchParams.get("date");
-		if (qsDate) setDate(qsDate);
-	}, [searchParams]);
+	const [
+		statementCustomerId,
+		setStatementCustomerId,
+	] = React.useState("");
+	const [
+		statementLoading,
+		setStatementLoading,
+	] = React.useState(false);
 
 	React.useEffect(() => {
 		const qsQuery = searchParams.get("q");
 		setTransactionQuery(qsQuery ?? "");
 	}, [searchParams]);
+	React.useEffect(() => {
+		if (
+			selectedCustomerId &&
+			normalizedCustomers.some(
+				(customer) =>
+					customer.id === selectedCustomerId,
+			)
+		) {
+			setStatementCustomerId(selectedCustomerId);
+			return;
+		}
+		if (!statementCustomerId && normalizedCustomers[0]) {
+			setStatementCustomerId(
+				normalizedCustomers[0].id,
+			);
+		}
+	}, [
+		normalizedCustomers,
+		selectedCustomerId,
+		statementCustomerId,
+	]);
 
 	React.useEffect(() => {
 		if (!isTransactionsOnly) return;
@@ -520,6 +616,24 @@ export function TabsClient({
 			normalizedProducts,
 			transactionsHistory,
 		]);
+	const latestRepeatableSale = React.useMemo(
+		() =>
+			(
+				transactionsHistory ?? []
+			).find(
+				(txn) =>
+					!txn.isReversal &&
+					!txn.isReversed &&
+					(txn.type === "DIRECT_SALE" ||
+						txn.type === "CHARGE") &&
+					(txn.items ?? []).some(
+						(item) =>
+							Boolean(item.productId) &&
+							(item.units ?? 0) > 0,
+					),
+			) ?? null,
+		[transactionsHistory],
+	);
 
 	const handleReverseTransaction = async () => {
 		if (!reversingTxn) return;
@@ -607,6 +721,149 @@ export function TabsClient({
 			setPaymentDialogOpen(false);
 		}
 	};
+	const fetchCustomerStatement = async () => {
+		if (!statementCustomerId) {
+			toast.error("Select a customer first");
+			return null;
+		}
+		setStatementLoading(true);
+		try {
+			const res = await fetch(
+				`/api/customers/${statementCustomerId}/statement?from=${from}&to=${date}`,
+			);
+			const body = await res
+				.json()
+				.catch(() => ({}));
+			if (!res.ok) {
+				throw new Error(
+					getApiErrorMessage(
+						body,
+						"Failed to load customer statement",
+					),
+				);
+			}
+			return (body?.data ??
+				body) as CustomerStatementResponse;
+		} catch (err) {
+			toast.error(
+				err instanceof Error
+					? err.message
+					: "Failed to load customer statement",
+			);
+			return null;
+		} finally {
+			setStatementLoading(false);
+		}
+	};
+	const exportStatementCsv = async () => {
+		const statement = await fetchCustomerStatement();
+		if (!statement) return;
+		const rows = [
+			[
+				"Date",
+				"Type",
+				"Amount",
+				"Signed Amount",
+				"Payment Method",
+				"Reference",
+				"Note",
+			],
+			...statement.ledger.map((row) => [
+				row.date ?? "",
+				row.type,
+				String(row.amountCents),
+				String(row.signedAmountCents),
+				row.paymentMethod ?? "",
+				row.reference ?? "",
+				row.note ?? "",
+			]),
+		];
+		const csv = rows
+			.map((row) =>
+				row
+					.map((cell) =>
+						`"${String(cell).replaceAll('"', '""')}"`,
+					)
+					.join(","),
+			)
+			.join("\n");
+		const blob = new Blob([csv], {
+			type: "text/csv;charset=utf-8",
+		});
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement("a");
+		a.href = url;
+		a.download = `statement_${statement.customer.name.replaceAll(
+			/\s+/g,
+			"_",
+		)}_${statement.range.from}_to_${statement.range.to}.csv`;
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+		URL.revokeObjectURL(url);
+	};
+	const exportStatementPdf = async () => {
+		const statement = await fetchCustomerStatement();
+		if (!statement) return;
+		const htmlRows = statement.ledger
+			.map(
+				(row) =>
+					`<tr><td>${row.date ?? ""}</td><td>${row.type}</td><td>${formatZAR(row.signedAmountCents)}</td><td>${row.paymentMethod ?? "-"}</td><td>${row.reference ?? "-"}</td><td>${row.note ?? "-"}</td></tr>`,
+			)
+			.join("");
+		const printWindow = window.open(
+			"",
+			"_blank",
+			"width=900,height=700",
+		);
+		if (!printWindow) {
+			toast.error("Could not open print window");
+			return;
+		}
+		printWindow.document.write(`
+			<html>
+				<head>
+					<title>Statement - ${statement.customer.name}</title>
+					<style>
+						body { font-family: Arial, sans-serif; padding: 16px; }
+						table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+						th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 12px; }
+						h1 { font-size: 18px; margin: 0 0 8px 0; }
+						p { margin: 4px 0; }
+					</style>
+				</head>
+				<body>
+					<h1>Customer Statement</h1>
+					<p><strong>Customer:</strong> ${statement.customer.name}</p>
+					<p><strong>Period:</strong> ${statement.range.from} to ${statement.range.to}</p>
+					<p><strong>Balance:</strong> ${formatZAR(statement.summary.balanceCents)}</p>
+					<table>
+						<thead>
+							<tr><th>Date</th><th>Type</th><th>Amount</th><th>Method</th><th>Reference</th><th>Note</th></tr>
+						</thead>
+						<tbody>${htmlRows}</tbody>
+					</table>
+				</body>
+			</html>
+		`);
+		printWindow.document.close();
+		printWindow.focus();
+		printWindow.print();
+	};
+	const copyReminderText = async () => {
+		const statement = await fetchCustomerStatement();
+		if (!statement) return;
+		try {
+			await navigator.clipboard.writeText(
+				statement.reminderText,
+			);
+			toast.success(
+				"WhatsApp reminder text copied",
+			);
+		} catch {
+			toast.error("Failed to copy reminder text");
+		}
+	};
 
 	return (
 		<PageWrapper
@@ -622,9 +879,14 @@ export function TabsClient({
 			}
 			actions={
 				isAccountsOnly ? undefined : (
-					<DatePickerYMD
-						value={date}
-						onChange={setDate}
+					<DateRangeControls
+						from={from}
+						to={date}
+						preset={preset}
+						onPresetChange={onPresetChange}
+						onFromChange={onFromChange}
+						onToChange={onToChange}
+						onRangeChange={onRangeChange}
 					/>
 				)
 			}
@@ -692,6 +954,68 @@ export function TabsClient({
 										/>
 									</Dialog>
 								</div>
+								<Card className="mb-4 shadow-sm">
+									<CardHeader className="pb-2">
+										<CardTitle className="text-base">
+											Statements & Reminders
+										</CardTitle>
+									</CardHeader>
+									<CardContent className="space-y-3">
+										<CustomerSelect
+											customers={
+												normalizedCustomers
+											}
+											value={
+												statementCustomerId
+											}
+											onChange={
+												setStatementCustomerId
+											}
+											label="Customer"
+										/>
+										<div className="grid gap-2 sm:grid-cols-3">
+											<Button
+												type="button"
+												variant="outline"
+												disabled={
+													statementLoading ||
+													!statementCustomerId
+												}
+												onClick={
+													exportStatementCsv
+												}
+											>
+												Export CSV
+											</Button>
+											<Button
+												type="button"
+												variant="outline"
+												disabled={
+													statementLoading ||
+													!statementCustomerId
+												}
+												onClick={
+													exportStatementPdf
+												}
+											>
+												Export PDF
+											</Button>
+											<Button
+												type="button"
+												variant="outline"
+												disabled={
+													statementLoading ||
+													!statementCustomerId
+												}
+												onClick={
+													copyReminderText
+												}
+											>
+												Copy WhatsApp
+											</Button>
+										</div>
+									</CardContent>
+								</Card>
 
 								{displayedCustomers.length ===
 								0 ? (
@@ -1178,9 +1502,31 @@ export function TabsClient({
 							<Card className="shadow-md mt-6">
 								<CardHeader>
 									<div className="flex flex-wrap items-center justify-between gap-2">
-										<CardTitle>
-											Transaction History
-										</CardTitle>
+										<div className="flex items-center gap-2">
+											<CardTitle>
+												Transaction
+												History
+											</CardTitle>
+											<Button
+												type="button"
+												variant="outline"
+												size="sm"
+												disabled={
+													!latestRepeatableSale
+												}
+												onClick={() => {
+													if (
+														!latestRepeatableSale
+													)
+														return;
+													repeatSaleFromHistory(
+														latestRepeatableSale,
+													);
+												}}
+											>
+												Repeat Last Sale
+											</Button>
+										</div>
 										<div className="w-full sm:w-[24rem]">
 											<Input
 												value={transactionQuery}
@@ -2120,13 +2466,13 @@ function TabChargeForm({
 		}
 
 		try {
-			const payload = {
+			const payload: Record<string, unknown> = {
 				date,
 				customerId,
 				items: validItems,
 				note: showNote && note ? note : undefined,
 			};
-			const queueResult =
+			let queueResult =
 				await postSaleWithOfflineQueue(
 					"/api/tabs/charge",
 					payload,
@@ -2146,21 +2492,64 @@ function TabChargeForm({
 				setNote("");
 				return;
 			}
-			const res = queueResult.response;
+			let res = queueResult.response;
 
 			if (!res.ok) {
-				const errorBody = await res
+				let errorBody = await res
 					.json()
 					.catch(() => ({}));
+				const errorCode =
+					getApiErrorCode(errorBody);
+				if (errorCode === "BELOW_COST") {
+					const proceed = window.confirm(
+						`${getApiErrorMessage(
+							errorBody,
+							"Below-cost sale detected.",
+						)}\n\nProceed with override?`,
+					);
+					if (proceed) {
+						payload.belowCostApproved = true;
+						payload.belowCostReason =
+							"User override from account sale form";
+						queueResult =
+							await postSaleWithOfflineQueue(
+								"/api/tabs/charge",
+								payload,
+							);
+						if (queueResult.queued) {
+							toast.success(
+								"Offline: account sale queued and will sync automatically.",
+							);
+							onSuccess?.();
+							setCustomerId("");
+							setItems([
+								{
+									productId: "",
+									units: "",
+								},
+							]);
+							setNote("");
+							return;
+						}
+						res = queueResult.response;
+						if (!res.ok) {
+							errorBody = await res
+								.json()
+								.catch(() => ({}));
+						}
+					}
+				}
+				if (!res.ok) {
 				throw new Error(
 					getApiErrorMessage(
 						errorBody,
 						"Failed to add sale to account",
 					),
 				);
+				}
 			}
 
-			const data = await res.json();
+			await res.json();
 			toast.success(
 				"Sale added to customer account",
 			);
@@ -2499,6 +2888,25 @@ function TabPaymentForm({
 	const [note, setNote] = React.useState("");
 	const [showNote, setShowNote] =
 		React.useState(false);
+	React.useEffect(() => {
+		const stored = localStorage.getItem(
+			"default_payment_method",
+		);
+		if (
+			stored === "CASH" ||
+			stored === "CARD" ||
+			stored === "EFT"
+		) {
+			setPaymentMethod(stored);
+		}
+	}, []);
+	React.useEffect(() => {
+		if (!paymentMethod) return;
+		localStorage.setItem(
+			"default_payment_method",
+			paymentMethod,
+		);
+	}, [paymentMethod]);
 
 	const handleSubmit = async (
 		e: React.FormEvent,
@@ -2507,27 +2915,36 @@ function TabPaymentForm({
 		setLoading(true);
 
 		try {
-			const res = await fetch(
-				"/api/tabs/payment",
-				{
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-					},
-					body: JSON.stringify({
-						date,
-						customerId,
-						amountCents,
-						paymentMethod,
-						reference:
-							showReference && reference
-								? reference
-								: undefined,
-						note:
-							showNote && note ? note : undefined,
-					}),
-				},
-			);
+			const payload = {
+				date,
+				customerId,
+				amountCents,
+				paymentMethod,
+				reference:
+					showReference && reference
+						? reference
+						: undefined,
+				note:
+					showNote && note ? note : undefined,
+			};
+			const queueResult =
+				await postTabPaymentWithOfflineQueue(
+					payload,
+				);
+			if (queueResult.queued) {
+				toast.success(
+					"Offline: payment queued and will sync automatically.",
+				);
+				setCustomerId("");
+				setAmountCents(0);
+				setReference("");
+				setShowReference(false);
+				setNote("");
+				setShowNote(false);
+				onSuccess();
+				return;
+			}
+			const res = queueResult.response;
 
 			if (!res.ok) {
 				const errorBody = await res
@@ -2549,7 +2966,6 @@ function TabPaymentForm({
 			// Reset form
 			setCustomerId("");
 			setAmountCents(0);
-			setPaymentMethod("");
 			setReference("");
 			setShowReference(false);
 			setNote("");
@@ -2730,6 +3146,26 @@ function DirectSaleForm({
 	const [showNote, setShowNote] = React.useState(
 		Boolean(initialData?.note),
 	);
+	React.useEffect(() => {
+		if (initialData?.paymentMethod) return;
+		const stored = localStorage.getItem(
+			"default_payment_method",
+		);
+		if (
+			stored === "CASH" ||
+			stored === "CARD" ||
+			stored === "EFT"
+		) {
+			setPaymentMethod(stored);
+		}
+	}, [initialData?.paymentMethod]);
+	React.useEffect(() => {
+		if (!paymentMethod) return;
+		localStorage.setItem(
+			"default_payment_method",
+			paymentMethod,
+		);
+	}, [paymentMethod]);
 	const productPriceById = React.useMemo(
 		() =>
 			new Map(
@@ -2807,13 +3243,13 @@ function DirectSaleForm({
 		}
 
 		try {
-			const payload = {
+			const payload: Record<string, unknown> = {
 				date,
 				paymentMethod,
 				items: validItems,
 				note: showNote && note ? note : undefined,
 			};
-			const queueResult =
+			let queueResult =
 				await postSaleWithOfflineQueue(
 					"/api/sales",
 					payload,
@@ -2833,18 +3269,61 @@ function DirectSaleForm({
 				onSuccess();
 				return;
 			}
-			const res = queueResult.response;
+			let res = queueResult.response;
 
 			if (!res.ok) {
-				const errorBody = await res
+				let errorBody = await res
 					.json()
 					.catch(() => ({}));
+				const errorCode =
+					getApiErrorCode(errorBody);
+				if (errorCode === "BELOW_COST") {
+					const proceed = window.confirm(
+						`${getApiErrorMessage(
+							errorBody,
+							"Below-cost sale detected.",
+						)}\n\nProceed with override?`,
+					);
+					if (proceed) {
+						payload.belowCostApproved = true;
+						payload.belowCostReason =
+							"User override from direct sale form";
+						queueResult =
+							await postSaleWithOfflineQueue(
+								"/api/sales",
+								payload,
+							);
+						if (queueResult.queued) {
+							toast.success(
+								"Offline: direct sale queued and will sync automatically.",
+							);
+							setItems([
+								{
+									productId: "",
+									units: "",
+								},
+							]);
+							setPaymentMethod("");
+							setNote("");
+							onSuccess();
+							return;
+						}
+						res = queueResult.response;
+						if (!res.ok) {
+							errorBody = await res
+								.json()
+								.catch(() => ({}));
+						}
+					}
+				}
+				if (!res.ok) {
 				throw new Error(
 					getApiErrorMessage(
 						errorBody,
 						"Failed to save direct sale",
 					),
 				);
+				}
 			}
 
 			toast.success("Direct sale saved");
@@ -2854,7 +3333,6 @@ function DirectSaleForm({
 					units: "",
 				},
 			]);
-			setPaymentMethod("");
 			setNote("");
 			onSuccess();
 		} catch (err) {

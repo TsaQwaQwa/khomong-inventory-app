@@ -87,6 +87,10 @@ export function ProductsClient() {
 	const searchParams = useSearchParams();
 	const focusedProductId =
 		searchParams.get("productId");
+	const stockStatusFilter = searchParams.get(
+		"stockStatus",
+	);
+	const priceFilter = searchParams.get("priceFilter");
 	const {
 		data: products,
 		error,
@@ -100,13 +104,36 @@ export function ProductsClient() {
 	);
 	const visibleProducts = React.useMemo(() => {
 		if (!products) return [];
-		if (!focusedProductId) return products;
-		const focused = products.find(
+		let filtered = products;
+		if (
+			stockStatusFilter === "OUT" ||
+			stockStatusFilter === "LOW" ||
+			stockStatusFilter === "OK"
+		) {
+			filtered = filtered.filter(
+				(product) =>
+					product.stockStatus === stockStatusFilter,
+			);
+		}
+		if (priceFilter === "missing") {
+			filtered = filtered.filter(
+				(product) =>
+					!product.currentPriceCents ||
+					product.currentPriceCents <= 0,
+			);
+		}
+		if (!focusedProductId) return filtered;
+		const focused = filtered.find(
 			(product) =>
 				product.id === focusedProductId,
 		);
-		return focused ? [focused] : products;
-	}, [focusedProductId, products]);
+		return focused ? [focused] : filtered;
+	}, [
+		focusedProductId,
+		products,
+		priceFilter,
+		stockStatusFilter,
+	]);
 
 	const [addDialogOpen, setAddDialogOpen] =
 		React.useState(false);

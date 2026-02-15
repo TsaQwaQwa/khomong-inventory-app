@@ -25,6 +25,8 @@ export async function GET(req: Request) {
 	const url = new URL(req.url);
 	const date =
 		url.searchParams.get("date") ?? todayYMD();
+	const from = url.searchParams.get("from");
+	const to = url.searchParams.get("to");
 	const fieldsParam = (
 		url.searchParams.get("fields") ?? ""
 	).toLowerCase();
@@ -37,13 +39,23 @@ export async function GET(req: Request) {
 				parseInt(lookbackDaysParam, 10) || 0,
 			)
 		: 0;
+	const isYmd = (value: string | null) =>
+		Boolean(
+			value &&
+				/^\d{4}-\d{2}-\d{2}$/.test(value),
+		);
 	const purchaseDateFilter =
-		lookbackDays > 0
+		isYmd(from) && isYmd(to)
 			? {
-					$gte: addDays(date, -lookbackDays),
-					$lte: date,
+					$gte: from,
+					$lte: to,
 				}
-			: date;
+			: lookbackDays > 0
+				? {
+						$gte: addDays(date, -lookbackDays),
+						$lte: date,
+					}
+				: date;
 
 	await connectDB();
 	const docs = await Purchase.find({

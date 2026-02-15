@@ -3,10 +3,15 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { SignOutButton } from "@clerk/nextjs";
 import useSWR from "swr";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { GlobalCommandSearch } from "@/components/global-command-search";
+import {
+	getOfflineQueueCount,
+	offlineQueueChangedEvent,
+} from "@/lib/offline-sales-queue";
 import {
 	Popover,
 	PopoverContent,
@@ -32,6 +37,7 @@ import {
 	ClipboardList,
 	History,
 	Menu,
+	LogOut,
 } from "lucide-react";
 
 const navItems = [
@@ -125,6 +131,11 @@ const headerSummaryFetcher = async (url: string) => {
 export function Header() {
 	const pathname = usePathname();
 	const [open, setOpen] = React.useState(false);
+	const [isOnline, setIsOnline] = React.useState(
+		true,
+	);
+	const [offlineQueueCount, setOfflineQueueCount] =
+		React.useState(0);
 	const { data: headerSummary } = useSWR<
 		HeaderSummary
 	>(
@@ -166,6 +177,38 @@ export function Header() {
 		},
 		[outOfStockCount, unreadAlertCount],
 	);
+	React.useEffect(() => {
+		const syncStatus = () => {
+			setIsOnline(navigator.onLine);
+			setOfflineQueueCount(getOfflineQueueCount());
+		};
+		syncStatus();
+		window.addEventListener("online", syncStatus);
+		window.addEventListener(
+			"offline",
+			syncStatus,
+		);
+		window.addEventListener(
+			offlineQueueChangedEvent,
+			syncStatus,
+		);
+		const id = window.setInterval(syncStatus, 5000);
+		return () => {
+			window.removeEventListener(
+				"online",
+				syncStatus,
+			);
+			window.removeEventListener(
+				"offline",
+				syncStatus,
+			);
+			window.removeEventListener(
+				offlineQueueChangedEvent,
+				syncStatus,
+			);
+			window.clearInterval(id);
+		};
+	}, []);
 
 	return (
 		<header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60">
@@ -263,7 +306,36 @@ export function Header() {
 					)}
 				</nav>
 				<div className="ml-auto flex shrink-0 items-center gap-2">
+					<div
+						className={cn(
+							"hidden md:inline-flex items-center rounded-full border px-2 py-1 text-xs font-medium",
+							isOnline
+								? "border-emerald-200 bg-emerald-50 text-emerald-700"
+								: "border-amber-200 bg-amber-50 text-amber-700",
+						)}
+						title={
+							offlineQueueCount > 0
+								? `${offlineQueueCount} pending offline action${offlineQueueCount === 1 ? "" : "s"}`
+								: "No pending offline actions"
+						}
+					>
+						{isOnline ? "Online" : "Offline"}
+						{offlineQueueCount > 0
+							? ` - ${offlineQueueCount} pending`
+							: ""}
+					</div>
 					<GlobalCommandSearch />
+					<SignOutButton redirectUrl="/sign-in">
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="hidden md:inline-flex"
+						>
+							<LogOut className="mr-2 h-4 w-4" />
+							Logout
+						</Button>
+					</SignOutButton>
 				</div>
 
 				{/* Mobile Navigation */}
@@ -289,6 +361,19 @@ export function Header() {
 							</SheetTitle>
 						</div>
 						<nav className="flex flex-col space-y-1">
+							<div
+								className={cn(
+									"mb-2 rounded-md border px-3 py-2 text-xs font-medium",
+									isOnline
+										? "border-emerald-200 bg-emerald-50 text-emerald-700"
+										: "border-amber-200 bg-amber-50 text-amber-700",
+								)}
+							>
+								{isOnline ? "Online" : "Offline"}
+								{offlineQueueCount > 0
+									? ` - ${offlineQueueCount} pending`
+									: " - no pending actions"}
+							</div>
 							{visibleNavItems.map((item) => {
 								const isActive =
 									pathname === item.href;
@@ -326,6 +411,21 @@ export function Header() {
 								);
 							})}
 						</nav>
+						<div className="mt-4 border-t pt-4">
+							<SignOutButton redirectUrl="/sign-in">
+								<Button
+									type="button"
+									variant="outline"
+									className="w-full justify-start"
+									onClick={() =>
+										setOpen(false)
+									}
+								>
+									<LogOut className="mr-2 h-4 w-4" />
+									Logout
+								</Button>
+							</SignOutButton>
+						</div>
 					</SheetContent>
 				</Sheet>
 			</div>

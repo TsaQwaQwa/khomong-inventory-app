@@ -29,6 +29,8 @@ export async function GET(req: Request) {
 
 	const url = new URL(req.url);
 	const date = url.searchParams.get("date");
+	const from = url.searchParams.get("from");
+	const to = url.searchParams.get("to");
 	const limitParam = Number(
 		url.searchParams.get("limit") ?? "50",
 	);
@@ -53,6 +55,35 @@ export async function GET(req: Request) {
 				docs.map((doc) => ({
 					...serializeDoc(doc),
 					date,
+				})),
+			);
+		}
+		if (from && to) {
+			const days = await BusinessDay.find({
+				date: { $gte: from, $lte: to },
+			})
+				.select({ _id: 1, date: 1 })
+				.lean();
+			if (!days.length) return ok([]);
+			const dayById = new Map(
+				days.map((day) => [
+					String(day._id),
+					day.date,
+				]),
+			);
+			const dayIds = Array.from(dayById.keys());
+			const docs = await Adjustment.find({
+				businessDayId: { $in: dayIds },
+			})
+				.sort({ createdAt: -1 })
+				.limit(limit)
+				.lean();
+			return ok(
+				docs.map((doc) => ({
+					...serializeDoc(doc),
+					date:
+						dayById.get(doc.businessDayId) ??
+						null,
 				})),
 			);
 		}

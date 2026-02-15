@@ -81,6 +81,16 @@ type ReportKind =
 	| "payment"
 	| "purchase"
 	| "adjustment";
+type RangePreset =
+	| "day"
+	| "week"
+	| "month"
+	| "year"
+	| "custom";
+type PreferredRangePreset = Exclude<
+	RangePreset,
+	"custom"
+>;
 
 interface RangeReport {
 	range: {
@@ -156,6 +166,8 @@ interface ReportPreset {
 }
 
 const PRESET_KEY = "reports-presets:v1";
+const RANGE_PREFERENCE_KEY =
+	"global-date-range-preference:v1";
 
 const fetcher = async (url: string) => {
 	const res = await fetch(url);
@@ -190,12 +202,50 @@ const isKind = (
 	value === "payment" ||
 	value === "purchase" ||
 	value === "adjustment";
+const isRangePreset = (
+	value: string | null,
+): value is RangePreset =>
+	value === "day" ||
+	value === "week" ||
+	value === "month" ||
+	value === "year" ||
+	value === "custom";
+const isPreferredRangePreset = (
+	value: string | null,
+): value is PreferredRangePreset =>
+	value === "day" ||
+	value === "week" ||
+	value === "month" ||
+	value === "year";
 
 const rangeDaysInclusive = (from: string, to: string) => {
 	const a = new Date(`${from}T00:00:00.000Z`).getTime();
 	const b = new Date(`${to}T00:00:00.000Z`).getTime();
 	const diff = Math.floor((b - a) / 86400000);
 	return Math.max(1, diff + 1);
+};
+const rangeFromPreset = (
+	preset: PreferredRangePreset,
+	to: string,
+) => {
+	if (preset === "day")
+		return { from: to, to };
+	if (preset === "week")
+		return { from: addDays(to, -6), to };
+	if (preset === "year")
+		return { from: addDays(to, -364), to };
+	return { from: addDays(to, -29), to };
+};
+const inferRangePreset = (
+	from: string,
+	to: string,
+): RangePreset => {
+	if (from === to) return "day";
+	const days = rangeDaysInclusive(from, to);
+	if (days === 7) return "week";
+	if (days === 30) return "month";
+	if (days >= 365 && days <= 366) return "year";
+	return "custom";
 };
 
 function asCsvCell(value: unknown): string {
@@ -229,13 +279,27 @@ export function ReportsClient() {
 	>([]);
 	const [selectedPresetId, setSelectedPresetId] =
 		React.useState<string>("none");
-
-	const to = isYmd(searchParams.get("to"))
-		? searchParams.get("to")!
-		: today;
-	const from = isYmd(searchParams.get("from"))
+	const [
+		rangePreference,
+		setRangePreference,
+	] = React.useState<PreferredRangePreset>("month");
+	const [
+		rangePreferenceLoaded,
+		setRangePreferenceLoaded,
+	] = React.useState(false);
+	const fromParam = isYmd(searchParams.get("from"))
 		? searchParams.get("from")!
-		: addDays(to, -29);
+		: null;
+	const toParam = isYmd(searchParams.get("to"))
+		? searchParams.get("to")!
+		: null;
+	const rangeParam = isRangePreset(
+		searchParams.get("range"),
+	)
+		? searchParams.get("range")!
+		: null;
+	const to = toParam ?? today;
+	const from = fromParam ?? addDays(to, -29);
 	const tab = isTab(searchParams.get("tab"))
 		? searchParams.get("tab")!
 		: "overview";
@@ -259,6 +323,18 @@ export function ReportsClient() {
 			setPresets(parsed);
 		} catch {
 			setPresets([]);
+		}
+	}, []);
+	React.useEffect(() => {
+		try {
+			const raw = localStorage.getItem(
+				RANGE_PREFERENCE_KEY,
+			);
+			if (isPreferredRangePreset(raw)) {
+				setRangePreference(raw);
+			}
+		} finally {
+			setRangePreferenceLoaded(true);
 		}
 	}, []);
 
@@ -295,6 +371,41 @@ export function ReportsClient() {
 		},
 		[pathname, router, searchParams],
 	);
+	const setRangePreferenceAndPersist =
+		React.useCallback(
+			(next: PreferredRangePreset) => {
+				setRangePreference(next);
+				localStorage.setItem(
+					RANGE_PREFERENCE_KEY,
+					next,
+				);
+			},
+			[],
+		);
+	const activeRangePreset = React.useMemo(() => {
+		if (rangeParam) return rangeParam;
+		return inferRangePreset(from, to);
+	}, [from, rangeParam, to]);
+	React.useEffect(() => {
+		if (!rangePreferenceLoaded) return;
+		if (fromParam && toParam) return;
+		const next = rangeFromPreset(
+			rangePreference,
+			toParam ?? today,
+		);
+		setQuery({
+			from: next.from,
+			to: next.to,
+			range: rangePreference,
+		});
+	}, [
+		fromParam,
+		rangePreference,
+		rangePreferenceLoaded,
+		setQuery,
+		toParam,
+		today,
+	]);
 
 	const reportQuery = React.useMemo(() => {
 		const params = new URLSearchParams({
@@ -366,6 +477,46 @@ export function ReportsClient() {
 			customerId: "all",
 		});
 	};
+	const applyRangePreset = React.useCallback(
+		(value: string) => {
+			if (!isRangePreset(value)) return;
+			if (value === "custom") {
+				setQuery({ range: "custom" });
+				return;
+			}
+			setRangePreferenceAndPersist(value);
+			const next = rangeFromPreset(value, to);
+			setQuery({
+				from: next.from,
+				to: next.to,
+				range: value,
+			});
+		},
+		[setQuery, setRangePreferenceAndPersist, to],
+	);
+	const onFromChange = React.useCallback(
+		(value: string) => {
+			const nextTo = value > to ? value : to;
+			setQuery({
+				from: value,
+				to: nextTo,
+				range: "custom",
+			});
+		},
+		[setQuery, to],
+	);
+	const onToChange = React.useCallback(
+		(value: string) => {
+			const nextFrom =
+				value < from ? value : from;
+			setQuery({
+				from: nextFrom,
+				to: value,
+				range: "custom",
+			});
+		},
+		[from, setQuery],
+	);
 
 	const saveCurrentPreset = () => {
 		const name = window
@@ -671,17 +822,38 @@ export function ReportsClient() {
 			description="Analyze historical sales, purchases, customer account activity, and discounts by date range."
 			actions={
 				<div className="flex flex-col gap-2 sm:flex-row">
+					<Select
+						value={activeRangePreset}
+						onValueChange={applyRangePreset}
+					>
+						<SelectTrigger className="w-[170px]">
+							<SelectValue placeholder="Range preset" />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="day">
+								Day
+							</SelectItem>
+							<SelectItem value="week">
+								Week
+							</SelectItem>
+							<SelectItem value="month">
+								Month
+							</SelectItem>
+							<SelectItem value="year">
+								Year
+							</SelectItem>
+							<SelectItem value="custom">
+								Custom
+							</SelectItem>
+						</SelectContent>
+					</Select>
 					<DatePickerYMD
 						value={from}
-						onChange={(value) =>
-							setQuery({ from: value })
-						}
+						onChange={onFromChange}
 					/>
 					<DatePickerYMD
 						value={to}
-						onChange={(value) =>
-							setQuery({ to: value })
-						}
+						onChange={onToChange}
 					/>
 				</div>
 			}

@@ -1,8 +1,13 @@
-type SalesEndpoint = "/api/sales" | "/api/tabs/charge";
+type QueueEndpoint =
+	| "/api/sales"
+	| "/api/tabs/charge"
+	| "/api/tabs/payment"
+	| "/api/purchases"
+	| "/api/adjustments";
 
-interface OfflineSalesQueueItem {
+interface OfflineQueueItem {
 	id: string;
-	endpoint: SalesEndpoint;
+	endpoint: QueueEndpoint;
 	body: Record<string, unknown>;
 	createdAt: string;
 	attempts: number;
@@ -20,33 +25,35 @@ type PostSaleResult =
 	| { queued: false; response: Response };
 
 const STORAGE_KEY = "offline_sales_queue_v1";
+const OFFLINE_QUEUE_EVENT = "offline-queue-changed";
 
 function canUseStorage() {
 	return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }
 
-function readQueue(): OfflineSalesQueueItem[] {
+function readQueue(): OfflineQueueItem[] {
 	if (!canUseStorage()) return [];
 	try {
 		const raw = window.localStorage.getItem(STORAGE_KEY);
 		if (!raw) return [];
-		const parsed = JSON.parse(raw) as OfflineSalesQueueItem[];
+		const parsed = JSON.parse(raw) as OfflineQueueItem[];
 		return Array.isArray(parsed) ? parsed : [];
 	} catch {
 		return [];
 	}
 }
 
-function writeQueue(queue: OfflineSalesQueueItem[]) {
+function writeQueue(queue: OfflineQueueItem[]) {
 	if (!canUseStorage()) return;
 	window.localStorage.setItem(STORAGE_KEY, JSON.stringify(queue));
+	window.dispatchEvent(new Event(OFFLINE_QUEUE_EVENT));
 }
 
 function makeQueueItem(
-	endpoint: SalesEndpoint,
+	endpoint: QueueEndpoint,
 	body: Record<string, unknown>,
 	error?: string,
-): OfflineSalesQueueItem {
+): OfflineQueueItem {
 	return {
 		id: `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
 		endpoint,
@@ -57,7 +64,7 @@ function makeQueueItem(
 	};
 }
 
-async function sendItem(item: OfflineSalesQueueItem) {
+async function sendItem(item: OfflineQueueItem) {
 	return fetch(item.endpoint, {
 		method: "POST",
 		headers: {
@@ -71,19 +78,26 @@ export function getOfflineSalesQueueCount() {
 	return readQueue().length;
 }
 
-export async function postSaleWithOfflineQueue(
-	endpoint: SalesEndpoint,
+export function getOfflineQueueCount() {
+	return readQueue().length;
+}
+
+export const offlineQueueChangedEvent =
+	OFFLINE_QUEUE_EVENT;
+
+export async function postWithOfflineQueue(
+	endpoint: QueueEndpoint,
 	body: Record<string, unknown>,
 ): Promise<PostSaleResult> {
 	if (typeof window !== "undefined" && !navigator.onLine) {
 		const queue = readQueue();
 		queue.push(makeQueueItem(endpoint, body, "offline"));
 		writeQueue(queue);
-			return {
-				queued: true,
-				response: null,
-			};
-		}
+		return {
+			queued: true,
+			response: null,
+		};
+	}
 
 	try {
 		const response = await fetch(endpoint, {
@@ -107,11 +121,40 @@ export async function postSaleWithOfflineQueue(
 			),
 		);
 		writeQueue(queue);
-			return {
-				queued: true,
-				response: null,
-			};
-		}
+		return {
+			queued: true,
+			response: null,
+		};
+	}
+}
+
+export async function postSaleWithOfflineQueue(
+	endpoint: "/api/sales" | "/api/tabs/charge",
+	body: Record<string, unknown>,
+): Promise<PostSaleResult> {
+	return postWithOfflineQueue(endpoint, body);
+}
+
+export async function postPurchaseWithOfflineQueue(
+	body: Record<string, unknown>,
+): Promise<PostSaleResult> {
+	return postWithOfflineQueue("/api/purchases", body);
+}
+
+export async function postAdjustmentWithOfflineQueue(
+	body: Record<string, unknown>,
+): Promise<PostSaleResult> {
+	return postWithOfflineQueue("/api/adjustments", body);
+}
+
+export async function postTabPaymentWithOfflineQueue(
+	body: Record<string, unknown>,
+): Promise<PostSaleResult> {
+	return postWithOfflineQueue("/api/tabs/payment", body);
+}
+
+export async function flushOfflineQueue(): Promise<FlushResult> {
+	return flushOfflineSalesQueue();
 }
 
 export async function flushOfflineSalesQueue(): Promise<FlushResult> {

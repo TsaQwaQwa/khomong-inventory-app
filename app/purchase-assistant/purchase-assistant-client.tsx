@@ -5,7 +5,7 @@ import * as React from "react";
 import useSWR from "swr";
 import { AlertCircle } from "lucide-react";
 import { PageWrapper } from "@/components/page-wrapper";
-import { DatePickerYMD } from "@/components/date-picker-ymd";
+import { DateRangeControls } from "@/components/date-range-controls";
 import { LoadingTable } from "@/components/loading-state";
 import { EmptyState } from "@/components/empty-state";
 import {
@@ -29,10 +29,8 @@ import {
 } from "@/components/ui/table";
 import {
 	usePathname,
-	useRouter,
 	useSearchParams,
 } from "next/navigation";
-import { getTodayJHB } from "@/lib/date-utils";
 import { formatZAR } from "@/lib/money";
 import type {
 	DailyReport,
@@ -41,6 +39,7 @@ import type {
 	Supplier,
 	SupplierPrice,
 } from "@/lib/types";
+import { useGlobalDateRangeQuery } from "@/lib/use-global-date-range-query";
 
 const fetcher = async (url: string) => {
 	const res = await fetch(url);
@@ -83,29 +82,15 @@ interface SupplierRollupRow {
 }
 
 export function PurchaseAssistantClient() {
-	const router = useRouter();
-	const pathname = usePathname();
-	const searchParams = useSearchParams();
-	const date = isValidDateParam(
-		searchParams.get("date"),
-	)
-		? searchParams.get("date")!
-		: getTodayJHB();
-
-	const onDateChange = React.useCallback(
-		(nextDate: string) => {
-			const params = new URLSearchParams(
-				searchParams.toString(),
-			);
-			params.set("date", nextDate);
-			const query = params.toString();
-			router.replace(
-				query ? `${pathname}?${query}` : pathname,
-				{ scroll: false },
-			);
-		},
-		[pathname, router, searchParams],
-	);
+	const {
+		from,
+		to: date,
+		preset,
+		onPresetChange,
+		onFromChange,
+		onToChange,
+		onRangeChange,
+	} = useGlobalDateRangeQuery();
 
 	const {
 		data: suppliers = [],
@@ -120,11 +105,11 @@ export function PurchaseAssistantClient() {
 		fetcher,
 	);
 	const { data: report } = useSWR<DailyReport>(
-		`/api/reports/daily?date=${date}`,
+		`/api/reports/daily?from=${from}&to=${date}`,
 		fetcher,
 	);
 	const { data: purchases = [] } = useSWR<Purchase[]>(
-		`/api/purchases?date=${date}&lookbackDays=90&fields=lite`,
+		`/api/purchases?from=${from}&to=${date}&fields=lite`,
 		fetcher,
 	);
 	const { data: supplierPrices = [] } = useSWR<
@@ -343,9 +328,14 @@ export function PurchaseAssistantClient() {
 			title="Purchase Assistant"
 			description="Supplier-focused restock assistant. Use best known supplier costs and recent purchasing patterns to reduce restock spend."
 			actions={
-				<DatePickerYMD
-					value={date}
-					onChange={onDateChange}
+				<DateRangeControls
+					from={from}
+					to={date}
+					preset={preset}
+					onPresetChange={onPresetChange}
+					onFromChange={onFromChange}
+					onToChange={onToChange}
+					onRangeChange={onRangeChange}
 				/>
 			}
 		>

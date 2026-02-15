@@ -90,19 +90,20 @@ export async function PATCH(
 		}
 	}
 
-	await connectDB();
-	const updatePayload: Record<string, unknown> =
-		{};
-	if (invoiceNo !== undefined)
-		updatePayload.invoiceNo = invoiceNo;
-	const existing = await Purchase.findOne({
-		_id: id,
-	}).lean();
-	if (
-		(Array.isArray(payload.items) ||
-			payload.discountCents !== undefined) &&
-		existing
-	) {
+	try {
+		await connectDB();
+		const updatePayload: Record<string, unknown> =
+			{};
+		if (invoiceNo !== undefined)
+			updatePayload.invoiceNo = invoiceNo;
+		const existing = await Purchase.findOne({
+			_id: id,
+		}).lean();
+		if (
+			(Array.isArray(payload.items) ||
+				payload.discountCents !== undefined) &&
+			existing
+		) {
 		const itemsByProduct = new Map<string, any>(
 			Array.isArray(payload.items)
 				? payload.items.map((item: any) => [
@@ -147,40 +148,46 @@ export async function PATCH(
 		updatePayload.subtotalCents = totals.subtotalCents;
 		updatePayload.discountCents = totals.discountCents;
 		updatePayload.totalCostCents = totals.totalCostCents;
-	}
-	if (attachments.length && existing) {
-		updatePayload.attachmentIds = [
-			...(existing.attachmentIds ?? []),
-			...attachments,
-		];
-	}
+		}
+		if (attachments.length && existing) {
+			updatePayload.attachmentIds = [
+				...(existing.attachmentIds ?? []),
+				...attachments,
+			];
+		}
 
-	const updated = await Purchase.findOneAndUpdate(
-		{ _id: id },
-		{ $set: updatePayload },
-		{ new: true },
-	).lean();
-	if (!updated)
-		return fail("Purchase not found", {
-			status: 404,
-			code: "NOT_FOUND",
-		});
-	if (existing) {
-		await writeAuditLog({
+		const updated = await Purchase.findOneAndUpdate(
+			{ _id: id },
+			{ $set: updatePayload },
+			{ new: true },
+		).lean();
+		if (!updated)
+			return fail("Purchase not found", {
+				status: 404,
+				code: "NOT_FOUND",
+			});
+		if (existing) {
+			await writeAuditLog({
+				scopeId: getScopeIdFromAuth(a),
+				actorUserId: a.userId ?? undefined,
+				action: "UPDATE",
+				entityType: "Purchase",
+				entityId: id,
+				oldValues: toAuditObject(existing),
+				newValues: toAuditObject(updated),
+			});
+		}
+		await learnSupplierPricesFromPurchase({
+			purchase: updated,
 			scopeId: getScopeIdFromAuth(a),
 			actorUserId: a.userId ?? undefined,
-			action: "UPDATE",
-			entityType: "Purchase",
-			entityId: id,
-			oldValues: toAuditObject(existing),
-			newValues: toAuditObject(updated),
+		});
+
+		return ok(serializeDoc(updated));
+	} catch {
+		return fail("Failed to update purchase", {
+			status: 500,
+			code: "SERVER_ERROR",
 		});
 	}
-	await learnSupplierPricesFromPurchase({
-		purchase: updated,
-		scopeId: getScopeIdFromAuth(a),
-		actorUserId: a.userId ?? undefined,
-	});
-
-	return ok(serializeDoc(updated));
 }

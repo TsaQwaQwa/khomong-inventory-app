@@ -4,14 +4,13 @@
 import * as React from "react";
 import {
 	usePathname,
-	useRouter,
 	useSearchParams,
 } from "next/navigation";
 import useSWR from "swr";
 import { toast } from "sonner";
 import { AlertCircle } from "lucide-react";
 import { PageWrapper } from "@/components/page-wrapper";
-import { DatePickerYMD } from "@/components/date-picker-ymd";
+import { DateRangeControls } from "@/components/date-range-controls";
 import { LoadingTable } from "@/components/loading-state";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
@@ -40,7 +39,6 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
-import { getTodayJHB } from "@/lib/date-utils";
 import { formatZAR } from "@/lib/money";
 import type {
 	DailyReport,
@@ -49,6 +47,7 @@ import type {
 	Supplier,
 	SupplierPrice,
 } from "@/lib/types";
+import { useGlobalDateRangeQuery } from "@/lib/use-global-date-range-query";
 
 const fetcher = async (url: string) => {
 	const res = await fetch(url);
@@ -101,49 +100,30 @@ const isSupplierTab = (
 	);
 
 export function SuppliersClient() {
-	const router = useRouter();
 	const pathname = usePathname();
 	const searchParams = useSearchParams();
-
-	const date = isValidDateParam(
-		searchParams.get("date"),
-	)
-		? searchParams.get("date")!
-		: getTodayJHB();
+	const {
+		from,
+		to: date,
+		preset,
+		onPresetChange,
+		onFromChange,
+		onToChange,
+		onRangeChange,
+		updateQuery,
+	} = useGlobalDateRangeQuery();
 	const activeTab = isSupplierTab(
 		searchParams.get("tab"),
 	)
 		? searchParams.get("tab")!
 		: "directory";
 
-	const updateQueryParam = React.useCallback(
-		(key: string, value: string) => {
-			const params = new URLSearchParams(
-				searchParams.toString(),
-			);
-			params.set(key, value);
-			const query = params.toString();
-			router.replace(
-				query ? `${pathname}?${query}` : pathname,
-				{ scroll: false },
-			);
-		},
-		[pathname, router, searchParams],
-	);
-
-	const onDateChange = React.useCallback(
-		(nextDate: string) => {
-			updateQueryParam("date", nextDate);
-		},
-		[updateQueryParam],
-	);
-
 	const onTabChange = React.useCallback(
 		(nextTab: string) => {
 			if (!isSupplierTab(nextTab)) return;
-			updateQueryParam("tab", nextTab);
+			updateQuery({ tab: nextTab });
 		},
-		[updateQueryParam],
+		[updateQuery],
 	);
 
 	const {
@@ -166,12 +146,12 @@ export function SuppliersClient() {
 	);
 	const { data: report } = useSWR<DailyReport>(
 		activeTab === "restock"
-			? `/api/reports/daily?date=${date}`
+			? `/api/reports/daily?from=${from}&to=${date}`
 			: null,
 		fetcher,
 	);
 	const { data: purchases = [] } = useSWR<Purchase[]>(
-		`/api/purchases?date=${date}&lookbackDays=90&fields=lite`,
+		`/api/purchases?from=${from}&to=${date}&fields=lite`,
 		fetcher,
 	);
 	const {
@@ -496,9 +476,14 @@ export function SuppliersClient() {
 				"View suppliers, known supplier costs, and restock savings. Use Global Quick Actions to add suppliers and set supplier costs."
 			}
 			actions={
-				<DatePickerYMD
-					value={date}
-					onChange={onDateChange}
+				<DateRangeControls
+					from={from}
+					to={date}
+					preset={preset}
+					onPresetChange={onPresetChange}
+					onFromChange={onFromChange}
+					onToChange={onToChange}
+					onRangeChange={onRangeChange}
 				/>
 			}
 		>

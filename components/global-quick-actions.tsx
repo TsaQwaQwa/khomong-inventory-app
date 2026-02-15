@@ -51,7 +51,12 @@ import {
 	getTodayJHB,
 } from "@/lib/date-utils";
 import { formatZAR } from "@/lib/money";
-import { postSaleWithOfflineQueue } from "@/lib/offline-sales-queue";
+import {
+	postSaleWithOfflineQueue,
+	postPurchaseWithOfflineQueue,
+	postAdjustmentWithOfflineQueue,
+	postTabPaymentWithOfflineQueue,
+} from "@/lib/offline-sales-queue";
 import type {
 	AdjustmentReason,
 	Customer,
@@ -698,6 +703,51 @@ export function GlobalQuickActions() {
 	);
 	const showInMoreActions = (action: QuickAction) =>
 		!favoriteActions.includes(action);
+	const pagePrimaryActions = React.useMemo<
+		QuickAction[]
+	>(() => {
+		if (pathname.startsWith("/products")) {
+			return ["product"];
+		}
+		if (pathname.startsWith("/purchases")) {
+			return ["purchase"];
+		}
+		if (pathname.startsWith("/suppliers")) {
+			return ["supplier"];
+		}
+		if (
+			pathname.startsWith("/purchase-assistant")
+		) {
+			return ["restock"];
+		}
+		if (pathname.startsWith("/adjustments")) {
+			return ["adjustment"];
+		}
+		if (pathname.startsWith("/tabs")) {
+			return ["account-sale"];
+		}
+		if (pathname.startsWith("/transactions")) {
+			return ["quick-checkout"];
+		}
+		if (pathname.startsWith("/reports")) {
+			return ["quick-top-sellers"];
+		}
+		if (pathname.startsWith("/dashboard")) {
+			return ["quick-checkout"];
+		}
+		return [];
+	}, [pathname]);
+	const visiblePagePrimaryActions =
+		React.useMemo(
+			() =>
+				pagePrimaryActions.filter(
+					(action) =>
+						!favoriteActions.includes(
+							action,
+						),
+				),
+			[pagePrimaryActions, favoriteActions],
+		);
 
 	if (!show) return null;
 
@@ -731,6 +781,25 @@ export function GlobalQuickActions() {
 						className="w-[calc(100vw-2rem)] max-w-sm p-2 md:w-80"
 					>
 						<div className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
+							{visiblePagePrimaryActions.length > 0 && (
+								<>
+									<p className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+										This Page
+									</p>
+									{visiblePagePrimaryActions.map(
+										(action, index) => (
+											<React.Fragment
+												key={`${action}-${index}`}
+											>
+												{renderQuickActionButton(
+													action,
+													"secondary",
+												)}
+											</React.Fragment>
+										),
+									)}
+								</>
+							)}
 							<p className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
 								Pinned
 							</p>
@@ -3255,27 +3324,30 @@ function AccountPaymentForm({
 		e.preventDefault();
 		setLoading(true);
 		try {
-			const res = await fetch(
-				"/api/tabs/payment",
-				{
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-					},
-					body: JSON.stringify({
-						date,
-						customerId,
-						amountCents,
-						paymentMethod,
-						reference:
-							showReference && reference
-								? reference
-								: undefined,
-						note:
-							showNote && note ? note : undefined,
-					}),
-				},
-			);
+			const payload = {
+				date,
+				customerId,
+				amountCents,
+				paymentMethod,
+				reference:
+					showReference && reference
+						? reference
+						: undefined,
+				note:
+					showNote && note ? note : undefined,
+			};
+			const queueResult =
+				await postTabPaymentWithOfflineQueue(
+					payload,
+				);
+			if (queueResult.queued) {
+				toast.success(
+					"Offline: payment queued and will sync automatically.",
+				);
+				onSuccess();
+				return;
+			}
+			const res = queueResult.response;
 			if (!res.ok) {
 				const errorBody = await res
 					.json()
@@ -4130,22 +4202,28 @@ function AddPurchaseForm({
 			return;
 		}
 		try {
-			const res = await fetch("/api/purchases", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					supplierId: supplierId || undefined,
-					invoiceNo: invoiceNo || undefined,
-					purchaseDate: date,
-					discountCents:
-						discountCents > 0
-							? discountCents
-							: undefined,
-					items: validItems,
-				}),
-			});
+			const payload = {
+				supplierId: supplierId || undefined,
+				invoiceNo: invoiceNo || undefined,
+				purchaseDate: date,
+				discountCents:
+					discountCents > 0
+						? discountCents
+						: undefined,
+				items: validItems,
+			};
+			const queueResult =
+				await postPurchaseWithOfflineQueue(
+					payload,
+				);
+			if (queueResult.queued) {
+				toast.success(
+					"Offline: purchase queued and will sync automatically.",
+				);
+				onSuccess();
+				return;
+			}
+			const res = queueResult.response;
 			if (!res.ok) {
 				const errorBody = await res
 					.json()
@@ -4467,19 +4545,19 @@ function AddAdjustmentForm({
 			return;
 		}
 		try {
-			const res = await fetch(
-				"/api/adjustments",
-				{
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-					},
-					body: JSON.stringify({
-						date,
-						items: validItems,
-					}),
-				},
-			);
+			const queueResult =
+				await postAdjustmentWithOfflineQueue({
+					date,
+					items: validItems,
+				});
+			if (queueResult.queued) {
+				toast.success(
+					"Offline: adjustment queued and will sync automatically.",
+				);
+				onSuccess();
+				return;
+			}
+			const res = queueResult.response;
 			if (!res.ok) {
 				const errorBody = await res
 					.json()

@@ -2,9 +2,8 @@
 /* eslint-disable max-len */
 
 import * as React from "react";
+import Link from "next/link";
 import {
-	usePathname,
-	useRouter,
 	useSearchParams,
 } from "next/navigation";
 import useSWR from "swr";
@@ -17,9 +16,11 @@ import {
 	TrendingDown,
 	Minus,
 	Lightbulb,
+	ChevronDown,
+	ChevronUp,
 } from "lucide-react";
 import { PageWrapper } from "@/components/page-wrapper";
-import { DatePickerYMD } from "@/components/date-picker-ymd";
+import { DateRangeControls } from "@/components/date-range-controls";
 import {
 	LoadingCards,
 	LoadingTable,
@@ -57,23 +58,19 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
-import { getTodayJHB } from "@/lib/date-utils";
 import { formatZAR } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import type { DailyReport } from "@/lib/types";
+import { useGlobalDateRangeQuery } from "@/lib/use-global-date-range-query";
 
 const DASHBOARD_TABS = [
 	"overview",
 	"sales-by-product",
 	"trends-recommendations",
 ] as const;
+const STOCK_RECOMMENDATIONS_PREVIEW_LIMIT = 5;
 
 type DashboardTab = (typeof DASHBOARD_TABS)[number];
-
-const isValidDateParam = (
-	value: string | null,
-): value is string =>
-	Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
 
 const isDashboardTab = (
 	value: string | null,
@@ -126,51 +123,40 @@ interface TransactionDrilldownState {
 		| "account-payments";
 	productId?: string;
 }
+interface ExceptionsSummary {
+	counts: {
+		outOfStock: number;
+		negativeStock: number;
+		noPrice: number;
+		overdueTabs: number;
+	};
+}
 
 export function DashboardClient() {
-	const router = useRouter();
-	const pathname = usePathname();
 	const searchParams = useSearchParams();
-
-	const date = isValidDateParam(
-		searchParams.get("date"),
-	)
-		? searchParams.get("date")!
-		: getTodayJHB();
+	const {
+		from,
+		to,
+		date,
+		preset,
+		onPresetChange,
+		onFromChange,
+		onToChange,
+		onRangeChange,
+		updateQuery,
+	} = useGlobalDateRangeQuery();
 	const activeTab = isDashboardTab(
 		searchParams.get("tab"),
 	)
 		? searchParams.get("tab")!
 		: "overview";
 
-	const updateQueryParam = React.useCallback(
-		(key: string, value: string) => {
-			const params = new URLSearchParams(
-				searchParams.toString(),
-			);
-			params.set(key, value);
-			const query = params.toString();
-			router.replace(
-				query ? `${pathname}?${query}` : pathname,
-				{ scroll: false },
-			);
-		},
-		[pathname, router, searchParams],
-	);
-
-	const onDateChange = React.useCallback(
-		(nextDate: string) => {
-			updateQueryParam("date", nextDate);
-		},
-		[updateQueryParam],
-	);
-
 	const onTabChange = React.useCallback(
 		(nextTab: string) => {
 			if (!isDashboardTab(nextTab)) return;
-			updateQueryParam("tab", nextTab);
+			updateQuery({ tab: nextTab });
 		},
-		[updateQueryParam],
+		[updateQuery],
 	);
 
 	const {
@@ -178,7 +164,7 @@ export function DashboardClient() {
 		error,
 		isLoading,
 	} = useSWR<DailyReport>(
-		`/api/reports/daily?date=${date}`,
+		`/api/reports/daily?from=${from}&to=${to}`,
 		fetcher,
 		{
 			onError: (err) => {
@@ -186,6 +172,11 @@ export function DashboardClient() {
 			},
 		},
 	);
+	const { data: exceptionsSummary } =
+		useSWR<ExceptionsSummary>(
+			"/api/exceptions/summary",
+			fetcher,
+		);
 
 	const checklistItems = React.useMemo(() => {
 		if (!report) return [];
@@ -233,8 +224,43 @@ export function DashboardClient() {
 		const sign = changePct > 0 ? "+" : "";
 		return `${sign}${changePct.toFixed(1)}%`;
 	}, [report]);
-	const stockRecommendations =
-		report?.stockRecommendations ?? [];
+	const stockRecommendations = React.useMemo(
+		() => report?.stockRecommendations ?? [],
+		[report?.stockRecommendations],
+	);
+	const hasExtraStockRecommendations =
+		stockRecommendations.length >
+		STOCK_RECOMMENDATIONS_PREVIEW_LIMIT;
+	const [
+		showAllStockRecommendations,
+		setShowAllStockRecommendations,
+	] = React.useState(false);
+	const [
+		stockAlertsOpen,
+		setStockAlertsOpen,
+	] = React.useState(false);
+	const visibleStockRecommendations =
+		React.useMemo(
+			() =>
+				showAllStockRecommendations
+					? stockRecommendations
+					: stockRecommendations.slice(
+							0,
+							STOCK_RECOMMENDATIONS_PREVIEW_LIMIT,
+						),
+			[
+				showAllStockRecommendations,
+				stockRecommendations,
+			],
+		);
+	React.useEffect(() => {
+		if (!hasExtraStockRecommendations) {
+			setShowAllStockRecommendations(false);
+		}
+	}, [hasExtraStockRecommendations, date]);
+	React.useEffect(() => {
+		setStockAlertsOpen(false);
+	}, [date]);
 	const [txDrilldown, setTxDrilldown] =
 		React.useState<TransactionDrilldownState>({
 			open: false,
@@ -266,8 +292,8 @@ export function DashboardClient() {
 		useSWR<DashboardTransactionEntry[]>(
 			txDrilldown.open
 				? txDrilldown.productId
-					? `/api/transactions?date=${date}&limit=200`
-					: `/api/transactions?date=${date}&limit=200&fields=quick`
+					? `/api/transactions?from=${from}&to=${to}&limit=200`
+					: `/api/transactions?from=${from}&to=${to}&limit=200&fields=quick`
 				: null,
 			fetcher,
 		);
@@ -303,9 +329,14 @@ export function DashboardClient() {
 			title="Daily Overview"
 			description="See daily sales and stock movement."
 			actions={
-				<DatePickerYMD
-					value={date}
-					onChange={onDateChange}
+				<DateRangeControls
+					from={from}
+					to={to}
+					preset={preset}
+					onPresetChange={onPresetChange}
+					onFromChange={onFromChange}
+					onToChange={onToChange}
+					onRangeChange={onRangeChange}
 				/>
 			}
 		>
@@ -329,20 +360,78 @@ export function DashboardClient() {
 				/>
 			) : (
 				<>
-					<StockAlertsPanel
-						rows={stockRecommendations}
-					/>
-					{!report.byProduct?.length ? (
-						<EmptyState
-							title="No data for this date"
-							description="No sales or stock activity has been recorded for this date yet."
+					<Card className="mb-4 border-amber-300/60 bg-amber-50/50 shadow-sm">
+						<CardContent className="pt-4">
+							<div className="flex flex-wrap items-center gap-2">
+								<p className="text-sm font-medium">
+									Needs attention:
+								</p>
+								<Link
+									href="/products?stockStatus=OUT"
+									className="rounded border bg-background px-2 py-1 text-xs hover:bg-accent/50"
+								>
+									{exceptionsSummary
+										?.counts
+										.outOfStock ?? 0}{" "}
+									out of stock
+								</Link>
+								<Link
+									href="/tabs?customerFilter=overdue"
+									className="rounded border bg-background px-2 py-1 text-xs hover:bg-accent/50"
+								>
+									{exceptionsSummary
+										?.counts
+										.overdueTabs ?? 0}{" "}
+									overdue tabs
+								</Link>
+								<Link
+									href="/products?priceFilter=missing"
+									className="rounded border bg-background px-2 py-1 text-xs hover:bg-accent/50"
+								>
+									{exceptionsSummary
+										?.counts.noPrice ?? 0}{" "}
+									no-price products
+								</Link>
+								<Link
+									href="/exceptions"
+									className="rounded border bg-background px-2 py-1 text-xs hover:bg-accent/50"
+								>
+									View exceptions
+								</Link>
+							</div>
+						</CardContent>
+					</Card>
+					<div className="mb-4">
+						<StockAlertsPanel
+							rows={stockRecommendations}
+							visibleRows={visibleStockRecommendations}
+							showAll={showAllStockRecommendations}
+							open={stockAlertsOpen}
+							hasExtraRows={
+								hasExtraStockRecommendations
+							}
+							onToggleShowAll={() =>
+								setShowAllStockRecommendations(
+									(prev) => !prev,
+								)
+							}
+							onToggleOpen={() =>
+								setStockAlertsOpen(
+									(prev) => !prev,
+								)
+							}
+							onOpenTrendsTab={() =>
+								onTabChange(
+									"trends-recommendations",
+								)
+							}
 						/>
-					) : (
-						<Tabs
-							value={activeTab}
-							onValueChange={onTabChange}
-							className="space-y-6"
-						>
+					</div>
+					<Tabs
+						value={activeTab}
+						onValueChange={onTabChange}
+						className="space-y-6"
+					>
 					<TabsList className="flex w-full items-center gap-1 overflow-x-auto">
 						<TabsTrigger
 							value="overview"
@@ -561,6 +650,13 @@ export function DashboardClient() {
 								</CardTitle>
 							</CardHeader>
 							<CardContent>
+								{report.byProduct.length === 0 ? (
+									<EmptyState
+										title="No product sales yet"
+										description="No product movement has been recorded for this date."
+									/>
+								) : (
+									<>
 								<div className="space-y-3 md:hidden">
 									{report.byProduct.map(
 										(item) => {
@@ -781,6 +877,8 @@ export function DashboardClient() {
 										</TableBody>
 									</Table>
 								</div>
+									</>
+								)}
 							</CardContent>
 						</Card>
 					</TabsContent>
@@ -819,6 +917,13 @@ export function DashboardClient() {
 										<p className="mb-2 text-sm text-muted-foreground">
 											Top Products by Units Sold
 										</p>
+									{report.trends.topProducts
+										.length === 0 ? (
+										<p className="text-sm text-muted-foreground">
+											No product trends yet for
+											this date.
+										</p>
+									) : (
 										<div className="space-y-2 text-sm">
 											{report.trends.topProducts.map(
 												(product) => (
@@ -841,9 +946,10 @@ export function DashboardClient() {
 												),
 											)}
 										</div>
-									</div>
-								</CardContent>
-							</Card>
+									)}
+								</div>
+							</CardContent>
+						</Card>
 
 							<Card className="shadow-md">
 								<CardHeader>
@@ -907,15 +1013,14 @@ export function DashboardClient() {
 									</CardTitle>
 								</CardHeader>
 								<CardContent>
-									{report.stockRecommendations
-										.length === 0 ? (
+									{stockRecommendations.length === 0 ? (
 										<p className="text-sm text-muted-foreground">
 											No purchase suggestions for this
 											date.
 										</p>
 									) : (
 									<div className="space-y-3">
-										{report.stockRecommendations.map(
+										{visibleStockRecommendations.map(
 											(item) => (
 												<div
 													key={item.productId}
@@ -977,6 +1082,21 @@ export function DashboardClient() {
 												</div>
 											),
 										)}
+										{hasExtraStockRecommendations && (
+											<button
+												type="button"
+												className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+												onClick={() =>
+													setShowAllStockRecommendations(
+														(prev) => !prev,
+													)
+												}
+											>
+												{showAllStockRecommendations
+													? "Show fewer recommendations"
+													: `Show all ${stockRecommendations.length} recommendations`}
+											</button>
+										)}
 									</div>
 								)}
 							</CardContent>
@@ -1018,8 +1138,7 @@ export function DashboardClient() {
 							/>
 						</div>
 					</TabsContent>
-						</Tabs>
-					)}
+					</Tabs>
 				</>
 			)}
 			<Dialog
@@ -1037,7 +1156,7 @@ export function DashboardClient() {
 							{txDrilldown.title}
 						</DialogTitle>
 						<DialogDescription className="text-xs leading-tight">
-							{date} transaction details shown in dashboard.
+							{from} to {to} transaction details shown in dashboard.
 						</DialogDescription>
 					</DialogHeader>
 					<div className="flex h-[60vh] min-h-0 flex-col overflow-hidden p-4">
@@ -1147,8 +1266,22 @@ export function DashboardClient() {
 
 function StockAlertsPanel({
 	rows,
+	visibleRows,
+	showAll,
+	open,
+	hasExtraRows,
+	onToggleOpen,
+	onToggleShowAll,
+	onOpenTrendsTab,
 }: {
 	rows: DailyReport["stockRecommendations"];
+	visibleRows: DailyReport["stockRecommendations"];
+	showAll: boolean;
+	open: boolean;
+	hasExtraRows: boolean;
+	onToggleOpen: () => void;
+	onToggleShowAll: () => void;
+	onOpenTrendsTab: () => void;
 }) {
 	if (rows.length === 0) return null;
 	const outOfStock = rows.filter(
@@ -1165,54 +1298,100 @@ function StockAlertsPanel({
 	return (
 		<Card className="border-destructive/30 bg-destructive/5 shadow-md">
 			<CardHeader className="pb-3">
-				<CardTitle className="flex items-center gap-2 text-base">
-					<AlertCircle className="h-4 w-4 text-destructive" />
-					Stock Alerts
-				</CardTitle>
-			</CardHeader>
-			<CardContent className="space-y-3">
-				<div className="flex flex-wrap items-center gap-2 text-xs">
-					<span className="rounded bg-destructive/10 px-2 py-1 font-medium text-destructive">
-						{outOfStock.length} out of stock
-					</span>
-					<span className="rounded bg-amber-500/10 px-2 py-1 font-medium text-amber-700">
-						{lowStock.length} low stock
-					</span>
-				</div>
-				<div className="space-y-2">
-					{rows.slice(0, 5).map((item) => (
-						<div
-							key={item.productId}
-							className="flex items-center justify-between gap-3 rounded-lg border bg-background p-2"
+				<div className="flex flex-wrap items-center justify-between gap-2">
+					<div className="flex flex-wrap items-center gap-2">
+						<CardTitle className="flex items-center gap-2 text-base">
+							<AlertCircle className="h-4 w-4 text-destructive" />
+							Stock Alerts
+						</CardTitle>
+						<span className="rounded bg-destructive/10 px-2 py-1 text-xs font-medium text-destructive">
+							{outOfStock.length} out of stock
+						</span>
+						<span className="rounded bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700">
+							{lowStock.length} low stock
+						</span>
+					</div>
+					<div className="flex items-center gap-2">
+						<button
+							type="button"
+							onClick={onToggleOpen}
+							className="inline-flex items-center gap-1 rounded border bg-background px-2 py-1 text-xs font-medium"
 						>
-							<div className="min-w-0">
-								<p className="truncate text-sm font-medium">
-									{item.productName}
-								</p>
-								<p className="text-xs text-muted-foreground">
-									Current: {item.currentUnits} | Reorder:{" "}
-									{item.reorderLevelUnits}
-								</p>
-							</div>
-							<span
-								className={cn(
-									"rounded px-2 py-0.5 text-xs font-medium",
-									item.priority === "HIGH"
-										? "bg-destructive/10 text-destructive"
-										: "bg-amber-500/10 text-amber-700",
-								)}
-							>
-								{item.priority}
-							</span>
-						</div>
-					))}
-					{rows.length > 5 && (
-						<p className="text-xs text-muted-foreground">
-							+{rows.length - 5} more in Trends & Recommendations.
-						</p>
-					)}
+							{open ? (
+								<>
+									<ChevronUp className="h-3.5 w-3.5" />
+									Collapse
+								</>
+							) : (
+								<>
+									<ChevronDown className="h-3.5 w-3.5" />
+									Expand
+								</>
+							)}
+						</button>
+					</div>
 				</div>
-			</CardContent>
+			</CardHeader>
+			{open && (
+				<CardContent className="space-y-3">
+					<div className="space-y-2">
+						{visibleRows.map((item) => (
+							<div
+								key={item.productId}
+								className="flex items-center justify-between gap-3 rounded-lg border bg-background p-2"
+							>
+								<div className="min-w-0">
+									<p className="truncate text-sm font-medium">
+										{item.productName}
+									</p>
+									<p className="text-xs text-muted-foreground">
+										Current: {item.currentUnits} | Reorder:{" "}
+										{item.reorderLevelUnits}
+									</p>
+								</div>
+								<span
+									className={cn(
+										"rounded px-2 py-0.5 text-xs font-medium",
+										item.priority === "HIGH"
+											? "bg-destructive/10 text-destructive"
+											: "bg-amber-500/10 text-amber-700",
+									)}
+								>
+									{item.priority}
+								</span>
+							</div>
+						))}
+					</div>
+					<div className="flex flex-wrap items-center gap-2">
+						<button
+							type="button"
+							onClick={onOpenTrendsTab}
+							className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+						>
+							Open Trends & Recommendations
+						</button>
+						{hasExtraRows && (
+							<button
+								type="button"
+								onClick={onToggleShowAll}
+								className="inline-flex items-center gap-1 rounded border bg-background px-2 py-1 text-xs font-medium"
+							>
+								{showAll ? (
+									<>
+										<ChevronUp className="h-3.5 w-3.5" />
+										Show less
+									</>
+								) : (
+									<>
+										<ChevronDown className="h-3.5 w-3.5" />
+										Show all
+									</>
+								)}
+							</button>
+						)}
+					</div>
+				</CardContent>
+			)}
 		</Card>
 	);
 }

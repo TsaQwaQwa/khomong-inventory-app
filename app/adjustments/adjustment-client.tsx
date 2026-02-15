@@ -11,7 +11,7 @@ import {
 	Pencil,
 } from "lucide-react";
 import { PageWrapper } from "@/components/page-wrapper";
-import { DatePickerYMD } from "@/components/date-picker-ymd";
+import { DateRangeControls } from "@/components/date-range-controls";
 import { LoadingForm } from "@/components/loading-state";
 import { EmptyState } from "@/components/empty-state";
 import { ProductSelect } from "@/components/product-select";
@@ -54,13 +54,14 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
-import { getTodayJHB } from "@/lib/date-utils";
 import { cn } from "@/lib/utils";
 import type {
 	Product,
 	AdjustmentReason,
 	AdjustmentItem,
 } from "@/lib/types";
+import { useGlobalDateRangeQuery } from "@/lib/use-global-date-range-query";
+import { postAdjustmentWithOfflineQueue } from "@/lib/offline-sales-queue";
 
 const fetcher = async (url: string) => {
 	const res = await fetch(url);
@@ -145,9 +146,15 @@ interface AdjustmentHistory {
 }
 
 export function AdjustmentsClient() {
-	const [date, setDate] = React.useState(
-		getTodayJHB(),
-	);
+	const {
+		from,
+		to: date,
+		preset,
+		onPresetChange,
+		onFromChange,
+		onToChange,
+		onRangeChange,
+	} = useGlobalDateRangeQuery();
 	const [items, setItems] = React.useState<
 		FormItem[]
 	>([
@@ -185,7 +192,7 @@ export function AdjustmentsClient() {
 		isLoading: adjustmentsLoading,
 		mutate: mutateHistory,
 	} = useSWR<AdjustmentHistory[]>(
-		`/api/adjustments?date=${date}`,
+		`/api/adjustments?from=${from}&to=${date}`,
 		fetcher,
 		{
 			onError: (err) =>
@@ -225,8 +232,11 @@ export function AdjustmentsClient() {
 		]);
 	};
 
-	const handleEditHistory = React.useCallback(
-		(history: AdjustmentHistory) => {
+	const openHistoryInForm = React.useCallback(
+		(
+			history: AdjustmentHistory,
+			options?: { forEdit?: boolean },
+		) => {
 			const loadedItems = history.items.map(
 				(item) => ({
 					productId: item.productId,
@@ -250,14 +260,46 @@ export function AdjustmentsClient() {
 							},
 						],
 			);
-			setEditingAdjustmentId(history.id);
+			setEditingAdjustmentId(
+				options?.forEdit ? history.id : null,
+			);
 			setIsFormOpen(true);
+		},
+		[],
+	);
+
+	const handleEditHistory = React.useCallback(
+		(history: AdjustmentHistory) => {
+			openHistoryInForm(history, {
+				forEdit: true,
+			});
 			toast.success(
 				"Adjustment loaded for editing",
 			);
 		},
-		[],
+		[openHistoryInForm],
 	);
+	const handleRepeatLastAdjustment =
+		React.useCallback(() => {
+			const latest =
+				adjustmentsHistory &&
+				adjustmentsHistory.length > 0
+					? adjustmentsHistory[0]
+					: null;
+			if (!latest) {
+				toast.error(
+					"No previous adjustment to repeat",
+				);
+				return;
+			}
+			openHistoryInForm(latest, {
+				forEdit: false,
+			});
+			toast.success("Last adjustment copied");
+		}, [
+			adjustmentsHistory,
+			openHistoryInForm,
+		]);
 
 	const removeItem = (index: number) => {
 		setItems(items.filter((_, i) => i !== index));
@@ -306,27 +348,44 @@ export function AdjustmentsClient() {
 		}
 
 		try {
-			const res = await fetch(
-				editingAdjustmentId
-					? `/api/adjustments/${editingAdjustmentId}`
-					: "/api/adjustments",
-				{
-					method: editingAdjustmentId
-						? "PATCH"
-						: "POST",
-					headers: {
-						"Content-Type": "application/json",
+			let res: Response;
+			if (editingAdjustmentId) {
+				res = await fetch(
+					`/api/adjustments/${editingAdjustmentId}`,
+					{
+						method: "PATCH",
+						headers: {
+							"Content-Type": "application/json",
+						},
+						body: JSON.stringify({
+							items: validItems,
+						}),
 					},
-					body: JSON.stringify(
-						editingAdjustmentId
-							? { items: validItems }
-							: {
-									date,
-									items: validItems,
-								},
-					),
-				},
-			);
+				);
+			} else {
+				const queueResult =
+					await postAdjustmentWithOfflineQueue({
+						date,
+						items: validItems,
+					});
+				if (queueResult.queued) {
+					toast.success(
+						"Offline: adjustment queued and will sync automatically.",
+					);
+					setItems([
+						{
+							productId: "",
+							unitsDelta: "",
+							reason: "",
+							note: "",
+						},
+					]);
+					setEditingAdjustmentId(null);
+					setIsFormOpen(false);
+					return;
+				}
+				res = queueResult.response;
+			}
 
 			if (!res.ok) {
 				const errorBody = await res
@@ -375,11 +434,30 @@ export function AdjustmentsClient() {
 			title="Stock Adjustments"
 			description="Record stock losses, gains, or corrections."
 			actions={
-				<div className="flex items-center gap-2">
-					<DatePickerYMD
-						value={date}
-						onChange={setDate}
+				<div className="flex flex-wrap items-start gap-2">
+					<DateRangeControls
+						from={from}
+						to={date}
+						preset={preset}
+						onPresetChange={onPresetChange}
+						onFromChange={onFromChange}
+						onToChange={onToChange}
+						onRangeChange={onRangeChange}
 					/>
+					<Button
+						type="button"
+						variant="outline"
+						className="self-start"
+						onClick={handleRepeatLastAdjustment}
+						disabled={
+							!(
+								adjustmentsHistory &&
+								adjustmentsHistory.length > 0
+							)
+						}
+					>
+						Repeat Last Adjustment
+					</Button>
 					<Button
 						type="button"
 						className="hidden"

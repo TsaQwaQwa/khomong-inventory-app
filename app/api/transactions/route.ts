@@ -23,6 +23,8 @@ export async function GET(req: Request) {
 
 	const url = new URL(req.url);
 	const date = url.searchParams.get("date");
+	const from = url.searchParams.get("from");
+	const to = url.searchParams.get("to");
 	const customerId =
 		url.searchParams.get("customerId");
 	const typeParam = (
@@ -69,6 +71,7 @@ export async function GET(req: Request) {
 				requestedType === "DIRECT_SALE");
 
 		let businessDayIdForDate: string | null = null;
+		let businessDayIdsForRange: string[] = [];
 		if (date) {
 			const day = await BusinessDay.findOne({
 				date,
@@ -76,6 +79,21 @@ export async function GET(req: Request) {
 			if (!day) return ok([]);
 			businessDayIdForDate = String(day._id);
 			tabMatch.businessDayId = businessDayIdForDate;
+		} else if (from && to) {
+			const days = await BusinessDay.find({
+				date: { $gte: from, $lte: to },
+			})
+				.select({ _id: 1 })
+				.lean();
+			businessDayIdsForRange = days.map((day) =>
+				String(day._id),
+			);
+			if (!businessDayIdsForRange.length) {
+				return ok([]);
+			}
+			tabMatch.businessDayId = {
+				$in: businessDayIdsForRange,
+			};
 		}
 
 		const [tabDocs, directSalesDocs] =
@@ -110,6 +128,12 @@ export async function GET(req: Request) {
 										businessDayId:
 											businessDayIdForDate,
 								  }
+								: businessDayIdsForRange.length > 0
+									? {
+											businessDayId: {
+												$in: businessDayIdsForRange,
+											},
+									  }
 								: {},
 					  )
 							.sort({ createdAt: -1 })

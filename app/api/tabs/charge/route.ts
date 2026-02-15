@@ -15,6 +15,7 @@ import { todayYMD } from "@/lib/dates";
 import { serializeDoc } from "@/lib/serialize";
 import { calculateSaleTotals } from "@/lib/sales-pricing";
 import { getCurrentStockByProductIds } from "@/lib/stock-availability";
+import { findBelowCostViolations } from "@/lib/margin-guardrails";
 import {
 	getScopeIdFromAuth,
 	toAuditObject,
@@ -176,6 +177,32 @@ export async function POST(req: Request) {
 			input.discountCents,
 		);
 		itemsWithPrice.push(...totals.items);
+		const belowCostViolations =
+			await findBelowCostViolations({
+				date,
+				lines: totals.items.map((line) => ({
+					productId: line.productId,
+					unitPriceCents: line.unitPriceCents,
+				})),
+			});
+		if (
+			belowCostViolations.length > 0 &&
+			!input.belowCostApproved
+		) {
+			const detail = belowCostViolations
+				.map(
+					(violation) =>
+						`${violation.productName} (sell ${violation.unitPriceCents}c, cost ${violation.baselineCostCents}c)`,
+				)
+				.join("; ");
+			return fail(
+				`Below-cost account sale detected: ${detail}. Confirm override to continue.`,
+				{
+					status: 409,
+					code: "BELOW_COST",
+				},
+			);
+		}
 
 		// Naive balance check (starter): compute current balance from ledger
 		const agg = await TabTransaction.aggregate([
