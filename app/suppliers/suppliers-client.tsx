@@ -40,6 +40,10 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { formatZAR } from "@/lib/money";
+import {
+	useOfflineCachedArraySWR,
+	useOfflineCachedSWR,
+} from "@/lib/use-offline-cached-swr";
 import type {
 	DailyReport,
 	Product,
@@ -127,40 +131,51 @@ export function SuppliersClient() {
 	);
 
 	const {
-		data: suppliers,
-		error: suppliersError,
-		isLoading: suppliersLoading,
-	} = useSWR<Supplier[]>(
-		"/api/suppliers",
+		items: suppliers,
+		error: effectiveSuppliersError,
+		isLoading: effectiveSuppliersLoading,
+		usingCachedData: usingCachedSuppliers,
+	} = useOfflineCachedArraySWR<Supplier>({
+		key: "/api/suppliers",
+		cacheKey: "suppliers:list",
 		fetcher,
-	);
+		onError: (err) => toast.error(err.message),
+	});
 	const { data: access } = useSWR<{
 		isAdmin: boolean;
 	}>("/api/session/access", fetcher);
 	const isAdmin = access?.isAdmin ?? false;
 	const [backfillLoading, setBackfillLoading] =
 		React.useState(false);
-	const { data: products = [] } = useSWR<Product[]>(
-		"/api/products",
+	const { items: products } = useOfflineCachedArraySWR<Product>({
+		key: "/api/products",
+		cacheKey: "products:list",
 		fetcher,
-	);
-	const { data: report } = useSWR<DailyReport>(
-		activeTab === "restock"
-			? `/api/reports/daily?from=${from}&to=${date}`
-			: null,
+	});
+	const { data: reportData } = useOfflineCachedSWR<
+		DailyReport
+	>({
+		key:
+			activeTab === "restock"
+				? `/api/reports/daily?from=${from}&to=${date}`
+				: null,
+		cacheKey: `suppliers:report:${from}:${date}`,
 		fetcher,
-	);
-	const { data: purchases = [] } = useSWR<Purchase[]>(
-		`/api/purchases?from=${from}&to=${date}&fields=lite`,
+	});
+	const { items: purchases } = useOfflineCachedArraySWR<Purchase>({
+		key: `/api/purchases?from=${from}&to=${date}&fields=lite`,
+		cacheKey: `suppliers:purchases:${from}:${date}`,
 		fetcher,
-	);
+	});
 	const {
-		data: supplierPrices = [],
+		items: supplierPrices,
 		mutate: mutateSupplierPrices,
-	} = useSWR<SupplierPrice[]>(
-		`/api/supplier-prices?asOf=${date}&fields=lite`,
+	} = useOfflineCachedArraySWR<SupplierPrice>({
+		key: `/api/supplier-prices?asOf=${date}&fields=lite`,
+		cacheKey: `suppliers:prices:${date}`,
 		fetcher,
-	);
+	});
+	const report = reportData;
 
 	const productNameById = React.useMemo(
 		() =>
@@ -487,6 +502,12 @@ export function SuppliersClient() {
 				/>
 			}
 		>
+			{usingCachedSuppliers && suppliers.length > 0 && (
+				<p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700">
+					Offline mode: showing cached suppliers data from this
+					device.
+				</p>
+			)}
 			<div className="mb-4 grid gap-3 sm:grid-cols-3">
 				<Card>
 					<CardContent className="pt-4">
@@ -543,14 +564,14 @@ export function SuppliersClient() {
 							<CardTitle>Supplier Directory</CardTitle>
 						</CardHeader>
 						<CardContent>
-							{suppliersLoading ? (
+							{effectiveSuppliersLoading ? (
 								<LoadingTable />
-							) : suppliersError ? (
+							) : effectiveSuppliersError ? (
 								<Alert variant="destructive">
 									<AlertCircle className="h-4 w-4" />
 									<AlertTitle>Error</AlertTitle>
 									<AlertDescription>
-										{suppliersError.message}
+										{effectiveSuppliersError.message}
 									</AlertDescription>
 								</Alert>
 							) : !supplierSummary.length ? (

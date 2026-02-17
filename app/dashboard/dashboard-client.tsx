@@ -59,6 +59,7 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { formatZAR } from "@/lib/money";
+import { useOfflineCachedSWR } from "@/lib/use-offline-cached-swr";
 import { cn } from "@/lib/utils";
 import type { DailyReport } from "@/lib/types";
 import { useGlobalDateRangeQuery } from "@/lib/use-global-date-range-query";
@@ -161,17 +162,15 @@ export function DashboardClient() {
 
 	const {
 		data: report,
-		error,
-		isLoading,
-	} = useSWR<DailyReport>(
-		`/api/reports/daily?from=${from}&to=${to}`,
+		error: effectiveError,
+		isLoading: effectiveLoading,
+		usingCachedData: usingCachedReport,
+	} = useOfflineCachedSWR<DailyReport>({
+		key: `/api/reports/daily?from=${from}&to=${to}`,
+		cacheKey: `dashboard:daily-report:${from}:${to}`,
 		fetcher,
-		{
-			onError: (err) => {
-				toast.error(err.message);
-			},
-		},
-	);
+		onError: (err) => toast.error(err.message),
+	});
 	const { data: exceptionsSummary } =
 		useSWR<ExceptionsSummary>(
 			"/api/exceptions/summary",
@@ -340,17 +339,22 @@ export function DashboardClient() {
 				/>
 			}
 		>
-			{isLoading ? (
+			{usingCachedReport && report && (
+				<p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700">
+					Offline mode: showing cached dashboard data from this device.
+				</p>
+			)}
+			{effectiveLoading ? (
 				<>
 					<LoadingCards className="mb-6" />
 					<LoadingTable />
 				</>
-			) : error ? (
+			) : effectiveError ? (
 				<Alert variant="destructive">
 					<AlertCircle className="h-4 w-4" />
 					<AlertTitle>Error</AlertTitle>
 					<AlertDescription>
-						{error.message}
+						{effectiveError.message}
 					</AlertDescription>
 				</Alert>
 			) : !report ? (

@@ -1,9 +1,10 @@
-const SHELL_CACHE = "kgomong-shell-v2";
-const API_CACHE = "kgomong-api-v2";
-const STATIC_CACHE = "kgomong-static-v2";
+const SHELL_CACHE = "kgomong-shell-v4";
+const API_CACHE = "kgomong-api-v4";
+const STATIC_CACHE = "kgomong-static-v4";
 const SHELL_URLS = [
 	"/",
 	"/dashboard",
+	"/offline",
 	"/manifest.webmanifest",
 	"/icon.svg",
 	"/icon-maskable.svg",
@@ -13,6 +14,43 @@ const AUTH_PATH_PREFIXES = [
 	"/sign-up",
 	"/sso-callback",
 ];
+const CLERK_QUERY_PREFIX = "__clerk_";
+const BASE_NAVIGATION_ROUTES = [];
+const ADMIN_NAVIGATION_ROUTES = [];
+
+const hasClerkQueryParams = (url) => {
+	for (const key of url.searchParams.keys()) {
+		if (key.startsWith(CLERK_QUERY_PREFIX)) {
+			return true;
+		}
+	}
+	return false;
+};
+
+const shouldCacheNavigationResponse = (response) => {
+	const responseUrl = new URL(response.url);
+	return (
+		response.ok &&
+		!response.redirected &&
+		!response.url.includes("/sign-in") &&
+		!hasClerkQueryParams(responseUrl)
+	);
+};
+
+const warmNavigationRoute = async (route) => {
+	const cache = await caches.open(SHELL_CACHE);
+	const cached = await cache.match(route);
+	if (cached) return;
+	try {
+		const network = await fetch(route, {
+			credentials: "include",
+		});
+		if (!shouldCacheNavigationResponse(network)) return;
+		await cache.put(route, network.clone());
+	} catch {
+		// best effort cache warming
+	}
+};
 
 self.addEventListener("install", (event) => {
 	event.waitUntil(
@@ -45,6 +83,19 @@ self.addEventListener("activate", (event) => {
 	);
 });
 
+self.addEventListener("message", (event) => {
+	const data = event.data;
+	if (!data || data.type !== "WARM_NAV_ROUTES") return;
+	const routes = Array.isArray(data.routes)
+		? data.routes
+		: [...BASE_NAVIGATION_ROUTES, ...ADMIN_NAVIGATION_ROUTES];
+	event.waitUntil(
+		Promise.allSettled(
+			routes.map((route) => warmNavigationRoute(route)),
+		),
+	);
+});
+
 self.addEventListener("fetch", (event) => {
 	const request = event.request;
 	if (request.method !== "GET") return;
@@ -54,9 +105,10 @@ self.addEventListener("fetch", (event) => {
 	const isAuthRoute = AUTH_PATH_PREFIXES.some((prefix) =>
 		url.pathname.startsWith(prefix),
 	);
+	const hasClerkParams = hasClerkQueryParams(url);
 
 	if (request.mode === "navigate") {
-		if (isAuthRoute) {
+		if (isAuthRoute || hasClerkParams) {
 			event.respondWith(fetch(request));
 			return;
 		}
@@ -64,21 +116,22 @@ self.addEventListener("fetch", (event) => {
 			(async () => {
 				try {
 					const network = await fetch(request);
-					const shouldCacheNavigation =
-						network.ok &&
-						!network.redirected &&
-						!network.url.includes("/sign-in");
-					if (shouldCacheNavigation) {
+					if (shouldCacheNavigationResponse(network)) {
 						const cache = await caches.open(SHELL_CACHE);
 						cache.put(request, network.clone());
+						cache.put(url.pathname, network.clone());
 					}
 					return network;
 				} catch {
 					const cache = await caches.open(SHELL_CACHE);
 					return (
 						(await cache.match(request)) ||
-						(await cache.match("/dashboard")) ||
-						(await cache.match("/"))
+						(await cache.match(url.pathname)) ||
+						(await cache.match("/offline")) ||
+						new Response("Offline and no cached page available.", {
+							status: 503,
+							headers: { "Content-Type": "text/plain" },
+						})
 					);
 				}
 			})(),
@@ -87,6 +140,32 @@ self.addEventListener("fetch", (event) => {
 	}
 
 	if (url.pathname.startsWith("/api/")) {
+		if (url.pathname === "/api/health") {
+			event.respondWith(
+				(async () => {
+					try {
+						return await fetch(request);
+					} catch {
+						return new Response(
+							JSON.stringify({
+								ok: false,
+								error: {
+									message: "Offline health probe failed.",
+								},
+							}),
+							{
+								status: 503,
+								headers: {
+									"Content-Type": "application/json",
+								},
+							},
+						);
+					}
+				})(),
+			);
+			return;
+		}
+
 		event.respondWith(
 			(async () => {
 				const cache = await caches.open(API_CACHE);

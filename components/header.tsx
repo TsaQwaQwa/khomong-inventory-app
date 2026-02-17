@@ -2,12 +2,13 @@
 
 import * as React from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { SignOutButton } from "@clerk/nextjs";
 import useSWR from "swr";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { GlobalCommandSearch } from "@/components/global-command-search";
+import { useOfflineAuthMode } from "@/lib/offline-auth-mode";
 import {
 	getOfflineQueueCount,
 	offlineQueueChangedEvent,
@@ -39,6 +40,16 @@ import {
 	Menu,
 	LogOut,
 } from "lucide-react";
+
+const GlobalCommandSearch = dynamic(
+	() =>
+		import("@/components/global-command-search").then(
+			(module) => module.GlobalCommandSearch,
+		),
+	{
+		ssr: false,
+	},
+);
 
 const navItems = [
 	{
@@ -128,8 +139,29 @@ const headerSummaryFetcher = async (url: string) => {
 	return (json?.data ?? json) as HeaderSummary;
 };
 
+const probeNetworkReachability = async () => {
+	const controller = new AbortController();
+	const timeoutId = window.setTimeout(
+		() => controller.abort(),
+		4000,
+	);
+	try {
+		const res = await fetch("/api/health", {
+			method: "GET",
+			cache: "no-store",
+			signal: controller.signal,
+		});
+		return res.ok;
+	} catch {
+		return false;
+	} finally {
+		window.clearTimeout(timeoutId);
+	}
+};
+
 export function Header() {
 	const pathname = usePathname();
+	const { clerkEnabled, offlineTrusted } = useOfflineAuthMode();
 	const [open, setOpen] = React.useState(false);
 	const [isOnline, setIsOnline] = React.useState(
 		true,
@@ -178,33 +210,45 @@ export function Header() {
 		[outOfStockCount, unreadAlertCount],
 	);
 	React.useEffect(() => {
-		const syncStatus = () => {
-			setIsOnline(navigator.onLine);
+		let cancelled = false;
+		const syncStatus = async () => {
 			setOfflineQueueCount(getOfflineQueueCount());
+			if (!navigator.onLine) {
+				if (!cancelled) setIsOnline(false);
+				return;
+			}
+			const reachable = await probeNetworkReachability();
+			if (!cancelled) setIsOnline(reachable);
 		};
-		syncStatus();
-		window.addEventListener("online", syncStatus);
+		void syncStatus();
+		const onNetworkChange = () => {
+			void syncStatus();
+		};
+		window.addEventListener("online", onNetworkChange);
 		window.addEventListener(
 			"offline",
-			syncStatus,
+			onNetworkChange,
 		);
 		window.addEventListener(
 			offlineQueueChangedEvent,
-			syncStatus,
+			onNetworkChange,
 		);
-		const id = window.setInterval(syncStatus, 5000);
+		const id = window.setInterval(() => {
+			void syncStatus();
+		}, 10000);
 		return () => {
+			cancelled = true;
 			window.removeEventListener(
 				"online",
-				syncStatus,
+				onNetworkChange,
 			);
 			window.removeEventListener(
 				"offline",
-				syncStatus,
+				onNetworkChange,
 			);
 			window.removeEventListener(
 				offlineQueueChangedEvent,
-				syncStatus,
+				onNetworkChange,
 			);
 			window.clearInterval(id);
 		};
@@ -325,17 +369,25 @@ export function Header() {
 							: ""}
 					</div>
 					<GlobalCommandSearch />
-					<SignOutButton redirectUrl="/sign-in">
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							className="hidden md:inline-flex"
-						>
-							<LogOut className="mr-2 h-4 w-4" />
-							Logout
-						</Button>
-					</SignOutButton>
+					{clerkEnabled ? (
+						<SignOutButton redirectUrl="/sign-in">
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="hidden md:inline-flex"
+							>
+								<LogOut className="mr-2 h-4 w-4" />
+								Logout
+							</Button>
+						</SignOutButton>
+					) : (
+						<div className="hidden rounded-md border px-3 py-1.5 text-xs text-muted-foreground md:inline-flex">
+							{offlineTrusted
+								? "Offline session"
+								: "Reconnect to sign in"}
+						</div>
+					)}
 				</div>
 
 				{/* Mobile Navigation */}
@@ -412,19 +464,27 @@ export function Header() {
 							})}
 						</nav>
 						<div className="mt-4 border-t pt-4">
-							<SignOutButton redirectUrl="/sign-in">
-								<Button
-									type="button"
-									variant="outline"
-									className="w-full justify-start"
-									onClick={() =>
-										setOpen(false)
-									}
-								>
-									<LogOut className="mr-2 h-4 w-4" />
-									Logout
-								</Button>
-							</SignOutButton>
+							{clerkEnabled ? (
+								<SignOutButton redirectUrl="/sign-in">
+									<Button
+										type="button"
+										variant="outline"
+										className="w-full justify-start"
+										onClick={() =>
+											setOpen(false)
+										}
+									>
+										<LogOut className="mr-2 h-4 w-4" />
+										Logout
+									</Button>
+								</SignOutButton>
+							) : (
+								<div className="rounded-md border px-3 py-2 text-xs text-muted-foreground">
+									{offlineTrusted
+										? "Offline session active"
+										: "Reconnect to sign in"}
+								</div>
+							)}
 						</div>
 					</SheetContent>
 				</Sheet>

@@ -75,6 +75,7 @@ function pushQuickAddDebugLog(
 	event: string,
 	meta?: Record<string, unknown>,
 ) {
+	if (process.env.NODE_ENV !== "development") return;
 	if (typeof window === "undefined") return;
 	if (!Array.isArray(window.__quickAddLogs)) {
 		window.__quickAddLogs = [];

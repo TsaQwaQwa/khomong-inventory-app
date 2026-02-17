@@ -2,8 +2,12 @@
 /* eslint-disable max-len */
 
 import * as React from "react";
-import { useSearchParams } from "next/navigation";
-import useSWR, { type KeyedMutator } from "swr";
+import {
+	usePathname,
+	useRouter,
+	useSearchParams,
+} from "next/navigation";
+import { type KeyedMutator } from "swr";
 import { toast } from "sonner";
 import {
 	Plus,
@@ -56,6 +60,7 @@ import { MoneyInput } from "@/components/money-input";
 import { formatZAR } from "@/lib/money";
 import { getTodayJHB } from "@/lib/date-utils";
 import { jsonFetcher } from "@/lib/swr";
+import { useOfflineCachedArraySWR } from "@/lib/use-offline-cached-swr";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/lib/types";
 
@@ -83,7 +88,13 @@ interface CurrentStockRow {
 }
 type ProductWithStock = Product & CurrentStockRow;
 
-export function ProductsClient() {
+export function ProductsClient({
+	showFilters = true,
+}: {
+	showFilters?: boolean;
+}) {
+	const router = useRouter();
+	const pathname = usePathname();
 	const searchParams = useSearchParams();
 	const focusedProductId =
 		searchParams.get("productId");
@@ -91,17 +102,29 @@ export function ProductsClient() {
 		"stockStatus",
 	);
 	const priceFilter = searchParams.get("priceFilter");
+	const stockStatusUiValue =
+		stockStatusFilter === "OUT" ||
+		stockStatusFilter === "LOW" ||
+		stockStatusFilter === "OK"
+			? stockStatusFilter
+			: "all";
+	const priceFilterUiValue =
+		priceFilter === "missing" ||
+		priceFilter === "set"
+			? priceFilter
+			: "all";
 	const {
-		data: products,
-		error,
-		isLoading,
+		items: products,
+		error: effectiveError,
+		isLoading: effectiveLoading,
 		mutate,
-	} = useSWR<ProductWithStock[]>(
-		"/api/products?includeStock=1",
-		{
+		usingCachedData: usingCachedProducts,
+	} = useOfflineCachedArraySWR<ProductWithStock>({
+		key: "/api/products?includeStock=1",
+		cacheKey: "products:includeStock=1",
+		fetcher: (url) => jsonFetcher<ProductWithStock[]>(url),
 		onError: (err) => toast.error(err.message),
-		},
-	);
+	});
 	const visibleProducts = React.useMemo(() => {
 		if (!products) return [];
 		let filtered = products;
@@ -120,6 +143,12 @@ export function ProductsClient() {
 				(product) =>
 					!product.currentPriceCents ||
 					product.currentPriceCents <= 0,
+			);
+		}
+		if (priceFilter === "set") {
+			filtered = filtered.filter(
+				(product) =>
+					(product.currentPriceCents ?? 0) > 0,
 			);
 		}
 		if (!focusedProductId) return filtered;
@@ -148,6 +177,40 @@ export function ProductsClient() {
 		setSelectedProduct(product);
 		setPriceDialogOpen(true);
 	};
+	const setFilterParam = (
+		key: "stockStatus" | "priceFilter",
+		value: string,
+	) => {
+		const params = new URLSearchParams(
+			searchParams.toString(),
+		);
+		params.delete("productId");
+		if (value === "all") {
+			params.delete(key);
+		} else {
+			params.set(key, value);
+		}
+		const query = params.toString();
+		router.push(
+			query ? `${pathname}?${query}` : pathname,
+		);
+	};
+	const clearFilters = () => {
+		const params = new URLSearchParams(
+			searchParams.toString(),
+		);
+		params.delete("productId");
+		params.delete("stockStatus");
+		params.delete("priceFilter");
+		const query = params.toString();
+		router.push(
+			query ? `${pathname}?${query}` : pathname,
+		);
+	};
+	const hasActiveFilters =
+		stockStatusUiValue !== "all" ||
+		priceFilterUiValue !== "all" ||
+		Boolean(focusedProductId);
 
 	return (
 		<PageWrapper
@@ -173,14 +236,19 @@ export function ProductsClient() {
 				</Dialog>
 			}
 		>
-			{isLoading ? (
+			{usingCachedProducts && products.length > 0 && (
+				<p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700">
+					Offline mode: showing cached products from this device.
+				</p>
+			)}
+			{effectiveLoading ? (
 				<LoadingTable />
-			) : error ? (
+			) : effectiveError ? (
 				<Alert variant="destructive">
 					<AlertCircle className="h-4 w-4" />
 					<AlertTitle>Error</AlertTitle>
 					<AlertDescription>
-						{error.message}
+						{effectiveError.message}
 					</AlertDescription>
 				</Alert>
 			) : !products?.length ? (
@@ -189,7 +257,89 @@ export function ProductsClient() {
 					description="Get started by adding your first product."
 				/>
 			) : (
-				<Card className="shadow-lg">
+				<div className="space-y-3">
+					{showFilters ? (
+						<Card>
+							<CardContent className="grid gap-3 pt-6 md:grid-cols-[1fr_1fr_auto] md:items-end">
+								<div className="space-y-1">
+									<Label htmlFor="stock-filter">
+										Stock Filter
+									</Label>
+									<Select
+										value={stockStatusUiValue}
+										onValueChange={(value) =>
+											setFilterParam(
+												"stockStatus",
+												value,
+											)
+										}
+									>
+										<SelectTrigger id="stock-filter">
+											<SelectValue placeholder="All stock levels" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="all">
+												All stock levels
+											</SelectItem>
+											<SelectItem value="OUT">
+												Out of stock
+											</SelectItem>
+											<SelectItem value="LOW">
+												Low stock
+											</SelectItem>
+											<SelectItem value="OK">
+												In stock
+											</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="space-y-1">
+									<Label htmlFor="price-filter">
+										Price Filter
+									</Label>
+									<Select
+										value={priceFilterUiValue}
+										onValueChange={(value) =>
+											setFilterParam(
+												"priceFilter",
+												value,
+											)
+										}
+									>
+										<SelectTrigger id="price-filter">
+											<SelectValue placeholder="All prices" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="all">
+												All prices
+											</SelectItem>
+											<SelectItem value="missing">
+												Missing price
+											</SelectItem>
+											<SelectItem value="set">
+												Price set
+											</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="flex items-center gap-2">
+									<Button
+										type="button"
+										variant="outline"
+										onClick={clearFilters}
+										disabled={!hasActiveFilters}
+									>
+										Clear Filters
+									</Button>
+									<p className="text-xs text-muted-foreground">
+										{visibleProducts.length} of{" "}
+										{products.length} shown
+									</p>
+								</div>
+							</CardContent>
+						</Card>
+					) : null}
+					<Card className="shadow-lg">
 					<CardContent className="pt-6">
 						<div className="space-y-3 md:hidden">
 							{visibleProducts.map((product) => {
@@ -389,7 +539,8 @@ export function ProductsClient() {
 							</Table>
 						</div>
 					</CardContent>
-				</Card>
+					</Card>
+				</div>
 			)}
 
 			{/* Edit Product Dialog */}

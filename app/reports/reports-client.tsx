@@ -61,6 +61,10 @@ import {
 } from "@/lib/date-utils";
 import { addDays } from "@/lib/dates";
 import { formatZAR } from "@/lib/money";
+import {
+	useOfflineCachedArraySWR,
+	useOfflineCachedSWR,
+} from "@/lib/use-offline-cached-swr";
 import * as XLSX from "xlsx";
 import type {
 	Customer,
@@ -448,9 +452,13 @@ export function ReportsClient() {
 
 	const {
 		data: report,
-		error,
-		isLoading,
-	} = useSWR<RangeReport>(reportQuery, fetcher, {
+		error: effectiveError,
+		isLoading: effectiveLoading,
+		usingCachedData: usingCachedReport,
+	} = useOfflineCachedSWR<RangeReport>({
+		key: reportQuery,
+		cacheKey: `reports:range:${reportQuery}`,
+		fetcher,
 		onError: (err) => toast.error(err.message),
 	});
 	const { data: compareReport } = useSWR<RangeReport>(
@@ -458,16 +466,24 @@ export function ReportsClient() {
 		fetcher,
 	);
 
-	const { data: products = [] } = useSWR<Product[]>(
-		"/api/products",
-		fetcher,
-	);
-	const { data: suppliers = [] } = useSWR<
-		Supplier[]
-	>("/api/suppliers", fetcher);
-	const { data: customers = [] } = useSWR<
-		Customer[]
-	>("/api/customers", fetcher);
+	const { items: products } =
+		useOfflineCachedArraySWR<Product>({
+			key: "/api/products",
+			cacheKey: "products:list",
+			fetcher,
+		});
+	const { items: suppliers } =
+		useOfflineCachedArraySWR<Supplier>({
+			key: "/api/suppliers",
+			cacheKey: "suppliers:list",
+			fetcher,
+		});
+	const { items: customers } =
+		useOfflineCachedArraySWR<Customer>({
+			key: "/api/customers",
+			cacheKey: "customers:list",
+			fetcher,
+		});
 
 	const clearFilters = () => {
 		setQuery({
@@ -983,13 +999,18 @@ export function ReportsClient() {
 				</CardContent>
 			</Card>
 
-			{isLoading ? (
+			{usingCachedReport && report && (
+				<p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700">
+					Offline mode: showing cached report data from this device.
+				</p>
+			)}
+			{effectiveLoading ? (
 				<LoadingCards />
-			) : error ? (
+			) : effectiveError ? (
 				<Alert variant="destructive">
 					<AlertCircle className="h-4 w-4" />
 					<AlertTitle>Error</AlertTitle>
-					<AlertDescription>{error.message}</AlertDescription>
+					<AlertDescription>{effectiveError.message}</AlertDescription>
 				</Alert>
 			) : !report ? (
 				<EmptyState

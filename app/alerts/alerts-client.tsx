@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import useSWR from "swr";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { AlertCircle } from "lucide-react";
 import { PageWrapper } from "@/components/page-wrapper";
@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/alert";
 import { EmptyState } from "@/components/empty-state";
 import { formatDateDisplay } from "@/lib/date-utils";
+import { useOfflineCachedArraySWR } from "@/lib/use-offline-cached-swr";
 
 type AlertStatus = "UNREAD" | "READ";
 type AlertPriority = "HIGH" | "MEDIUM" | "LOW";
@@ -30,6 +31,11 @@ interface InboxAlert {
 	priority: AlertPriority;
 	title: string;
 	detail: string;
+	affectedCount?: number;
+	items?: Array<{
+		productId: string;
+		label: string;
+	}>;
 	status: AlertStatus;
 	createdAt?: string;
 }
@@ -48,27 +54,25 @@ const alertsFetcher = async (url: string) => {
 };
 
 export function AlertsClient() {
+	const router = useRouter();
+
 	const {
-		data: alerts = [],
-		error,
-		isLoading,
+		data: alertsData,
+		error: effectiveError,
+		isLoading: effectiveLoading,
 		mutate,
-	} = useSWR<InboxAlert[]>(
-		"/api/alerts?status=all&limit=500",
-		alertsFetcher,
-		{
-			onError: (err) => toast.error(err.message),
-		},
-	);
+		usingCachedData: usingCachedAlerts,
+		items: alerts,
+	} = useOfflineCachedArraySWR<InboxAlert>({
+		key: "/api/alerts?status=all&limit=500",
+		cacheKey: "alerts:list:all:500",
+		fetcher: alertsFetcher,
+		onError: (err) => toast.error(err.message),
+	});
 
 	const displayAlerts = React.useMemo(
 		() =>
 			[...alerts].sort((a, b) => {
-				if (a.status !== b.status) {
-					return a.status === "UNREAD"
-						? -1
-						: 1;
-				}
 				const aTime = new Date(
 					a.createdAt ?? a.date,
 				).getTime();
@@ -121,12 +125,9 @@ export function AlertsClient() {
 		}
 	};
 
-	const markOne = async (
-		alertId: string,
-		status: AlertStatus,
-	) => {
+	const markOneRead = async (alertId: string) => {
 		try {
-			await updateStatus([alertId], status);
+			await updateStatus([alertId], "READ");
 			mutate();
 		} catch (err) {
 			toast.error(
@@ -137,10 +138,30 @@ export function AlertsClient() {
 		}
 	};
 
+	const getAlertBrowseHref = (alert: InboxAlert) => {
+		if (alert.type === "OUT_OF_STOCK") {
+			return "/products?stockStatus=OUT";
+		}
+		if (alert.type === "LOW_STOCK") {
+			return "/products?stockStatus=LOW";
+		}
+		if (alert.type === "DAILY_PURCHASE_PLAN") {
+			return "/products?stockStatus=LOW";
+		}
+		return "/products";
+	};
+
+	const handleAlertClick = (alert: InboxAlert) => {
+		if (alert.status === "UNREAD") {
+			void markOneRead(alert.id);
+		}
+		router.push(getAlertBrowseHref(alert));
+	};
+
 	return (
 		<PageWrapper
 			title="Alerts Inbox"
-			description="Review stock alerts and mark read/unread."
+			description="Click an alert to open its related view."
 			actions={
 				<Button
 					type="button"
@@ -158,15 +179,20 @@ export function AlertsClient() {
 				</Button>
 			}
 		>
-			{error ? (
+			{usingCachedAlerts && alerts.length > 0 && (
+				<p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700">
+					Offline mode: showing cached alerts from this device.
+				</p>
+			)}
+			{effectiveError ? (
 				<Alert variant="destructive">
 					<AlertCircle className="h-4 w-4" />
 					<AlertTitle>Error</AlertTitle>
 					<AlertDescription>
-						{error.message}
+						{effectiveError.message}
 					</AlertDescription>
 				</Alert>
-			) : isLoading ? (
+			) : effectiveLoading ? (
 				<p className="text-sm text-muted-foreground">
 					Loading alerts...
 				</p>
@@ -179,10 +205,22 @@ export function AlertsClient() {
 				displayAlerts.map((alert) => (
 					<Card
 						key={alert.id}
+						role="button"
+						tabIndex={0}
+						onClick={() => handleAlertClick(alert)}
+						onKeyDown={(e) => {
+							if (
+								e.key === "Enter" ||
+								e.key === " "
+							) {
+								e.preventDefault();
+								handleAlertClick(alert);
+							}
+						}}
 						className={
 							alert.status === "UNREAD"
-								? "border-amber-400 bg-amber-50/40"
-								: "opacity-80"
+								? "border-amber-400 bg-amber-50/40 cursor-pointer"
+								: "opacity-80 cursor-pointer"
 						}
 					>
 						<CardHeader className="pb-2">
@@ -217,37 +255,9 @@ export function AlertsClient() {
 						</CardHeader>
 						<CardContent className="space-y-2 text-sm">
 							<p>{alert.detail}</p>
-							<div className="flex gap-2">
-								{alert.status === "UNREAD" ? (
-									<Button
-										type="button"
-										size="sm"
-										variant="outline"
-										onClick={() =>
-											markOne(
-												alert.id,
-												"READ",
-											)
-										}
-									>
-										Mark Read
-									</Button>
-								) : (
-									<Button
-										type="button"
-										size="sm"
-										variant="outline"
-										onClick={() =>
-											markOne(
-												alert.id,
-												"UNREAD",
-											)
-										}
-									>
-										Mark Unread
-									</Button>
-								)}
-							</div>
+							<p className="text-xs text-muted-foreground">
+								Open related products
+							</p>
 						</CardContent>
 					</Card>
 				))

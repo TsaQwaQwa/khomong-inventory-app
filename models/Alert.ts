@@ -19,6 +19,10 @@ export interface AlertDoc {
 	title: string;
 	detail: string;
 	affectedCount?: number;
+	items?: Array<{
+		productId: string;
+		label: string;
+	}>;
 	dedupeKey: string;
 	status: AlertStatus;
 	createdAt: Date;
@@ -38,6 +42,19 @@ const AlertSchema = new Schema<AlertDoc>(
 		title: { type: String, required: true },
 		detail: { type: String, required: true },
 		affectedCount: { type: Number },
+		items: [
+			{
+				_id: false,
+				productId: {
+					type: String,
+					required: true,
+				},
+				label: {
+					type: String,
+					required: true,
+				},
+			},
+		],
 		dedupeKey: {
 			type: String,
 			required: true,

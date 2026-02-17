@@ -2,7 +2,6 @@
 /* eslint-disable max-len */
 
 import * as React from "react";
-import useSWR from "swr";
 import { toast } from "sonner";
 import {
 	Plus,
@@ -55,6 +54,7 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { useOfflineCachedArraySWR } from "@/lib/use-offline-cached-swr";
 import type {
 	Product,
 	AdjustmentReason,
@@ -175,29 +175,33 @@ export function AdjustmentsClient() {
 	] = React.useState<string | null>(null);
 
 	const {
-		data: products,
-		error,
-		isLoading,
+		items: products,
+		error: productsError,
+		isLoading: productsLoading,
 		mutate: mutateProducts,
-	} = useSWR<Product[]>(
-		"/api/products",
+		usingCachedData: usingCachedProducts,
+	} = useOfflineCachedArraySWR<Product>({
+		key: "/api/products",
+		cacheKey: "products:list",
 		fetcher,
-		{
-			onError: (err) => toast.error(err.message),
-		},
-	);
+		onError: (err) => toast.error(err.message),
+	});
 	const {
-		data: adjustmentsHistory,
+		items: adjustmentsHistory,
 		error: adjustmentsError,
 		isLoading: adjustmentsLoading,
 		mutate: mutateHistory,
-	} = useSWR<AdjustmentHistory[]>(
-		`/api/adjustments?from=${from}&to=${date}`,
+		usingCachedData: usingCachedHistory,
+	} = useOfflineCachedArraySWR<AdjustmentHistory>({
+		key: `/api/adjustments?from=${from}&to=${date}`,
+		cacheKey: `adjustments:${from}:${date}`,
 		fetcher,
-		{
-			onError: (err) => toast.error(err.message),
-		},
-	);
+		onError: (err) => toast.error(err.message),
+	});
+	const usingCachedData = usingCachedProducts || usingCachedHistory;
+	const effectiveLoading =
+		productsLoading || adjustmentsLoading;
+	const effectiveError = productsError ?? adjustmentsError;
 
 	const productMap = React.useMemo(
 		() =>
@@ -475,14 +479,22 @@ export function AdjustmentsClient() {
 				</div>
 			}
 		>
-			{isLoading || adjustmentsLoading ? (
+			{usingCachedData &&
+				(products.length > 0 ||
+					adjustmentsHistory.length > 0) && (
+					<p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700">
+						Offline mode: showing cached adjustments data from this
+						device.
+					</p>
+				)}
+			{effectiveLoading ? (
 				<LoadingForm />
-			) : error || adjustmentsError ? (
+			) : effectiveError ? (
 				<Alert variant="destructive">
 					<AlertCircle className="h-4 w-4" />
 					<AlertTitle>Error</AlertTitle>
 					<AlertDescription>
-						{(error ?? adjustmentsError)
+						{effectiveError
 							?.message ??
 							"Failed to load adjustments"}
 					</AlertDescription>

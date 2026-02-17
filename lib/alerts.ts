@@ -23,7 +23,10 @@ export async function syncStockAlertsForDay({
 		title: string;
 		detail: string;
 		affectedCount: number;
-		items: string[];
+		items: Array<{
+			productId: string;
+			label: string;
+		}>;
 	}> = [];
 
 	if (out.length > 0) {
@@ -33,7 +36,10 @@ export async function syncStockAlertsForDay({
 			title: "Out of stock products",
 			detail: `${out.length} product(s) are out of stock.`,
 			affectedCount: out.length,
-			items: out.slice(0, 6).map((r) => r.productName),
+			items: out.map((r) => ({
+				productId: r.productId,
+				label: r.productName,
+			})),
 		});
 	}
 	if (low.length > 0) {
@@ -43,7 +49,10 @@ export async function syncStockAlertsForDay({
 			title: "Low stock products",
 			detail: `${low.length} product(s) are below reorder level.`,
 			affectedCount: low.length,
-			items: low.slice(0, 6).map((r) => r.productName),
+			items: low.map((r) => ({
+				productId: r.productId,
+				label: r.productName,
+			})),
 		});
 	}
 	if (recs.length > 0) {
@@ -54,10 +63,10 @@ export async function syncStockAlertsForDay({
 			detail:
 				"Suggested quantities based on recent sell-through and reorder levels.",
 			affectedCount: recs.length,
-			items: recs.slice(0, 8).map(
-				(rec) =>
-					`${rec.productName} (${rec.recommendedOrderUnits}u)`,
-			),
+			items: recs.map((rec) => ({
+				productId: rec.productId,
+				label: `${rec.productName} (${rec.recommendedOrderUnits}u)`,
+			})),
 		});
 	}
 
@@ -74,6 +83,7 @@ export async function syncStockAlertsForDay({
 					title: definition.title,
 					detail: definition.detail,
 					affectedCount: definition.affectedCount,
+					items: definition.items,
 				},
 				$setOnInsert: {
 					status: "UNREAD",

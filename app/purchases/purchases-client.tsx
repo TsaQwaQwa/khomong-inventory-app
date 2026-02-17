@@ -2,7 +2,6 @@
 /* eslint-disable max-len */
 
 import * as React from "react";
-import useSWR from "swr";
 import { toast } from "sonner";
 import {
 	Plus,
@@ -66,6 +65,7 @@ import type {
 import { jsonFetcher } from "@/lib/swr";
 import { useGlobalDateRangeQuery } from "@/lib/use-global-date-range-query";
 import { postPurchaseWithOfflineQueue } from "@/lib/offline-sales-queue";
+import { useOfflineCachedArraySWR } from "@/lib/use-offline-cached-swr";
 
 const fetcher = async (url: string) => {
 	const res = await fetch(url);
@@ -98,32 +98,30 @@ export function PurchasesClient() {
 		React.useState<Purchase | null>(null);
 
 	const {
-		data: purchases,
-		error,
-		isLoading,
+		items: purchases,
+		error: effectiveError,
+		isLoading: effectiveLoading,
 		mutate,
-	} = useSWR<Purchase[]>(
-		`/api/purchases?from=${from}&to=${date}`,
+		usingCachedData: usingCachedPurchases,
+	} = useOfflineCachedArraySWR<Purchase>({
+		key: `/api/purchases?from=${from}&to=${date}`,
+		cacheKey: `purchases:${from}:${date}`,
 		fetcher,
-		{
-			onError: (err) => toast.error(err.message),
-		},
-	);
-
-	const { data: products } = useSWR<Product[]>(
-		"/api/products",
+		onError: (err) => toast.error(err.message),
+	});
+	const { items: products } = useOfflineCachedArraySWR<Product>({
+		key: "/api/products",
+		cacheKey: "products:list",
 		fetcher,
-	);
-	const {
-		data: suppliers,
-	} = useSWR<Supplier[]>(
-		"/api/suppliers",
+	});
+	const { items: suppliers } = useOfflineCachedArraySWR<Supplier>({
+		key: "/api/suppliers",
+		cacheKey: "suppliers:list",
 		fetcher,
-	);
+	});
 
 	const normalizedProducts = React.useMemo(
-		() =>
-			Array.isArray(products) ? products : [],
+		() => (Array.isArray(products) ? products : []),
 		[products],
 	);
 	const latestPurchase = React.useMemo(
@@ -204,14 +202,19 @@ export function PurchasesClient() {
 				</div>
 			}
 		>
-			{isLoading ? (
+			{usingCachedPurchases && purchases.length > 0 && (
+				<p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700">
+					Offline mode: showing cached purchases from this device.
+				</p>
+			)}
+			{effectiveLoading ? (
 				<LoadingTable />
-			) : error ? (
+			) : effectiveError ? (
 				<Alert variant="destructive">
 					<AlertCircle className="h-4 w-4" />
 					<AlertTitle>Error</AlertTitle>
 					<AlertDescription>
-						{error.message}
+						{effectiveError.message}
 					</AlertDescription>
 				</Alert>
 			) : !purchases?.length ? (

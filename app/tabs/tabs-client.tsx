@@ -79,6 +79,10 @@ import {
 	postSaleWithOfflineQueue,
 	postTabPaymentWithOfflineQueue,
 } from "@/lib/offline-sales-queue";
+import {
+	writeOfflineResource,
+} from "@/lib/offline-resource-cache";
+import { useOfflineCachedArraySWR } from "@/lib/use-offline-cached-swr";
 import { formatZAR } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { useGlobalDateRangeQuery } from "@/lib/use-global-date-range-query";
@@ -184,6 +188,18 @@ interface TabTransactionHistory {
 	reversalReason?: string;
 	isReversal?: boolean;
 	isReversed?: boolean;
+}
+
+interface QueuedTransactionDraft {
+	type: TabTransactionHistory["type"];
+	date: string | null;
+	customerId: string | null;
+	customerName: string;
+	amountCents: number;
+	paymentMethod?: PaymentMethod;
+	note?: string;
+	reference?: string;
+	items?: TabTransactionHistory["items"];
 }
 
 interface TabsClientProps {
@@ -326,16 +342,69 @@ export function TabsClient({
 		error: productsError,
 		isLoading: productsLoading,
 	} = useSWR<Product[]>("/api/products", fetcher);
+	const transactionsCacheKey = React.useMemo(
+		() => `transactions:${from}:${date}:limit=200`,
+		[from, date],
+	);
 	const {
-		data: transactionsHistory,
-		isLoading: transactionsLoading,
+		items: transactionsHistory,
+		cachedData: cachedTransactions,
+		isLoading: effectiveTransactionsLoading,
 		mutate: mutateTransactions,
-	} = useSWR<TabTransactionHistory[]>(
-		`/api/transactions?from=${from}&to=${date}&limit=200`,
+		usingCachedData: usingCachedTransactions,
+	} = useOfflineCachedArraySWR<TabTransactionHistory>({
+		key: `/api/transactions?from=${from}&to=${date}&limit=200`,
+		cacheKey: transactionsCacheKey,
 		fetcher,
-		{
-			onError: (err) => toast.error(err.message),
+		onError: (err) => toast.error(err.message),
+	});
+	const appendQueuedTransaction = React.useCallback(
+		(draft: QueuedTransactionDraft) => {
+			const optimisticTxn: TabTransactionHistory = {
+				id: `offline_${Date.now()}_${Math.random()
+					.toString(36)
+					.slice(2, 8)}`,
+				date: draft.date,
+				customerId: draft.customerId,
+				customerName: draft.customerName,
+				type: draft.type,
+				amountCents: draft.amountCents,
+				paymentMethod: draft.paymentMethod,
+				note: draft.note,
+				reference: draft.reference,
+				createdAt: new Date().toISOString(),
+				items: draft.items,
+				isReversal: false,
+				isReversed: false,
+			};
+			void mutateTransactions(
+				(current) => {
+					const base = Array.isArray(current)
+						? current
+						: Array.isArray(cachedTransactions)
+							? cachedTransactions
+							: [];
+					const next = [
+						optimisticTxn,
+						...base,
+					];
+					void writeOfflineResource(
+						transactionsCacheKey,
+						next,
+					);
+					return next;
+				},
+				{
+					revalidate: false,
+					populateCache: true,
+				},
+			);
 		},
+		[
+			cachedTransactions,
+			mutateTransactions,
+			transactionsCacheKey,
+		],
 	);
 	const normalizedProducts = React.useMemo(
 		() =>
@@ -1373,6 +1442,19 @@ export function TabsClient({
 														null,
 													);
 												}}
+												onQueued={(
+													draft,
+												) => {
+													appendQueuedTransaction(
+														draft,
+													);
+													setDirectSaleDialogOpen(
+														false,
+													);
+													setRepeatDirectSeed(
+														null,
+													);
+												}}
 											/>
 										</DialogContent>
 									</Dialog>
@@ -1442,6 +1524,19 @@ export function TabsClient({
 														null,
 													);
 												}}
+												onQueued={(
+													draft,
+												) => {
+													appendQueuedTransaction(
+														draft,
+													);
+													setSaleDialogOpen(
+														false,
+													);
+													setRepeatAccountSeed(
+														null,
+													);
+												}}
 											/>
 										</DialogContent>
 									</Dialog>
@@ -1482,6 +1577,16 @@ export function TabsClient({
 												onSuccess={() => {
 													mutateCustomers();
 													mutateTransactions();
+													setPaymentDialogOpen(
+														false,
+													);
+												}}
+												onQueued={(
+													draft,
+												) => {
+													appendQueuedTransaction(
+														draft,
+													);
 													setPaymentDialogOpen(
 														false,
 													);
@@ -1557,7 +1662,13 @@ export function TabsClient({
 									</div>
 								</CardHeader>
 								<CardContent>
-									{transactionsLoading ? (
+									{usingCachedTransactions && (
+										<p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700">
+											Offline mode: showing cached transactions from this
+											device.
+										</p>
+									)}
+									{effectiveTransactionsLoading ? (
 										<LoadingTable />
 									) : !filteredTransactions.length ? (
 										<p className="text-sm text-muted-foreground">
@@ -2345,6 +2456,7 @@ function TabChargeForm({
 	initialData,
 	onCustomerCreated,
 	onSuccess,
+	onQueued,
 }: {
 	customers: Customer[];
 	products: Product[];
@@ -2356,6 +2468,7 @@ function TabChargeForm({
 	};
 	onCustomerCreated?: () => void;
 	onSuccess?: () => void;
+	onQueued?: (draft: QueuedTransactionDraft) => void;
 }) {
 	const [loading, setLoading] =
 		React.useState(false);
@@ -2458,6 +2571,18 @@ function TabChargeForm({
 				productId: item.productId,
 				units: parseInt(item.units) || 0,
 			}));
+		const estimatedAmountCents = validItems.reduce(
+			(total, item) =>
+				total +
+				(item.units > 0
+					? (productPriceById.get(item.productId) ??
+						0) * item.units
+					: 0),
+			0,
+		);
+		const selectedCustomer = customers.find(
+			(customer) => customer.id === customerId,
+		);
 
 		if (validItems.length === 0) {
 			toast.error("Please add at least one item");
@@ -2478,6 +2603,18 @@ function TabChargeForm({
 					payload,
 				);
 			if (queueResult.queued) {
+				onQueued?.({
+					type: "CHARGE",
+					date,
+					customerId,
+					customerName:
+						selectedCustomer?.name ??
+						"Account Customer",
+					amountCents: estimatedAmountCents,
+					note:
+						showNote && note ? note : undefined,
+					items: validItems,
+				});
 				toast.success(
 					"Offline: account sale queued and will sync automatically.",
 				);
@@ -2517,6 +2654,21 @@ function TabChargeForm({
 								payload,
 							);
 						if (queueResult.queued) {
+							onQueued?.({
+								type: "CHARGE",
+								date,
+								customerId,
+								customerName:
+									selectedCustomer?.name ??
+									"Account Customer",
+								amountCents:
+									estimatedAmountCents,
+								note:
+									showNote && note
+										? note
+										: undefined,
+								items: validItems,
+							});
 							toast.success(
 								"Offline: account sale queued and will sync automatically.",
 							);
@@ -2868,10 +3020,12 @@ function TabPaymentForm({
 	customers,
 	date,
 	onSuccess,
+	onQueued,
 }: {
 	customers: Customer[];
 	date: string;
 	onSuccess: () => void;
+	onQueued?: (draft: QueuedTransactionDraft) => void;
 }) {
 	const [loading, setLoading] =
 		React.useState(false);
@@ -2931,7 +3085,27 @@ function TabPaymentForm({
 				await postTabPaymentWithOfflineQueue(
 					payload,
 				);
+			const selectedCustomer = customers.find(
+				(customer) => customer.id === customerId,
+			);
 			if (queueResult.queued) {
+				onQueued?.({
+					type: "PAYMENT",
+					date,
+					customerId,
+					customerName:
+						selectedCustomer?.name ??
+						"Account Customer",
+					amountCents,
+					paymentMethod:
+						paymentMethod || undefined,
+					reference:
+						showReference && reference
+							? reference
+							: undefined,
+					note:
+						showNote && note ? note : undefined,
+				});
 				toast.success(
 					"Offline: payment queued and will sync automatically.",
 				);
@@ -3111,6 +3285,7 @@ function DirectSaleForm({
 	date,
 	initialData,
 	onSuccess,
+	onQueued,
 }: {
 	products: Product[];
 	date: string;
@@ -3120,6 +3295,7 @@ function DirectSaleForm({
 		note: string;
 	};
 	onSuccess: () => void;
+	onQueued?: (draft: QueuedTransactionDraft) => void;
 }) {
 	const [loading, setLoading] =
 		React.useState(false);
@@ -3235,6 +3411,13 @@ function DirectSaleForm({
 				units: parseInt(item.units) || 0,
 			}))
 			.filter((item) => item.units > 0);
+		const estimatedAmountCents = validItems.reduce(
+			(total, item) =>
+				total +
+				((productPriceById.get(item.productId) ??
+					0) * item.units),
+			0,
+		);
 
 		if (validItems.length === 0) {
 			toast.error("Please add at least one item");
@@ -3255,6 +3438,18 @@ function DirectSaleForm({
 					payload,
 				);
 			if (queueResult.queued) {
+				onQueued?.({
+					type: "DIRECT_SALE",
+					date,
+					customerId: null,
+					customerName: "Walk-in Customer",
+					amountCents: estimatedAmountCents,
+					paymentMethod:
+						paymentMethod || undefined,
+					note:
+						showNote && note ? note : undefined,
+					items: validItems,
+				});
 				toast.success(
 					"Offline: direct sale queued and will sync automatically.",
 				);
@@ -3294,6 +3489,23 @@ function DirectSaleForm({
 								payload,
 							);
 						if (queueResult.queued) {
+							onQueued?.({
+								type: "DIRECT_SALE",
+								date,
+								customerId: null,
+								customerName:
+									"Walk-in Customer",
+								amountCents:
+									estimatedAmountCents,
+								paymentMethod:
+									paymentMethod ||
+									undefined,
+								note:
+									showNote && note
+										? note
+										: undefined,
+								items: validItems,
+							});
 							toast.success(
 								"Offline: direct sale queued and will sync automatically.",
 							);
