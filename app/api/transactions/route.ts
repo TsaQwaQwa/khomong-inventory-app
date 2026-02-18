@@ -104,18 +104,20 @@ export async function GET(req: Request) {
 							.limit(limit)
 							.select(
 								fieldsQuick
-									? {
-											_id: 1,
-											customerId: 1,
-											businessDayId: 1,
-											type: 1,
-											amountCents: 1,
-											paymentMethod: 1,
-											reference: 1,
-											note: 1,
-											createdAt: 1,
-											reversalOfId: 1,
-									  }
+								? {
+										_id: 1,
+										customerId: 1,
+										businessDayId: 1,
+										type: 1,
+										amountCents: 1,
+										paymentMethod: 1,
+										cashReceivedCents: 1,
+										changeCents: 1,
+										reference: 1,
+										note: 1,
+										createdAt: 1,
+										reversalOfId: 1,
+								  }
 									: {},
 							)
 							.lean()
@@ -140,15 +142,17 @@ export async function GET(req: Request) {
 							.limit(limit)
 							.select(
 								fieldsQuick
-									? {
-											_id: 1,
-											businessDayId: 1,
-											paymentMethod: 1,
-											discountCents: 1,
-											items: 1,
-											createdAt: 1,
-											reversalOfId: 1,
-									  }
+								? {
+										_id: 1,
+										businessDayId: 1,
+										paymentMethod: 1,
+										amountCents: 1,
+										cashReceivedCents: 1,
+										changeCents: 1,
+										items: 1,
+										createdAt: 1,
+										reversalOfId: 1,
+								  }
 									: {},
 							)
 							.lean(),

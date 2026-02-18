@@ -34,6 +34,19 @@ export async function POST(req: Request) {
 			req,
 			tabPaymentSchema,
 		);
+		if (
+			input.paymentMethod === "CASH" &&
+			typeof input.cashReceivedCents === "number" &&
+			input.cashReceivedCents < input.amountCents
+		) {
+			return fail(
+				"Cash received is less than payment amount",
+				{
+					status: 400,
+					code: "INSUFFICIENT_CASH",
+				},
+			);
+		}
 		const date = input.date ?? todayYMD();
 		const day = await getOrCreateDay(
 			date,
@@ -46,6 +59,20 @@ export async function POST(req: Request) {
 			type: "PAYMENT",
 			amountCents: input.amountCents,
 			paymentMethod: input.paymentMethod,
+			cashReceivedCents:
+				input.paymentMethod === "CASH" &&
+				typeof input.cashReceivedCents === "number"
+					? input.cashReceivedCents
+					: undefined,
+			changeCents:
+				input.paymentMethod === "CASH" &&
+				typeof input.cashReceivedCents === "number"
+					? Math.max(
+							0,
+							input.cashReceivedCents -
+								input.amountCents,
+					  )
+					: undefined,
 			reference: input.reference,
 			note: input.note,
 			createdByUserId: a.userId!,

@@ -79,8 +79,8 @@ export async function POST(req: Request) {
 					-(item.lineTotalCents ?? 0),
 			}));
 
-				const created =
-					await SaleTransaction.create({
+			const created =
+				await SaleTransaction.create({
 					businessDayId: original.businessDayId,
 					paymentMethod: original.paymentMethod,
 					subtotalCents:
@@ -88,6 +88,10 @@ export async function POST(req: Request) {
 					discountCents:
 						-(original.discountCents ?? 0),
 					amountCents: -(original.amountCents ?? 0),
+					cashReceivedCents:
+						-(original.cashReceivedCents ?? 0),
+					changeCents:
+						-(original.changeCents ?? 0),
 					items: reversedItems,
 					note: `REVERSAL_OF:${input.transactionId} | ${input.reason}`,
 					reversalOfId: input.transactionId,
@@ -170,6 +174,9 @@ export async function POST(req: Request) {
 			subtotalCents: -(original.subtotalCents ?? 0),
 			discountCents: -(original.discountCents ?? 0),
 			amountCents: -(original.amountCents ?? 0),
+			cashReceivedCents:
+				-(original.cashReceivedCents ?? 0),
+			changeCents: -(original.changeCents ?? 0),
 			paymentMethod: original.paymentMethod,
 			reference: original.reference,
 			items:

@@ -26,6 +26,7 @@ import { EmptyState } from "@/components/empty-state";
 import { ProductSelect } from "@/components/product-select";
 import { CustomerSelect } from "@/components/customer-select";
 import { MoneyInput } from "@/components/money-input";
+import { CashChangeCalculator } from "@/components/cash-change-calculator";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -174,15 +175,15 @@ interface TabTransactionHistory {
 		| "ADJUSTMENT"
 		| "DIRECT_SALE";
 	amountCents: number;
-	discountCents?: number;
 	paymentMethod?: PaymentMethod;
+	cashReceivedCents?: number;
+	changeCents?: number;
 	note?: string;
 	reference?: string;
 	createdAt?: string;
 	items?: {
 		productId: string;
 		units: number;
-		discountCents?: number;
 	}[];
 	reversalOfId?: string;
 	reversalReason?: string;
@@ -197,6 +198,8 @@ interface QueuedTransactionDraft {
 	customerName: string;
 	amountCents: number;
 	paymentMethod?: PaymentMethod;
+	cashReceivedCents?: number;
+	changeCents?: number;
 	note?: string;
 	reference?: string;
 	items?: TabTransactionHistory["items"];
@@ -370,6 +373,9 @@ export function TabsClient({
 				type: draft.type,
 				amountCents: draft.amountCents,
 				paymentMethod: draft.paymentMethod,
+				cashReceivedCents:
+					draft.cashReceivedCents,
+				changeCents: draft.changeCents,
 				note: draft.note,
 				reference: draft.reference,
 				createdAt: new Date().toISOString(),
@@ -1734,6 +1740,25 @@ export function TabsClient({
 																		"-"}
 																</span>
 															</div>
+															{txn.paymentMethod ===
+																"CASH" && (
+																<p className="mt-1 text-xs text-muted-foreground">
+																	Received{" "}
+																	{typeof txn.cashReceivedCents ===
+																	"number"
+																		? formatZAR(
+																				txn.cashReceivedCents,
+																		  )
+																		: "-"}{" "}
+																	| Change{" "}
+																	{typeof txn.changeCents ===
+																	"number"
+																		? formatZAR(
+																				txn.changeCents,
+																		  )
+																		: "-"}
+																</p>
+															)}
 															<div className="mt-3 flex items-center justify-end gap-2">
 																{txn.isReversal && (
 																	<span className="rounded px-2 py-1 text-xs bg-muted text-muted-foreground">
@@ -1852,10 +1877,42 @@ export function TabsClient({
 																		)}
 																	</TableCell>
 																	<TableCell className="text-muted-foreground">
-																		{txn.paymentMethod ??
-																			txn.reference ??
-																			txn.note ??
-																			"-"}
+																		<div className="space-y-0.5">
+																			<p>
+																				{txn.paymentMethod ??
+																					"-"}
+																			</p>
+																			{txn.paymentMethod ===
+																				"CASH" && (
+																				<p className="text-xs">
+																					Received{" "}
+																					{typeof txn.cashReceivedCents ===
+																					"number"
+																						? formatZAR(
+																								txn.cashReceivedCents,
+																						  )
+																						: "-"}{" "}
+																					| Change{" "}
+																					{typeof txn.changeCents ===
+																					"number"
+																						? formatZAR(
+																								txn.changeCents,
+																						  )
+																						: "-"}
+																				</p>
+																			)}
+																			{txn.reference && (
+																				<p className="text-xs">
+																					Ref:{" "}
+																					{txn.reference}
+																				</p>
+																			)}
+																			{txn.note && (
+																				<p className="text-xs truncate max-w-48">
+																					{txn.note}
+																				</p>
+																			)}
+																		</div>
 																	</TableCell>
 																	<TableCell className="text-right">
 																		{txn.isReversal ? (
@@ -3033,6 +3090,8 @@ function TabPaymentForm({
 		React.useState("");
 	const [amountCents, setAmountCents] =
 		React.useState(0);
+	const [cashReceivedCents, setCashReceivedCents] =
+		React.useState(0);
 	const [paymentMethod, setPaymentMethod] =
 		React.useState<PaymentMethod | "">("");
 	const [reference, setReference] =
@@ -3041,6 +3100,8 @@ function TabPaymentForm({
 		React.useState(false);
 	const [note, setNote] = React.useState("");
 	const [showNote, setShowNote] =
+		React.useState(false);
+	const [cashStep, setCashStep] =
 		React.useState(false);
 	React.useEffect(() => {
 		const stored = localStorage.getItem(
@@ -3061,11 +3122,29 @@ function TabPaymentForm({
 			paymentMethod,
 		);
 	}, [paymentMethod]);
+	React.useEffect(() => {
+		if (paymentMethod !== "CASH") {
+			setCashStep(false);
+		}
+	}, [paymentMethod]);
 
 	const handleSubmit = async (
 		e: React.FormEvent,
 	) => {
 		e.preventDefault();
+		if (paymentMethod === "CASH" && !cashStep) {
+			setCashStep(true);
+			return;
+		}
+		if (
+			paymentMethod === "CASH" &&
+			cashReceivedCents < amountCents
+		) {
+			toast.error(
+				"Cash received is less than the payment amount.",
+			);
+			return;
+		}
 		setLoading(true);
 
 		try {
@@ -3074,6 +3153,10 @@ function TabPaymentForm({
 				customerId,
 				amountCents,
 				paymentMethod,
+				cashReceivedCents:
+					paymentMethod === "CASH"
+						? cashReceivedCents
+						: undefined,
 				reference:
 					showReference && reference
 						? reference
@@ -3099,6 +3182,18 @@ function TabPaymentForm({
 					amountCents,
 					paymentMethod:
 						paymentMethod || undefined,
+					cashReceivedCents:
+						paymentMethod === "CASH"
+							? cashReceivedCents
+							: undefined,
+					changeCents:
+						paymentMethod === "CASH"
+							? Math.max(
+									0,
+									cashReceivedCents -
+										amountCents,
+							  )
+							: undefined,
 					reference:
 						showReference && reference
 							? reference
@@ -3111,6 +3206,8 @@ function TabPaymentForm({
 				);
 				setCustomerId("");
 				setAmountCents(0);
+				setCashReceivedCents(0);
+				setCashStep(false);
 				setReference("");
 				setShowReference(false);
 				setNote("");
@@ -3140,6 +3237,8 @@ function TabPaymentForm({
 			// Reset form
 			setCustomerId("");
 			setAmountCents(0);
+			setCashReceivedCents(0);
+			setCashStep(false);
 			setReference("");
 			setShowReference(false);
 			setNote("");
@@ -3163,104 +3262,135 @@ function TabPaymentForm({
 			className="flex flex-col h-[60vh]"
 		>
 			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
-				<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-					<CustomerSelect
-						customers={customers}
-						value={customerId}
-						onChange={setCustomerId}
-						label="Tab Holder"
-					/>
-
-					<MoneyInput
-						label="Amount"
-						value={amountCents}
-						onChange={setAmountCents}
-					/>
-				</div>
-
-				<div className="space-y-3">
-					<Label>Payment Method</Label>
-					<Select
-						value={paymentMethod}
-						onValueChange={(v) =>
-							setPaymentMethod(v as PaymentMethod)
-						}
-					>
-						<SelectTrigger>
-							<SelectValue placeholder="Select method" />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="CASH">
-								Cash
-							</SelectItem>
-							<SelectItem value="CARD">
-								Card
-							</SelectItem>
-							<SelectItem value="EFT">
-								EFT
-							</SelectItem>
-						</SelectContent>
-					</Select>
-				</div>
-
-				<div className="space-y-3">
-					<div className="space-y-2">
-						<div className="grid grid-cols-2 gap-2">
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								className="w-full"
-								onClick={() =>
-									setShowReference(
-										(prev) => !prev,
-									)
-								}
-							>
-								{showReference
-									? "Hide Ref"
-									: "Add Ref"}
-							</Button>
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								className="w-full"
-								onClick={() =>
-									setShowNote((prev) => !prev)
-								}
-							>
-								{showNote
-									? "Hide Note"
-									: "Add Note"}
-							</Button>
+				{cashStep && paymentMethod === "CASH" ? (
+					<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+						<div className="rounded-md border p-3">
+							<p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+								Cash Settlement
+							</p>
+							<p className="text-sm font-medium">
+								Confirm cash received and change
+							</p>
+							<p className="text-xs text-muted-foreground">
+								Payment amount: {formatZAR(amountCents)}
+							</p>
 						</div>
-						{showReference && (
-							<div className="space-y-2">
-								<Label>
-									Reference (optional)
-								</Label>
-								<Input
-									value={reference}
-									onChange={(e) =>
-										setReference(e.target.value)
-									}
-									placeholder="e.g. Receipt #123"
-								/>
-							</div>
-						)}
-						{showNote && (
-							<Textarea
-								value={note}
-								onChange={(e) =>
-									setNote(e.target.value)
-								}
-								placeholder="Any notes..."
-								rows={2}
-							/>
-						)}
+						<CashChangeCalculator
+							totalCents={amountCents}
+							cashReceivedCents={cashReceivedCents}
+							onCashReceivedChange={setCashReceivedCents}
+						/>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							onClick={() => setCashStep(false)}
+						>
+							Back
+						</Button>
 					</div>
-				</div>
+				) : (
+					<>
+						<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+							<CustomerSelect
+								customers={customers}
+								value={customerId}
+								onChange={setCustomerId}
+								label="Tab Holder"
+							/>
+
+							<MoneyInput
+								label="Amount"
+								value={amountCents}
+								onChange={setAmountCents}
+							/>
+						</div>
+
+						<div className="space-y-3">
+							<Label>Payment Method</Label>
+							<Select
+								value={paymentMethod}
+								onValueChange={(v) =>
+									setPaymentMethod(v as PaymentMethod)
+								}
+							>
+								<SelectTrigger>
+									<SelectValue placeholder="Select method" />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="CASH">
+										Cash
+									</SelectItem>
+									<SelectItem value="CARD">
+										Card
+									</SelectItem>
+									<SelectItem value="EFT">
+										EFT
+									</SelectItem>
+								</SelectContent>
+							</Select>
+						</div>
+
+						<div className="space-y-3">
+							<div className="space-y-2">
+								<div className="grid grid-cols-2 gap-2">
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										className="w-full"
+										onClick={() =>
+											setShowReference(
+												(prev) => !prev,
+											)
+										}
+									>
+										{showReference
+											? "Hide Ref"
+											: "Add Ref"}
+									</Button>
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										className="w-full"
+										onClick={() =>
+											setShowNote((prev) => !prev)
+										}
+									>
+										{showNote
+											? "Hide Note"
+											: "Add Note"}
+									</Button>
+								</div>
+								{showReference && (
+									<div className="space-y-2">
+										<Label>
+											Reference (optional)
+										</Label>
+										<Input
+											value={reference}
+											onChange={(e) =>
+												setReference(e.target.value)
+											}
+											placeholder="e.g. Receipt #123"
+										/>
+									</div>
+								)}
+								{showNote && (
+									<Textarea
+										value={note}
+										onChange={(e) =>
+											setNote(e.target.value)
+										}
+										placeholder="Any notes..."
+										rows={2}
+									/>
+								)}
+							</div>
+						</div>
+					</>
+				)}
 			</div>
 			<div className="shrink-0 border-t px-4 py-3">
 				<Button
@@ -3273,7 +3403,12 @@ function TabPaymentForm({
 						amountCents <= 0
 					}
 				>
-					{loading ? "Saving..." : "Save"}
+					{loading
+						? "Saving..."
+						: cashStep &&
+							paymentMethod === "CASH"
+							? "Confirm Payment"
+							: "Save"}
 				</Button>
 			</div>
 		</form>
@@ -3316,6 +3451,10 @@ function DirectSaleForm({
 		React.useState<PaymentMethod | "">(
 			initialData?.paymentMethod ?? "",
 		);
+	const [cashReceivedCents, setCashReceivedCents] =
+		React.useState(0);
+	const [cashStep, setCashStep] =
+		React.useState(false);
 	const [note, setNote] = React.useState(
 		initialData?.note ?? "",
 	);
@@ -3352,6 +3491,18 @@ function DirectSaleForm({
 			),
 		[products],
 	);
+	const totalDueCents = React.useMemo(
+		() =>
+			items.reduce((sum, item) => {
+				const units =
+					parseInt(item.units, 10) || 0;
+				const unitPrice =
+					productPriceById.get(item.productId) ??
+					0;
+				return sum + units * unitPrice;
+			}, 0),
+		[items, productPriceById],
+	);
 	React.useEffect(() => {
 		if (!initialData) return;
 		setItems(
@@ -3368,6 +3519,11 @@ function DirectSaleForm({
 		setNote(initialData.note);
 		setShowNote(Boolean(initialData.note));
 	}, [initialData]);
+	React.useEffect(() => {
+		if (paymentMethod !== "CASH") {
+			setCashStep(false);
+		}
+	}, [paymentMethod]);
 
 	const addItem = () => {
 		setItems([
@@ -3400,6 +3556,19 @@ function DirectSaleForm({
 		e: React.FormEvent,
 	) => {
 		e.preventDefault();
+		if (paymentMethod === "CASH" && !cashStep) {
+			setCashStep(true);
+			return;
+		}
+		if (
+			paymentMethod === "CASH" &&
+			cashReceivedCents < totalDueCents
+		) {
+			toast.error(
+				"Cash received is less than the sale total.",
+			);
+			return;
+		}
 		setLoading(true);
 
 		const validItems = items
@@ -3411,13 +3580,7 @@ function DirectSaleForm({
 				units: parseInt(item.units) || 0,
 			}))
 			.filter((item) => item.units > 0);
-		const estimatedAmountCents = validItems.reduce(
-			(total, item) =>
-				total +
-				((productPriceById.get(item.productId) ??
-					0) * item.units),
-			0,
-		);
+		const estimatedAmountCents = totalDueCents;
 
 		if (validItems.length === 0) {
 			toast.error("Please add at least one item");
@@ -3429,6 +3592,10 @@ function DirectSaleForm({
 			const payload: Record<string, unknown> = {
 				date,
 				paymentMethod,
+				cashReceivedCents:
+					paymentMethod === "CASH"
+						? cashReceivedCents
+						: undefined,
 				items: validItems,
 				note: showNote && note ? note : undefined,
 			};
@@ -3446,6 +3613,18 @@ function DirectSaleForm({
 					amountCents: estimatedAmountCents,
 					paymentMethod:
 						paymentMethod || undefined,
+					cashReceivedCents:
+						paymentMethod === "CASH"
+							? cashReceivedCents
+							: undefined,
+					changeCents:
+						paymentMethod === "CASH"
+							? Math.max(
+									0,
+									cashReceivedCents -
+										estimatedAmountCents,
+							  )
+							: undefined,
 					note:
 						showNote && note ? note : undefined,
 					items: validItems,
@@ -3460,6 +3639,8 @@ function DirectSaleForm({
 					},
 				]);
 				setPaymentMethod("");
+				setCashReceivedCents(0);
+				setCashStep(false);
 				setNote("");
 				onSuccess();
 				return;
@@ -3500,6 +3681,20 @@ function DirectSaleForm({
 								paymentMethod:
 									paymentMethod ||
 									undefined,
+								cashReceivedCents:
+									paymentMethod ===
+									"CASH"
+										? cashReceivedCents
+										: undefined,
+								changeCents:
+									paymentMethod ===
+									"CASH"
+										? Math.max(
+												0,
+												cashReceivedCents -
+													estimatedAmountCents,
+										  )
+										: undefined,
 								note:
 									showNote && note
 										? note
@@ -3516,6 +3711,8 @@ function DirectSaleForm({
 								},
 							]);
 							setPaymentMethod("");
+							setCashReceivedCents(0);
+							setCashStep(false);
 							setNote("");
 							onSuccess();
 							return;
@@ -3545,6 +3742,8 @@ function DirectSaleForm({
 					units: "",
 				},
 			]);
+			setCashReceivedCents(0);
+			setCashStep(false);
 			setNote("");
 			onSuccess();
 		} catch (err) {
@@ -3564,6 +3763,35 @@ function DirectSaleForm({
 			className="flex flex-col h-[60vh]"
 		>
 			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
+				{cashStep && paymentMethod === "CASH" ? (
+					<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+						<div className="rounded-md border p-3">
+							<p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+								Cash Settlement
+							</p>
+							<p className="text-sm font-medium">
+								Enter cash received
+							</p>
+							<p className="text-xs text-muted-foreground">
+								Total due: {formatZAR(totalDueCents)}
+							</p>
+						</div>
+						<CashChangeCalculator
+							totalCents={totalDueCents}
+							cashReceivedCents={cashReceivedCents}
+							onCashReceivedChange={setCashReceivedCents}
+						/>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							onClick={() => setCashStep(false)}
+						>
+							Back to Items
+						</Button>
+					</div>
+				) : (
+					<>
 				<div className="flex min-h-0 flex-1 flex-col space-y-2 h-[50vh]">
 					<Label>Items Sold</Label>
 					<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
@@ -3689,14 +3917,24 @@ function DirectSaleForm({
 						/>
 					)}
 				</div>
+					</>
+				)}
 			</div>
 			<div className="shrink-0 border-t px-4 py-3">
 				<Button
 					type="submit"
 					className="w-full"
-					disabled={loading || !paymentMethod}
+					disabled={
+						loading ||
+						!paymentMethod
+					}
 				>
-					{loading ? "Saving..." : "Save"}
+					{loading
+						? "Saving..."
+						: cashStep &&
+							paymentMethod === "CASH"
+							? "Confirm Cash Sale"
+							: "Save"}
 				</Button>
 			</div>
 		</form>

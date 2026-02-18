@@ -131,7 +131,6 @@ export async function POST(req: Request) {
 			productId: string;
 			units: number;
 			unitPriceCents: number;
-			discountCents?: number;
 		}[] = [];
 		for (const item of input.items) {
 			const unitPriceCents = await getPrice(
@@ -148,13 +147,22 @@ export async function POST(req: Request) {
 				productId: item.productId,
 				units: item.units,
 				unitPriceCents,
-				discountCents: item.discountCents,
 			});
 		}
-		const totals = calculateSaleTotals(
-			rawLines,
-			input.discountCents,
-		);
+		const totals = calculateSaleTotals(rawLines);
+		if (
+			input.paymentMethod === "CASH" &&
+			typeof input.cashReceivedCents === "number" &&
+			input.cashReceivedCents < totals.amountCents
+		) {
+			return fail(
+				"Cash received is less than sale total",
+				{
+					status: 400,
+					code: "INSUFFICIENT_CASH",
+				},
+			);
+		}
 		itemsWithPrice.push(...totals.items);
 		const belowCostViolations =
 			await findBelowCostViolations({
@@ -188,8 +196,21 @@ export async function POST(req: Request) {
 				businessDayId: String(day._id),
 				paymentMethod: input.paymentMethod,
 				subtotalCents: totals.subtotalCents,
-				discountCents: totals.discountCents,
 				amountCents: totals.amountCents,
+				cashReceivedCents:
+					input.paymentMethod === "CASH" &&
+					typeof input.cashReceivedCents === "number"
+						? input.cashReceivedCents
+						: undefined,
+				changeCents:
+					input.paymentMethod === "CASH" &&
+					typeof input.cashReceivedCents === "number"
+						? Math.max(
+								0,
+								input.cashReceivedCents -
+									totals.amountCents,
+						  )
+						: undefined,
 				items: itemsWithPrice,
 				note: input.note,
 				createdByUserId: a.userId!,

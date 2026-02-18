@@ -18,6 +18,8 @@ export interface SaleTransactionDoc {
 	subtotalCents?: number;
 	discountCents?: number;
 	amountCents: number;
+	cashReceivedCents?: number;
+	changeCents?: number;
 	items: SaleTxnItem[];
 	note?: string;
 	reversalOfId?: string;
@@ -42,6 +44,8 @@ const SaleTransactionSchema =
 				type: Number,
 				required: true,
 			},
+			cashReceivedCents: { type: Number },
+			changeCents: { type: Number },
 			subtotalCents: { type: Number },
 			discountCents: { type: Number },
 			items: [

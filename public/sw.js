@@ -1,6 +1,6 @@
-const SHELL_CACHE = "kgomong-shell-v4";
-const API_CACHE = "kgomong-api-v4";
-const STATIC_CACHE = "kgomong-static-v4";
+const SHELL_CACHE = "kgomong-shell-v5";
+const API_CACHE = "kgomong-api-v5";
+const STATIC_CACHE = "kgomong-static-v5";
 const SHELL_URLS = [
 	"/",
 	"/dashboard",
@@ -203,8 +203,6 @@ self.addEventListener("fetch", (event) => {
 	event.respondWith(
 		(async () => {
 			const cache = await caches.open(STATIC_CACHE);
-			const cached = await cache.match(request);
-			if (cached) return cached;
 			try {
 				const network = await fetch(request);
 				if (network.ok) {
@@ -212,6 +210,7 @@ self.addEventListener("fetch", (event) => {
 				}
 				return network;
 			} catch {
+				const cached = await cache.match(request);
 				return cached || Response.error();
 			}
 		})(),

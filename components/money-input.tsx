@@ -4,7 +4,7 @@ import * as React from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { fromCents, toCents } from "@/lib/money";
+import { fromCents } from "@/lib/money";
 
 interface MoneyInputProps {
 	label?: string;
@@ -27,28 +27,94 @@ export function MoneyInput({
 }: MoneyInputProps) {
 	const [displayValue, setDisplayValue] =
 		React.useState(fromCents(value));
+	const centsRef = React.useRef(
+		Math.max(0, value),
+	);
 
 	React.useEffect(() => {
-		setDisplayValue(fromCents(value));
+		const safeCents = Math.max(0, value);
+		centsRef.current = safeCents;
+		setDisplayValue(fromCents(safeCents));
 	}, [value]);
+
+	const applyCents = React.useCallback(
+		(nextCents: number) => {
+			const safeCents = Math.max(
+				0,
+				Math.trunc(nextCents),
+			);
+			centsRef.current = safeCents;
+			onChange(safeCents);
+			setDisplayValue(fromCents(safeCents));
+		},
+		[onChange],
+	);
 
 	const handleChange = (
 		e: React.ChangeEvent<HTMLInputElement>,
 	) => {
-		const inputValue = e.target.value;
-		// Allow only numbers and one decimal point
-		if (
-			/^[\d]*\.?[\d]{0,2}$/.test(inputValue) ||
-			inputValue === ""
-		) {
-			setDisplayValue(inputValue);
+		// Fallback path for environments where keydown
+		// interception is inconsistent (mobile keyboards).
+		const digitsOnly = e.target.value.replace(
+			/\D/g,
+			"",
+		);
+		const cents = digitsOnly
+			? parseInt(digitsOnly, 10)
+			: 0;
+		applyCents(cents);
+	};
+
+	const handleKeyDown = (
+		e: React.KeyboardEvent<HTMLInputElement>,
+	) => {
+		if (disabled) return;
+
+		if (/^\d$/.test(e.key)) {
+			e.preventDefault();
+			const digit = parseInt(e.key, 10);
+			const nextCents = Math.max(
+				0,
+				centsRef.current * 10 + digit,
+			);
+			applyCents(nextCents);
+			return;
+		}
+
+		if (e.key === "Backspace") {
+			e.preventDefault();
+			const nextCents = Math.floor(
+				centsRef.current / 10,
+			);
+			applyCents(nextCents);
+			return;
+		}
+
+		if (e.key === "Delete") {
+			e.preventDefault();
+			applyCents(0);
 		}
 	};
 
-	const handleBlur = () => {
-		const cents = toCents(displayValue);
-		onChange(cents);
-		setDisplayValue(fromCents(cents));
+	const handlePaste = (
+		e: React.ClipboardEvent<HTMLInputElement>,
+	) => {
+		if (disabled) return;
+		e.preventDefault();
+		const pasted = e.clipboardData.getData("text");
+		const digitsOnly = pasted.replace(/\D/g, "");
+		if (!digitsOnly) return;
+		applyCents(parseInt(digitsOnly, 10));
+	};
+
+	const handleFocus = (
+		e: React.FocusEvent<HTMLInputElement>,
+	) => {
+		// Keep caret clear of separators.
+		requestAnimationFrame(() => {
+			const length = e.target.value.length;
+			e.target.setSelectionRange(length, length);
+		});
 	};
 
 	const inputId =
@@ -72,7 +138,9 @@ export function MoneyInput({
 					inputMode="decimal"
 					value={displayValue}
 					onChange={handleChange}
-					onBlur={handleBlur}
+					onKeyDown={handleKeyDown}
+					onPaste={handlePaste}
+					onFocus={handleFocus}
 					placeholder={placeholder}
 					disabled={disabled}
 					className="pl-7"

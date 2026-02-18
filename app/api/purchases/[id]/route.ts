@@ -7,6 +7,8 @@ import { Purchase } from "@/models/Purchase";
 import { serializeDoc } from "@/lib/serialize";
 import { calculatePurchaseTotals } from "@/lib/purchase-pricing";
 import { learnSupplierPricesFromPurchase } from "@/lib/supplier-price-learning";
+import { parseJson } from "@/lib/validate";
+import { purchaseUpdateSchema } from "@/lib/schemas";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -30,126 +32,92 @@ export async function PATCH(
 		});
 
 	const { id } = await ctx.params;
-	const payload = await req
-		.json()
-		.catch(() => null);
-	if (
-		!payload ||
-		(payload.invoiceNo !== undefined &&
-			typeof payload.invoiceNo !== "string") ||
-		(payload.discountCents !== undefined &&
-			typeof payload.discountCents !== "number")
-	) {
-		return fail("Invalid payload", {
-			status: 400,
-			code: "INVALID_DATA",
-		});
-	}
-
-	const invoiceNo =
-		payload.invoiceNo &&
-		payload.invoiceNo.trim().length
-			? payload.invoiceNo.trim()
-			: undefined;
-	const attachments: string[] = [];
-	if (Array.isArray(payload.attachments)) {
-		const uploadDir = path.join(
-			process.cwd(),
-			"public",
-			"uploads",
-			"purchases",
-		);
-		fs.mkdirSync(uploadDir, { recursive: true });
-		for (const [
-			index,
-			dataUrl,
-		] of payload.attachments.entries()) {
-			if (
-				typeof dataUrl !== "string" ||
-				!dataUrl.includes("base64")
-			)
-				continue;
-			const matches = dataUrl.match(
-				/^data:(image\/[^;]+);base64,(.+)$/,
-			);
-			if (!matches) continue;
-			const [, mime, base64] = matches;
-			const ext = mime.split("/")[1] ?? "bin";
-			const filename = `${Date.now()}-${randomUUID()}-${index}.${ext}`;
-			const filePath = path.join(
-				uploadDir,
-				filename,
-			);
-			fs.writeFileSync(
-				filePath,
-				Buffer.from(base64, "base64"),
-			);
-			attachments.push(
-				`uploads/purchases/${filename}`,
-			);
-		}
-	}
 
 	try {
+		const payload = await parseJson(
+			req,
+			purchaseUpdateSchema,
+		);
 		await connectDB();
-		const updatePayload: Record<string, unknown> =
-			{};
-		if (invoiceNo !== undefined)
-			updatePayload.invoiceNo = invoiceNo;
 		const existing = await Purchase.findOne({
 			_id: id,
 		}).lean();
-		if (
-			(Array.isArray(payload.items) ||
-				payload.discountCents !== undefined) &&
-			existing
-		) {
-		const itemsByProduct = new Map<string, any>(
-			Array.isArray(payload.items)
-				? payload.items.map((item: any) => [
-						item.productId,
-						item,
-					])
-				: [],
-		);
-		const mergedItems = existing.items.map((item) => {
-			const override = itemsByProduct.get(
-				item.productId,
-			);
-			if (!override) return item;
-			return {
-				...item,
-				unitCostCents:
-					override.unitCostCents ?? item.unitCostCents,
-				discountCents:
-					override.discountCents ?? item.discountCents,
-			};
-		});
-		const existingItemDiscountTotal =
-			mergedItems.reduce(
-				(sum, item) =>
-					sum + (item.discountCents ?? 0),
-				0,
-			);
-		const existingAdditionalDiscount = Math.max(
-			0,
-			(existing.discountCents ?? 0) -
-				existingItemDiscountTotal,
-		);
-		const requestedAdditionalDiscount =
-			payload.discountCents !== undefined
-				? payload.discountCents
-				: existingAdditionalDiscount;
-		const totals = calculatePurchaseTotals(
-			mergedItems,
-			requestedAdditionalDiscount,
-		);
-		updatePayload.items = totals.items;
-		updatePayload.subtotalCents = totals.subtotalCents;
-		updatePayload.discountCents = totals.discountCents;
-		updatePayload.totalCostCents = totals.totalCostCents;
+		if (!existing)
+			return fail("Purchase not found", {
+				status: 404,
+				code: "NOT_FOUND",
+			});
+
+		const updatePayload: Record<string, unknown> =
+			{};
+		if (payload.supplierId !== undefined) {
+			const supplierId = payload.supplierId.trim();
+			updatePayload.supplierId =
+				supplierId.length > 0
+					? supplierId
+					: undefined;
 		}
-		if (attachments.length && existing) {
+		if (payload.invoiceNo !== undefined) {
+			const invoiceNo = payload.invoiceNo.trim();
+			updatePayload.invoiceNo =
+				invoiceNo.length > 0
+					? invoiceNo
+					: undefined;
+		}
+		if (payload.purchaseDate !== undefined) {
+			updatePayload.purchaseDate = payload.purchaseDate;
+		}
+
+		if (payload.items !== undefined && existing) {
+			const nextItems =
+				payload.items ?? existing.items;
+			const totals = calculatePurchaseTotals(
+				nextItems,
+			);
+			updatePayload.items = totals.items;
+			updatePayload.subtotalCents =
+				totals.subtotalCents;
+			updatePayload.totalCostCents =
+				totals.totalCostCents;
+		}
+
+		const attachments: string[] = [];
+		if (Array.isArray(payload.attachments)) {
+			const uploadDir = path.join(
+				process.cwd(),
+				"public",
+				"uploads",
+				"purchases",
+			);
+			fs.mkdirSync(uploadDir, {
+				recursive: true,
+			});
+			for (const [
+				index,
+				dataUrl,
+			] of payload.attachments.entries()) {
+				if (!dataUrl.includes("base64")) continue;
+				const matches = dataUrl.match(
+					/^data:(image\/[^;]+);base64,(.+)$/,
+				);
+				if (!matches) continue;
+				const [, mime, base64] = matches;
+				const ext = mime.split("/")[1] ?? "bin";
+				const filename = `${Date.now()}-${randomUUID()}-${index}.${ext}`;
+				const filePath = path.join(
+					uploadDir,
+					filename,
+				);
+				fs.writeFileSync(
+					filePath,
+					Buffer.from(base64, "base64"),
+				);
+				attachments.push(
+					`uploads/purchases/${filename}`,
+				);
+			}
+		}
+		if (attachments.length) {
 			updatePayload.attachmentIds = [
 				...(existing.attachmentIds ?? []),
 				...attachments,
@@ -158,14 +126,18 @@ export async function PATCH(
 
 		const updated = await Purchase.findOneAndUpdate(
 			{ _id: id },
-			{ $set: updatePayload },
+			{
+				$set: updatePayload,
+				$unset: { discountCents: 1 },
+			},
 			{ new: true },
 		).lean();
-		if (!updated)
+		if (!updated) {
 			return fail("Purchase not found", {
 				status: 404,
 				code: "NOT_FOUND",
 			});
+		}
 		if (existing) {
 			await writeAuditLog({
 				scopeId: getScopeIdFromAuth(a),
@@ -184,7 +156,17 @@ export async function PATCH(
 		});
 
 		return ok(serializeDoc(updated));
-	} catch {
+	} catch (e: any) {
+		const msg = String(e?.message ?? e);
+		if (msg.startsWith("VALIDATION_ERROR:")) {
+			return fail(
+				msg.replace("VALIDATION_ERROR:", ""),
+				{
+					status: 400,
+					code: "VALIDATION_ERROR",
+				},
+			);
+		}
 		return fail("Failed to update purchase", {
 			status: 500,
 			code: "SERVER_ERROR",

@@ -229,7 +229,7 @@ export function PurchasesClient() {
 							key={purchase.id}
 							purchase={purchase}
 							products={normalizedProducts}
-							onEditInvoice={() =>
+							onEditPurchase={() =>
 								setEditingPurchase(purchase)
 							}
 						/>
@@ -244,9 +244,10 @@ export function PurchasesClient() {
 				}}
 			>
 				{editingPurchase && (
-					<EditInvoiceDialog
+					<EditPurchaseDialog
 						purchase={editingPurchase}
 						products={normalizedProducts}
+						suppliers={suppliers || []}
 						onSuccess={() => {
 							setEditingPurchase(null);
 							mutate();
@@ -261,11 +262,11 @@ export function PurchasesClient() {
 function PurchaseCard({
 	purchase,
 	products,
-	onEditInvoice,
+	onEditPurchase,
 }: {
 	purchase: Purchase;
 	products: Product[];
-	onEditInvoice?: () => void;
+	onEditPurchase?: () => void;
 }) {
 	const attachments =
 		purchase.attachmentIds?.filter(Boolean) ?? [];
@@ -285,15 +286,10 @@ function PurchaseCard({
 				(item.unitCostCents || 0) * item.units),
 		0,
 	);
-	const purchaseDiscountCents =
-		purchase.discountCents ?? 0;
 	const totalCost =
 		typeof purchase.totalCostCents === "number"
 			? purchase.totalCostCents
-			: Math.max(
-					0,
-					subtotalCost - purchaseDiscountCents,
-				);
+			: subtotalCost;
 
 	return (
 		<Card className="shadow-md">
@@ -303,22 +299,23 @@ function PurchaseCard({
 						{purchase.supplierName ||
 							"Unknown Supplier"}
 					</span>
-					{purchase.invoiceNo && (
-						<div className="flex items-center gap-2 text-sm font-normal text-muted-foreground">
-							<span>
+					<div className="flex items-center gap-2">
+						{purchase.invoiceNo && (
+							<span className="text-sm font-normal text-muted-foreground">
 								Invoice: {purchase.invoiceNo}
 							</span>
-							{onEditInvoice && (
-								<Button
-									variant="ghost"
-									size="icon"
-									onClick={onEditInvoice}
-								>
-									<Edit className="h-4 w-4" />
-								</Button>
-							)}
-						</div>
-					)}
+						)}
+						{onEditPurchase && (
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={onEditPurchase}
+							>
+								<Edit className="mr-2 h-4 w-4" />
+								Edit Purchase
+							</Button>
+						)}
+					</div>
 				</CardTitle>
 			</CardHeader>
 			<CardContent>
@@ -338,14 +335,6 @@ function PurchaseCard({
 							</p>
 							<p className="font-medium">
 								{totalUnits}
-							</p>
-						</div>
-						<div>
-							<p className="text-muted-foreground">
-								Discount
-							</p>
-							<p className="font-medium">
-								{formatZAR(purchaseDiscountCents)}
 							</p>
 						</div>
 						<div className="text-right">
@@ -467,10 +456,6 @@ function PurchaseCard({
 							{totalUnits}
 						</span>
 						<span>
-							<strong>Discount:</strong>{" "}
-							{formatZAR(purchaseDiscountCents)}
-						</span>
-						<span>
 							<strong>Total Cost:</strong>{" "}
 							{formatZAR(totalCost)}
 						</span>
@@ -516,8 +501,7 @@ interface LineItem {
 	productId: string;
 	cases: string;
 	singles: string;
-	unitCostCents: number;
-	discountCents: number;
+	lineSubtotalCents: number;
 }
 
 function RecordPurchaseDialog({
@@ -543,10 +527,6 @@ function RecordPurchaseDialog({
 		React.useState(
 			initialData?.invoiceNo ?? "",
 		);
-	const [discountCents, setDiscountCents] =
-		React.useState(
-			initialData?.discountCents ?? 0,
-		);
 	const [scanBarcode, setScanBarcode] =
 		React.useState("");
 	const [items, setItems] = React.useState<
@@ -557,18 +537,17 @@ function RecordPurchaseDialog({
 					productId: item.productId,
 					cases: String(item.cases ?? 0),
 					singles: String(item.singles ?? 0),
-					unitCostCents:
-						item.unitCostCents ?? 0,
-					discountCents:
-						item.discountCents ?? 0,
+					lineSubtotalCents:
+						item.lineTotalCostCents ??
+						(item.unitCostCents ?? 0) *
+							item.units,
 				}))
 			: [
 					{
 						productId: "",
 						cases: "",
 						singles: "",
-						unitCostCents: 0,
-						discountCents: 0,
+						lineSubtotalCents: 0,
 					},
 				],
 	);
@@ -604,25 +583,23 @@ function RecordPurchaseDialog({
 	React.useEffect(() => {
 		setSupplierId(initialData?.supplierId ?? "");
 		setInvoiceNo(initialData?.invoiceNo ?? "");
-		setDiscountCents(initialData?.discountCents ?? 0);
 		setItems(
 			initialData?.items.length
 				? initialData.items.map((item) => ({
 						productId: item.productId,
 						cases: String(item.cases ?? 0),
 						singles: String(item.singles ?? 0),
-						unitCostCents:
-							item.unitCostCents ?? 0,
-						discountCents:
-							item.discountCents ?? 0,
+						lineSubtotalCents:
+							item.lineTotalCostCents ??
+							(item.unitCostCents ?? 0) *
+								item.units,
 					}))
 				: [
 						{
 							productId: "",
 							cases: "",
 							singles: "",
-							unitCostCents: 0,
-							discountCents: 0,
+							lineSubtotalCents: 0,
 						},
 					],
 		);
@@ -635,8 +612,7 @@ function RecordPurchaseDialog({
 				productId: "",
 				cases: "",
 				singles: "",
-				unitCostCents: 0,
-				discountCents: 0,
+				lineSubtotalCents: 0,
 			},
 		]);
 	};
@@ -725,8 +701,7 @@ function RecordPurchaseDialog({
 							productId: matchedProduct.id,
 							cases: "0",
 							singles: "1",
-							unitCostCents: 0,
-							discountCents: 0,
+							lineSubtotalCents: 0,
 						},
 					]);
 				}
@@ -747,19 +722,16 @@ function RecordPurchaseDialog({
 			.filter(
 				(item) =>
 					item.productId &&
-					(item.cases || item.singles),
+					(item.cases || item.singles) &&
+					item.lineSubtotalCents > 0,
 			)
 			.map((item) => ({
 				productId: item.productId,
 				cases: parseInt(item.cases) || 0,
 				singles: parseInt(item.singles) || 0,
 				units: calculateUnits(item),
-				unitCostCents:
-					item.unitCostCents || undefined,
-				discountCents:
-					item.discountCents > 0
-						? item.discountCents
-						: undefined,
+				lineSubtotalCents:
+					item.lineSubtotalCents || undefined,
 			}));
 
 		if (validItems.length === 0) {
@@ -773,10 +745,6 @@ function RecordPurchaseDialog({
 				supplierId: supplierId || undefined,
 				invoiceNo: invoiceNo || undefined,
 				purchaseDate: date,
-				discountCents:
-					discountCents > 0
-						? discountCents
-						: undefined,
 				items: validItems,
 			};
 			const queueResult =
@@ -820,7 +788,7 @@ function RecordPurchaseDialog({
 	};
 
 	return (
-		<DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+		<DialogContent className="max-w-2xl md:max-w-4xl lg:max-w-5xl max-h-[90vh] overflow-y-auto">
 			<DialogHeader>
 				<DialogTitle>
 					{initialData
@@ -875,12 +843,6 @@ function RecordPurchaseDialog({
 							placeholder="INV-12345"
 						/>
 					</div>
-					<MoneyInput
-						label="Purchase Discount (optional)"
-						value={discountCents}
-						onChange={setDiscountCents}
-					/>
-
 					<div className="space-y-2">
 						<Label htmlFor="scanBarcode">
 							Scan Barcode
@@ -930,20 +892,20 @@ function RecordPurchaseDialog({
 								const units =
 									calculateUnits(item);
 								const subtotalCents =
-									units *
-									(item.unitCostCents ?? 0);
-								const netCents = Math.max(
-									0,
-									subtotalCents -
-										item.discountCents,
-								);
+									item.lineSubtotalCents ?? 0;
+								const estimatedUnitCost =
+									units > 0
+										? Math.round(
+												subtotalCents / units,
+										  )
+										: 0;
 								return (
 									<div
 										key={index}
 										className="space-y-1 rounded-lg bg-muted/50 p-3"
 									>
 										<div className="grid grid-cols-12 gap-2 items-end">
-											<div className="col-span-12 sm:col-span-4">
+											<div className="col-span-12 lg:col-span-4">
 												<ProductSelect
 													products={
 														normalizedProducts
@@ -957,7 +919,7 @@ function RecordPurchaseDialog({
 													placeholder="Select product"
 												/>
 											</div>
-											<div className="col-span-4 sm:col-span-2 space-y-1">
+											<div className="col-span-4 lg:col-span-1 space-y-1">
 												<Label className="text-xs">
 													Cases
 												</Label>
@@ -974,7 +936,7 @@ function RecordPurchaseDialog({
 													placeholder="0"
 												/>
 											</div>
-											<div className="col-span-4 sm:col-span-2 space-y-1">
+											<div className="col-span-4 lg:col-span-1 space-y-1">
 												<Label className="text-xs">
 													Singles
 												</Label>
@@ -991,7 +953,7 @@ function RecordPurchaseDialog({
 													placeholder="0"
 												/>
 											</div>
-											<div className="col-span-4 sm:col-span-2 space-y-1">
+											<div className="col-span-4 lg:col-span-1 space-y-1">
 												<Label className="text-xs">
 													Units
 												</Label>
@@ -1002,41 +964,24 @@ function RecordPurchaseDialog({
 													className="bg-muted"
 												/>
 											</div>
-											<div className="col-span-8 sm:col-span-2 flex gap-1 items-end">
-												<div className="min-w-0 flex-1 space-y-1">
-													<Label className="text-xs">
-														Unit Cost
-													</Label>
-														<MoneyInput
-															value={
-																item.unitCostCents
-															}
-															onChange={(v) =>
-																updateItem(index, {
-																	unitCostCents: v,
-															})
-														}
-														placeholder="0.00"
-														className="space-y-0"
-													/>
-												</div>
-												<div className="min-w-0 flex-1 space-y-1">
-													<Label className="text-xs">
-														Item Discount
-													</Label>
-														<MoneyInput
-															value={
-																item.discountCents
-															}
-															onChange={(v) =>
-																updateItem(index, {
-																	discountCents: v,
-															})
-														}
-														placeholder="0.00"
-														className="space-y-0"
-													/>
-												</div>
+											<div className="col-span-6 lg:col-span-2 min-w-0 space-y-1">
+												<Label className="text-xs">
+													Total
+												</Label>
+												<MoneyInput
+													value={
+														item.lineSubtotalCents
+													}
+													onChange={(v) =>
+														updateItem(index, {
+															lineSubtotalCents: v,
+														})
+													}
+													placeholder="0.00"
+													className="space-y-0"
+												/>
+											</div>
+											<div className="col-span-12 lg:col-span-1 flex justify-end">
 												{items.length > 1 && (
 													<Button
 														type="button"
@@ -1053,8 +998,11 @@ function RecordPurchaseDialog({
 											</div>
 										</div>
 										<p className="text-[11px] text-muted-foreground">
-											Subtotal {formatZAR(subtotalCents)} | Net{" "}
-											{formatZAR(netCents)}
+											Subtotal {formatZAR(subtotalCents)}
+										</p>
+										<p className="text-[11px] text-muted-foreground">
+											Estimated unit cost:{" "}
+											{formatZAR(estimatedUnitCost)}
 										</p>
 									</div>
 								);
@@ -1094,62 +1042,111 @@ function RecordPurchaseDialog({
 	);
 }
 
-function EditInvoiceDialog({
+function EditPurchaseDialog({
 	purchase,
 	products,
+	suppliers,
 	onSuccess,
 }: {
 	purchase: Purchase;
 	products: Product[];
+	suppliers: Supplier[];
 	onSuccess: () => void;
 }) {
-	const [invoiceNo, setInvoiceNo] =
-		React.useState(purchase.invoiceNo ?? "");
 	const [loading, setLoading] =
 		React.useState(false);
-	const [itemCosts, setItemCosts] =
-		React.useState(
-			purchase.items.map((item) => ({
-				productId: item.productId,
-				unitCostCents: item.unitCostCents ?? 0,
-			})),
-		);
+	const [supplierId, setSupplierId] =
+		React.useState(purchase.supplierId ?? "");
+	const [invoiceNo, setInvoiceNo] =
+		React.useState(purchase.invoiceNo ?? "");
+	const [purchaseDate, setPurchaseDate] =
+		React.useState(purchase.purchaseDate);
+	const [items, setItems] = React.useState<
+		LineItem[]
+	>(
+		purchase.items.map((item) => ({
+			productId: item.productId,
+			cases: String(item.cases ?? 0),
+			singles: String(item.singles ?? 0),
+			lineSubtotalCents:
+				item.lineTotalCostCents ??
+				(item.unitCostCents ?? 0) * item.units,
+		})),
+	);
 	const [attachmentFile, setAttachmentFile] =
 		React.useState<File | null>(null);
 
 	React.useEffect(() => {
+		setSupplierId(purchase.supplierId ?? "");
 		setInvoiceNo(purchase.invoiceNo ?? "");
-		setItemCosts(
+		setPurchaseDate(purchase.purchaseDate);
+		setItems(
 			purchase.items.map((item) => ({
 				productId: item.productId,
-				unitCostCents: item.unitCostCents ?? 0,
+				cases: String(item.cases ?? 0),
+				singles: String(item.singles ?? 0),
+				lineSubtotalCents:
+					item.lineTotalCostCents ??
+					(item.unitCostCents ?? 0) * item.units,
 			})),
 		);
 		setAttachmentFile(null);
 	}, [purchase]);
 
-	const productMap = React.useMemo(
-		() => new Map(products.map((p) => [p.id, p])),
+	const normalizedProducts = React.useMemo(
+		() =>
+			Array.isArray(products) ? products : [],
 		[products],
 	);
-
-	const handleCostChange = (
-		productId: string,
-		cents: number,
-	) => {
-		setItemCosts((prev) =>
-			prev.map((item) =>
-				item.productId === productId
-					? { ...item, unitCostCents: cents }
-					: item,
+	const productMap = React.useMemo(
+		() =>
+			new Map(
+				normalizedProducts.map((p) => [p.id, p]),
 			),
+		[normalizedProducts],
+	);
+
+	const calculateUnits = (
+		item: LineItem,
+	): number => {
+		const product = productMap.get(
+			item.productId,
 		);
+		const packSize = product?.packSize || 1;
+		const cases = parseInt(item.cases) || 0;
+		const singles = parseInt(item.singles) || 0;
+		return cases * packSize + singles;
 	};
 
-	const handleFileChange = (
-		file?: File | null,
-	) => {
-		setAttachmentFile(file ?? null);
+	const updateItem = React.useCallback(
+		(index: number, updates: Partial<LineItem>) => {
+			setItems((prevItems) =>
+				prevItems.map((item, i) =>
+					i === index
+						? { ...item, ...updates }
+						: item,
+				),
+			);
+		},
+		[],
+	);
+
+	const addItem = () => {
+		setItems((prev) => [
+			...prev,
+			{
+				productId: "",
+				cases: "",
+				singles: "",
+				lineSubtotalCents: 0,
+			},
+		]);
+	};
+
+	const removeItem = (index: number) => {
+		setItems((prev) =>
+			prev.filter((_, i) => i !== index),
+		);
 	};
 
 	const handleSubmit = async (
@@ -1157,6 +1154,28 @@ function EditInvoiceDialog({
 	) => {
 		e.preventDefault();
 		setLoading(true);
+
+		const validItems = items
+			.filter(
+				(item) =>
+					item.productId &&
+					(item.cases || item.singles) &&
+					item.lineSubtotalCents > 0,
+			)
+			.map((item) => ({
+				productId: item.productId,
+				cases: parseInt(item.cases) || 0,
+				singles: parseInt(item.singles) || 0,
+				units: calculateUnits(item),
+				lineSubtotalCents:
+					item.lineSubtotalCents || undefined,
+			}));
+
+		if (validItems.length === 0) {
+			toast.error("Please add at least one item");
+			setLoading(false);
+			return;
+		}
 
 		try {
 			const attachments = attachmentFile
@@ -1175,23 +1194,25 @@ function EditInvoiceDialog({
 						"Content-Type": "application/json",
 					},
 					body: JSON.stringify({
+						supplierId:
+							supplierId || undefined,
 						invoiceNo:
-							invoiceNo.trim() || undefined,
-						items: itemCosts,
+							invoiceNo || undefined,
+						purchaseDate,
+						items: validItems,
 						attachments,
 					}),
 				},
 			);
-
 			toast.success(
-				"Invoice updated successfully",
+				"Purchase updated successfully",
 			);
 			onSuccess();
 		} catch (err) {
 			toast.error(
 				err instanceof Error
 					? err.message
-					: "Failed to update invoice",
+					: "Failed to update purchase",
 			);
 		} finally {
 			setLoading(false);
@@ -1199,19 +1220,52 @@ function EditInvoiceDialog({
 	};
 
 	return (
-		<DialogContent>
+		<DialogContent className="max-w-2xl md:max-w-4xl lg:max-w-5xl max-h-[90vh] overflow-y-auto">
 			<DialogHeader>
-				<DialogTitle>Edit Invoice</DialogTitle>
+				<DialogTitle>Edit Purchase</DialogTitle>
 				<DialogDescription>
-					Update the invoice details for this
-					purchase.
+					Update supplier, date, line items, and invoice details.
 				</DialogDescription>
 			</DialogHeader>
 			<form onSubmit={handleSubmit}>
-				<div className="space-y-4 py-4">
+				<div className="grid gap-4 py-4">
+					<div className="space-y-2">
+						<Label>Supplier</Label>
+						<Select
+							value={supplierId}
+							onValueChange={setSupplierId}
+						>
+							<SelectTrigger>
+								<SelectValue placeholder="Select supplier (optional)" />
+							</SelectTrigger>
+							<SelectContent>
+								{suppliers.map((s) => (
+									<SelectItem
+										key={s.id}
+										value={s.id}
+									>
+										{s.name}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					</div>
+					<div className="space-y-2">
+						<Label htmlFor="editPurchaseDate">
+							Purchase Date
+						</Label>
+						<Input
+							id="editPurchaseDate"
+							type="date"
+							value={purchaseDate}
+							onChange={(e) =>
+								setPurchaseDate(e.target.value)
+							}
+						/>
+					</div>
 					<div className="space-y-2">
 						<Label htmlFor="editInvoiceNo">
-							Invoice Number
+							Invoice Number (optional)
 						</Label>
 						<Input
 							id="editInvoiceNo"
@@ -1219,43 +1273,139 @@ function EditInvoiceDialog({
 							onChange={(e) =>
 								setInvoiceNo(e.target.value)
 							}
-							placeholder="Enter invoice number"
+							placeholder="INV-12345"
 						/>
 					</div>
 					<div className="space-y-2">
-						<Label>Unit Costs</Label>
+						<Label>Items</Label>
 						<div className="space-y-3">
-							{purchase.items.map((item) => {
-								const productName =
-									productMap.get(item.productId)
-										?.name ?? item.productId;
+							{items.map((item, index) => {
+								const units =
+									calculateUnits(item);
+								const subtotalCents =
+									item.lineSubtotalCents ?? 0;
+								const estimatedUnitCost =
+									units > 0
+										? Math.round(
+												subtotalCents / units,
+										  )
+										: 0;
 								return (
 									<div
-										key={item.productId}
-										className="flex items-center gap-3"
+										key={index}
+										className="space-y-1 rounded-lg bg-muted/50 p-3"
 									>
-										<span className="flex-1 text-sm text-muted-foreground">
-											{productName}
-										</span>
-										<MoneyInput
-											value={
-												itemCosts.find(
-													(cost) =>
-														cost.productId ===
-														item.productId,
-												)?.unitCostCents ?? 0
-											}
-											onChange={(cents) =>
-												handleCostChange(
-													item.productId,
-													cents,
-												)
-											}
-										/>
+										<div className="grid grid-cols-12 gap-2 items-end">
+											<div className="col-span-12 lg:col-span-4">
+												<ProductSelect
+													products={
+														normalizedProducts
+													}
+													value={item.productId}
+													onChange={(v) =>
+														updateItem(index, {
+															productId: v,
+														})
+													}
+													placeholder="Select product"
+												/>
+											</div>
+											<div className="col-span-4 lg:col-span-1 space-y-1">
+												<Label className="text-xs">
+													Cases
+												</Label>
+												<Input
+													type="number"
+													min="0"
+													value={item.cases}
+													onChange={(e) =>
+														updateItem(index, {
+															cases:
+																e.target.value,
+														})
+													}
+												/>
+											</div>
+											<div className="col-span-4 lg:col-span-1 space-y-1">
+												<Label className="text-xs">
+													Singles
+												</Label>
+												<Input
+													type="number"
+													min="0"
+													value={item.singles}
+													onChange={(e) =>
+														updateItem(index, {
+															singles:
+																e.target.value,
+														})
+													}
+												/>
+											</div>
+											<div className="col-span-4 lg:col-span-1 space-y-1">
+												<Label className="text-xs">
+													Units
+												</Label>
+												<Input
+													type="number"
+													value={units}
+													disabled
+													className="bg-muted"
+												/>
+											</div>
+											<div className="col-span-6 lg:col-span-2 min-w-0 space-y-1">
+												<Label className="text-xs">
+													Total
+												</Label>
+												<MoneyInput
+													value={
+														item.lineSubtotalCents
+													}
+													onChange={(v) =>
+														updateItem(index, {
+															lineSubtotalCents: v,
+														})
+													}
+													placeholder="0.00"
+													className="space-y-0"
+												/>
+											</div>
+											<div className="col-span-12 lg:col-span-1 flex justify-end">
+												{items.length > 1 && (
+													<Button
+														type="button"
+														variant="ghost"
+														size="icon"
+														onClick={() =>
+															removeItem(index)
+														}
+														className="shrink-0"
+													>
+														<Trash2 className="h-4 w-4" />
+													</Button>
+												)}
+											</div>
+										</div>
+										<p className="text-[11px] text-muted-foreground">
+											Subtotal {formatZAR(subtotalCents)}
+										</p>
+										<p className="text-[11px] text-muted-foreground">
+											Estimated unit cost:{" "}
+											{formatZAR(estimatedUnitCost)}
+										</p>
 									</div>
 								);
 							})}
 						</div>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							onClick={addItem}
+						>
+							<Plus className="mr-2 h-4 w-4" />
+							Add Item
+						</Button>
 					</div>
 					<div className="space-y-2">
 						<Label>Upload Invoice Image</Label>
@@ -1263,7 +1413,7 @@ function EditInvoiceDialog({
 							type="file"
 							accept="image/*"
 							onChange={(e) =>
-								handleFileChange(
+								setAttachmentFile(
 									e.target.files?.[0] ?? null,
 								)
 							}

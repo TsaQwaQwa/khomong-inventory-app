@@ -136,7 +136,6 @@ export async function POST(req: Request) {
 			input.purchaseDate ?? todayYMD();
 		const purchaseTotals = calculatePurchaseTotals(
 			input.items,
-			input.discountCents,
 		);
 		const created = await Purchase.create({
 			supplierId: input.supplierId,
@@ -144,7 +143,6 @@ export async function POST(req: Request) {
 			purchaseDate,
 			items: purchaseTotals.items,
 			subtotalCents: purchaseTotals.subtotalCents,
-			discountCents: purchaseTotals.discountCents,
 			totalCostCents: purchaseTotals.totalCostCents,
 			attachmentIds: input.attachmentIds ?? [],
 			createdByUserId: a.userId!,

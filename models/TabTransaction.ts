@@ -20,6 +20,8 @@ export interface TabTransactionDoc {
   subtotalCents?: number;
   discountCents?: number;
   amountCents: number;
+  cashReceivedCents?: number;
+  changeCents?: number;
 
   paymentMethod?: PaymentMethod;
   reference?: string;
@@ -43,6 +45,8 @@ const TabTransactionSchema = new Schema<TabTransactionDoc>(
     subtotalCents: { type: Number },
     discountCents: { type: Number },
     amountCents: { type: Number, required: true },
+    cashReceivedCents: { type: Number },
+    changeCents: { type: Number },
 
     paymentMethod: { type: String },
     reference: { type: String },

@@ -1,8 +1,3 @@
-import {
-	allocateDiscountAcrossLines,
-	clampDiscountCents,
-} from "@/lib/discount";
-
 interface PurchaseLineInput {
 	productId: string;
 	cases?: number;
@@ -10,12 +5,10 @@ interface PurchaseLineInput {
 	units: number;
 	unitCostCents?: number;
 	lineSubtotalCents?: number;
-	discountCents?: number;
 }
 
 export function calculatePurchaseTotals(
 	items: PurchaseLineInput[],
-	additionalDiscountCents: number | undefined,
 ) {
 	const lineMeta = items.map((item) => {
 		const units = Math.max(0, item.units ?? 0);
@@ -52,69 +45,21 @@ export function calculatePurchaseTotals(
 		0,
 	);
 
-	const baseLineDiscounts = items.map((item, index) =>
-		clampDiscountCents(
-			item.discountCents,
-			lineSubtotals[index],
-		),
-	);
-	const baseDiscountTotal = baseLineDiscounts.reduce(
-		(sum, value) => sum + value,
-		0,
-	);
-
-	const remainingSubtotals = lineSubtotals.map(
-		(value, index) =>
-			Math.max(0, value - baseLineDiscounts[index]),
-	);
-	const additionalDiscount = clampDiscountCents(
-		additionalDiscountCents,
-		remainingSubtotals.reduce(
-			(sum, value) => sum + value,
-			0,
-		),
-	);
-	const additionalByLine =
-		allocateDiscountAcrossLines(
-			remainingSubtotals,
-			additionalDiscount,
-		);
-
-	const normalizedItems = items.map((item, index) => {
-		const lineDiscountCents =
-			baseLineDiscounts[index] +
-			additionalByLine[index];
-		return {
-			productId: item.productId,
-			cases: item.cases ?? 0,
-			singles: item.singles ?? 0,
-			units: lineMeta[index].units,
-			unitCostCents:
-				lineMeta[index].derivedUnitCostCents > 0
-					? lineMeta[index].derivedUnitCostCents
-					: undefined,
-			discountCents:
-				lineDiscountCents > 0
-					? lineDiscountCents
-					: undefined,
-			lineTotalCostCents: Math.max(
-				0,
-				lineSubtotals[index] - lineDiscountCents,
-			),
-		};
-	});
-
-	const discountCents =
-		baseDiscountTotal + additionalDiscount;
-	const totalCostCents = Math.max(
-		0,
-		subtotalCents - discountCents,
-	);
+	const normalizedItems = items.map((item, index) => ({
+		productId: item.productId,
+		cases: item.cases ?? 0,
+		singles: item.singles ?? 0,
+		units: lineMeta[index].units,
+		unitCostCents:
+			lineMeta[index].derivedUnitCostCents > 0
+				? lineMeta[index].derivedUnitCostCents
+				: undefined,
+		lineTotalCostCents: Math.max(0, lineSubtotals[index]),
+	}));
 
 	return {
 		items: normalizedItems,
 		subtotalCents,
-		discountCents,
-		totalCostCents,
+		totalCostCents: subtotalCents,
 	};
 }

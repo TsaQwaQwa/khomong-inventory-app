@@ -153,7 +153,6 @@ export async function POST(req: Request) {
 			productId: string;
 			units: number;
 			unitPriceCents: number;
-			discountCents?: number;
 		}[] = [];
 		for (const it of input.items) {
 			const unitPriceCents = await getPrice(
@@ -169,13 +168,9 @@ export async function POST(req: Request) {
 				productId: it.productId,
 				units: it.units,
 				unitPriceCents,
-				discountCents: it.discountCents,
 			});
 		}
-		const totals = calculateSaleTotals(
-			rawLines,
-			input.discountCents,
-		);
+		const totals = calculateSaleTotals(rawLines);
 		itemsWithPrice.push(...totals.items);
 		const belowCostViolations =
 			await findBelowCostViolations({
@@ -272,7 +267,6 @@ export async function POST(req: Request) {
 			businessDayId: String(day._id),
 			type: "CHARGE",
 			subtotalCents: totals.subtotalCents,
-			discountCents: totals.discountCents,
 			amountCents: totals.amountCents,
 			items: itemsWithPrice,
 			note: input.note,

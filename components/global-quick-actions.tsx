@@ -31,6 +31,7 @@ import {
 import { ProductSelect } from "@/components/product-select";
 import { CustomerSelect } from "@/components/customer-select";
 import { MoneyInput } from "@/components/money-input";
+import { CashChangeCalculator } from "@/components/cash-change-calculator";
 import {
 	Box,
 	ChevronDown,
@@ -156,7 +157,6 @@ interface PurchaseItemForm {
 	cases: string;
 	singles: string;
 	lineSubtotalCents: number;
-	discountCents: number;
 }
 
 interface AdjustmentItemForm {
@@ -233,11 +233,9 @@ interface DirectSaleHistoryLite {
 	id: string;
 	type: "DIRECT_SALE";
 	paymentMethod?: PaymentMethod;
-	discountCents?: number;
 	items?: {
 		productId: string;
 		units: number;
-		discountCents?: number;
 	}[];
 	isReversal?: boolean;
 	isReversed?: boolean;
@@ -529,7 +527,6 @@ export function GlobalQuickActions() {
 									(selectedMeta?.unitCostCents ??
 										0),
 							),
-						discountCents: 0,
 						suggestedSupplierId:
 							selectedMeta?.supplierId ?? "",
 					};
@@ -1338,6 +1335,8 @@ function QuickCheckoutForm({
 	>([]);
 	const [paymentMethod, setPaymentMethod] =
 		React.useState<PaymentMethod>("CASH");
+	const [cashReceivedCents, setCashReceivedCents] =
+		React.useState(0);
 	const scanInputRef =
 		React.useRef<HTMLInputElement | null>(null);
 	const lastScanKeyTsRef = React.useRef(0);
@@ -1413,7 +1412,7 @@ function QuickCheckoutForm({
 	}, [txnHistory]);
 	const isJourneyMode = mode !== "default";
 	const [journeyStep, setJourneyStep] =
-		React.useState<1 | 2>(
+		React.useState<1 | 2 | 3>(
 			isJourneyMode ? 1 : 2,
 		);
 	const [
@@ -1780,6 +1779,22 @@ function QuickCheckoutForm({
 		e: React.FormEvent,
 	) => {
 		e.preventDefault();
+		if (
+			paymentMethod === "CASH" &&
+			journeyStep !== 3
+		) {
+			setJourneyStep(3);
+			return;
+		}
+		if (
+			paymentMethod === "CASH" &&
+			cashReceivedCents < totalCents
+		) {
+			toast.error(
+				"Cash received is less than the sale total.",
+			);
+			return;
+		}
 		setLoading(true);
 
 		const validItems = items
@@ -1799,6 +1814,10 @@ function QuickCheckoutForm({
 			const payload = {
 				date,
 				paymentMethod,
+				cashReceivedCents:
+					paymentMethod === "CASH"
+						? cashReceivedCents
+						: undefined,
 				items: validItems,
 			};
 			const queueResult = await postSaleWithOfflineQueue(
@@ -1811,7 +1830,9 @@ function QuickCheckoutForm({
 				);
 				setItems([]);
 				setScanInput("");
+				setCashReceivedCents(0);
 				fastKeyStreakRef.current = 0;
+				setJourneyStep(isJourneyMode ? 1 : 2);
 				requestAnimationFrame(() =>
 					scanInputRef.current?.focus(),
 				);
@@ -1833,7 +1854,9 @@ function QuickCheckoutForm({
 			toast.success("Checkout saved");
 			setItems([]);
 			setScanInput("");
+			setCashReceivedCents(0);
 			fastKeyStreakRef.current = 0;
+			setJourneyStep(isJourneyMode ? 1 : 2);
 			requestAnimationFrame(() =>
 				scanInputRef.current?.focus(),
 			);
@@ -1962,6 +1985,33 @@ function QuickCheckoutForm({
 								</Button>
 							</div>
 						)}
+					</div>
+				) : journeyStep === 3 ? (
+					<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+						<div className="rounded-md border p-3">
+							<p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+								Cash Settlement
+							</p>
+							<p className="text-sm font-medium">
+								Enter cash received
+							</p>
+							<p className="text-xs text-muted-foreground">
+								Total due: {formatZAR(totalCents)}
+							</p>
+						</div>
+						<CashChangeCalculator
+							totalCents={totalCents}
+							cashReceivedCents={cashReceivedCents}
+							onCashReceivedChange={setCashReceivedCents}
+						/>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							onClick={() => setJourneyStep(2)}
+						>
+							Back to Items
+						</Button>
 					</div>
 				) : (
 					<>
@@ -2263,9 +2313,16 @@ function QuickCheckoutForm({
 				)}
 			</div>
 			<SaveFooter
-				disabled={loading || items.length === 0}
+				disabled={
+					loading || items.length === 0
+				}
 				loading={loading}
-				label="Checkout"
+				label={
+					journeyStep === 3 &&
+					paymentMethod === "CASH"
+						? "Confirm Cash Checkout"
+						: "Checkout"
+				}
 			/>
 		</form>
 	);
@@ -2841,14 +2898,58 @@ function DirectSaleForm({
 	>([]);
 	const [paymentMethod, setPaymentMethod] =
 		React.useState<PaymentMethod | "">("");
+	const [cashReceivedCents, setCashReceivedCents] =
+		React.useState(0);
+	const [cashStep, setCashStep] =
+		React.useState(false);
 	const [note, setNote] = React.useState("");
 	const [showNote, setShowNote] =
 		React.useState(false);
+	const productPriceById = React.useMemo(
+		() =>
+			new Map(
+				products.map((product) => [
+					product.id,
+					product.currentPriceCents ?? 0,
+				]),
+			),
+		[products],
+	);
+	const totalDueCents = React.useMemo(
+		() =>
+			items.reduce((sum, item) => {
+				const units =
+					parseInt(item.units, 10) || 0;
+				const unitPrice =
+					productPriceById.get(item.productId) ??
+					0;
+				return sum + units * unitPrice;
+			}, 0),
+		[items, productPriceById],
+	);
+	React.useEffect(() => {
+		if (paymentMethod !== "CASH") {
+			setCashStep(false);
+		}
+	}, [paymentMethod]);
 
 	const handleSubmit = async (
 		e: React.FormEvent,
 	) => {
 		e.preventDefault();
+		if (paymentMethod === "CASH" && !cashStep) {
+			setCashStep(true);
+			return;
+		}
+		if (
+			paymentMethod === "CASH" &&
+			cashReceivedCents < totalDueCents
+		) {
+			toast.error(
+				"Cash received is less than the sale total.",
+			);
+			return;
+		}
 		setLoading(true);
 		const validItems = items
 			.filter(
@@ -2870,6 +2971,10 @@ function DirectSaleForm({
 			const payload = {
 				date,
 				paymentMethod,
+				cashReceivedCents:
+					paymentMethod === "CASH"
+						? cashReceivedCents
+						: undefined,
 				items: validItems,
 				note:
 					showNote && note ? note : undefined,
@@ -2882,6 +2987,8 @@ function DirectSaleForm({
 				toast.success(
 					"Offline: direct sale queued and will sync automatically.",
 				);
+				setCashReceivedCents(0);
+				setCashStep(false);
 				onSuccess();
 				return;
 			}
@@ -2898,6 +3005,8 @@ function DirectSaleForm({
 				);
 			}
 			toast.success("Direct sale saved");
+			setCashReceivedCents(0);
+			setCashStep(false);
 			onSuccess();
 		} catch (err) {
 			toast.error(
@@ -2916,58 +3025,89 @@ function DirectSaleForm({
 			className="flex flex-col h-[60vh]"
 		>
 			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
-				<QuickAddSaleItems
-					items={items}
-					setItems={setItems}
-					products={products}
-				/>
-				<div className="space-y-3">
-					<Label>Payment Method</Label>
-					<Select
-						value={paymentMethod}
-						onValueChange={(v) =>
-							setPaymentMethod(v as PaymentMethod)
-						}
-					>
-						<SelectTrigger>
-							<SelectValue placeholder="Select method" />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="CASH">
-								Cash
-							</SelectItem>
-							<SelectItem value="CARD">
-								Card
-							</SelectItem>
-							<SelectItem value="EFT">
-								EFT
-							</SelectItem>
-						</SelectContent>
-					</Select>
-				</div>
-				<div className="space-y-2">
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						className="w-full"
-						onClick={() =>
-							setShowNote((prev) => !prev)
-						}
-					>
-						{showNote ? "Hide Note" : "Add Note"}
-					</Button>
-					{showNote && (
-						<Textarea
-							value={note}
-							onChange={(e) =>
-								setNote(e.target.value)
-							}
-							placeholder="Any notes..."
-							rows={2}
+				{cashStep && paymentMethod === "CASH" ? (
+					<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+						<div className="rounded-md border p-3">
+							<p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+								Cash Settlement
+							</p>
+							<p className="text-sm font-medium">
+								Enter cash received
+							</p>
+							<p className="text-xs text-muted-foreground">
+								Total due: {formatZAR(totalDueCents)}
+							</p>
+						</div>
+						<CashChangeCalculator
+							totalCents={totalDueCents}
+							cashReceivedCents={cashReceivedCents}
+							onCashReceivedChange={setCashReceivedCents}
 						/>
-					)}
-				</div>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							onClick={() => setCashStep(false)}
+						>
+							Back to Items
+						</Button>
+					</div>
+				) : (
+					<>
+						<QuickAddSaleItems
+							items={items}
+							setItems={setItems}
+							products={products}
+						/>
+						<div className="space-y-3">
+							<Label>Payment Method</Label>
+							<Select
+								value={paymentMethod}
+								onValueChange={(v) =>
+									setPaymentMethod(v as PaymentMethod)
+								}
+							>
+								<SelectTrigger>
+									<SelectValue placeholder="Select method" />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="CASH">
+										Cash
+									</SelectItem>
+									<SelectItem value="CARD">
+										Card
+									</SelectItem>
+									<SelectItem value="EFT">
+										EFT
+									</SelectItem>
+								</SelectContent>
+							</Select>
+						</div>
+						<div className="space-y-2">
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="w-full"
+								onClick={() =>
+									setShowNote((prev) => !prev)
+								}
+							>
+								{showNote ? "Hide Note" : "Add Note"}
+							</Button>
+							{showNote && (
+								<Textarea
+									value={note}
+									onChange={(e) =>
+										setNote(e.target.value)
+									}
+									placeholder="Any notes..."
+									rows={2}
+								/>
+							)}
+						</div>
+					</>
+				)}
 			</div>
 			<SaveFooter
 				disabled={
@@ -2976,6 +3116,11 @@ function DirectSaleForm({
 					items.length === 0
 				}
 				loading={loading}
+				label={
+					cashStep && paymentMethod === "CASH"
+						? "Confirm Cash Sale"
+						: "Save"
+				}
 			/>
 		</form>
 	);
@@ -3311,6 +3456,10 @@ function AccountPaymentForm({
 		React.useState(0);
 	const [paymentMethod, setPaymentMethod] =
 		React.useState<PaymentMethod | "">("");
+	const [cashReceivedCents, setCashReceivedCents] =
+		React.useState(0);
+	const [cashStep, setCashStep] =
+		React.useState(false);
 	const [reference, setReference] =
 		React.useState("");
 	const [showReference, setShowReference] =
@@ -3318,11 +3467,29 @@ function AccountPaymentForm({
 	const [note, setNote] = React.useState("");
 	const [showNote, setShowNote] =
 		React.useState(false);
+	React.useEffect(() => {
+		if (paymentMethod !== "CASH") {
+			setCashStep(false);
+		}
+	}, [paymentMethod]);
 
 	const handleSubmit = async (
 		e: React.FormEvent,
 	) => {
 		e.preventDefault();
+		if (paymentMethod === "CASH" && !cashStep) {
+			setCashStep(true);
+			return;
+		}
+		if (
+			paymentMethod === "CASH" &&
+			cashReceivedCents < amountCents
+		) {
+			toast.error(
+				"Cash received is less than the payment amount.",
+			);
+			return;
+		}
 		setLoading(true);
 		try {
 			const payload = {
@@ -3330,6 +3497,10 @@ function AccountPaymentForm({
 				customerId,
 				amountCents,
 				paymentMethod,
+				cashReceivedCents:
+					paymentMethod === "CASH"
+						? cashReceivedCents
+						: undefined,
 				reference:
 					showReference && reference
 						? reference
@@ -3345,6 +3516,8 @@ function AccountPaymentForm({
 				toast.success(
 					"Offline: payment queued and will sync automatically.",
 				);
+				setCashReceivedCents(0);
+				setCashStep(false);
 				onSuccess();
 				return;
 			}
@@ -3363,6 +3536,8 @@ function AccountPaymentForm({
 			toast.success(
 				"Payment recorded successfully",
 			);
+			setCashReceivedCents(0);
+			setCashStep(false);
 			onSuccess();
 		} catch (err) {
 			toast.error(
@@ -3381,97 +3556,128 @@ function AccountPaymentForm({
 			className="flex flex-col h-[60vh]"
 		>
 			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
-				<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-					<CustomerSelect
-						customers={customers}
-						value={customerId}
-						onChange={setCustomerId}
-						label="Tab Holder"
-					/>
-					<MoneyInput
-						label="Amount"
-						value={amountCents}
-						onChange={setAmountCents}
-					/>
-				</div>
-
-				<div className="space-y-3">
-					<Label>Payment Method</Label>
-					<Select
-						value={paymentMethod}
-						onValueChange={(v) =>
-							setPaymentMethod(v as PaymentMethod)
-						}
-					>
-						<SelectTrigger>
-							<SelectValue placeholder="Select method" />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="CASH">
-								Cash
-							</SelectItem>
-							<SelectItem value="CARD">
-								Card
-							</SelectItem>
-							<SelectItem value="EFT">
-								EFT
-							</SelectItem>
-						</SelectContent>
-					</Select>
-				</div>
-
-				<div className="space-y-2">
-					<div className="grid grid-cols-2 gap-2">
+				{cashStep && paymentMethod === "CASH" ? (
+					<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+						<div className="rounded-md border p-3">
+							<p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+								Cash Settlement
+							</p>
+							<p className="text-sm font-medium">
+								Confirm cash received and change
+							</p>
+							<p className="text-xs text-muted-foreground">
+								Payment amount: {formatZAR(amountCents)}
+							</p>
+						</div>
+						<CashChangeCalculator
+							totalCents={amountCents}
+							cashReceivedCents={cashReceivedCents}
+							onCashReceivedChange={setCashReceivedCents}
+						/>
 						<Button
 							type="button"
 							variant="outline"
 							size="sm"
-							className="w-full"
-							onClick={() =>
-								setShowReference((prev) => !prev)
-							}
+							onClick={() => setCashStep(false)}
 						>
-							{showReference
-								? "Hide Ref"
-								: "Add Ref"}
-						</Button>
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							className="w-full"
-							onClick={() =>
-								setShowNote((prev) => !prev)
-							}
-						>
-							{showNote
-								? "Hide Note"
-								: "Add Note"}
+							Back
 						</Button>
 					</div>
-					{showReference && (
-						<div className="space-y-2">
-							<Label>Reference (optional)</Label>
-							<Input
-								value={reference}
-								onChange={(e) =>
-									setReference(e.target.value)
-								}
-								placeholder="e.g. Receipt #123"
+				) : (
+					<>
+						<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+							<CustomerSelect
+								customers={customers}
+								value={customerId}
+								onChange={setCustomerId}
+								label="Tab Holder"
+							/>
+							<MoneyInput
+								label="Amount"
+								value={amountCents}
+								onChange={setAmountCents}
 							/>
 						</div>
-					)}
-					{showNote && (
-						<Textarea
-							value={note}
-							onChange={(e) =>
-								setNote(e.target.value)
-							}
-							placeholder="Any notes..."
-							rows={2}
-						/>
-					)}
-				</div>
+
+						<div className="space-y-3">
+							<Label>Payment Method</Label>
+							<Select
+								value={paymentMethod}
+								onValueChange={(v) =>
+									setPaymentMethod(v as PaymentMethod)
+								}
+							>
+								<SelectTrigger>
+									<SelectValue placeholder="Select method" />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="CASH">
+										Cash
+									</SelectItem>
+									<SelectItem value="CARD">
+										Card
+									</SelectItem>
+									<SelectItem value="EFT">
+										EFT
+									</SelectItem>
+								</SelectContent>
+							</Select>
+						</div>
+
+						<div className="space-y-2">
+							<div className="grid grid-cols-2 gap-2">
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									className="w-full"
+									onClick={() =>
+										setShowReference((prev) => !prev)
+									}
+								>
+									{showReference
+										? "Hide Ref"
+										: "Add Ref"}
+								</Button>
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									className="w-full"
+									onClick={() =>
+										setShowNote((prev) => !prev)
+									}
+								>
+									{showNote
+										? "Hide Note"
+										: "Add Note"}
+								</Button>
+							</div>
+							{showReference && (
+								<div className="space-y-2">
+									<Label>Reference (optional)</Label>
+									<Input
+										value={reference}
+										onChange={(e) =>
+											setReference(e.target.value)
+										}
+										placeholder="e.g. Receipt #123"
+									/>
+								</div>
+							)}
+							{showNote && (
+								<Textarea
+									value={note}
+									onChange={(e) =>
+										setNote(e.target.value)
+									}
+									placeholder="Any notes..."
+									rows={2}
+								/>
+							)}
+						</div>
+					</>
+				)}
 			</div>
 			<SaveFooter
 				disabled={
@@ -3481,6 +3687,11 @@ function AccountPaymentForm({
 					amountCents <= 0
 				}
 				loading={loading}
+				label={
+					cashStep && paymentMethod === "CASH"
+						? "Confirm Payment"
+						: "Save"
+				}
 			/>
 		</form>
 	);
@@ -4105,8 +4316,6 @@ function AddPurchaseForm({
 		React.useState(initialSupplierId ?? "");
 	const [invoiceNo, setInvoiceNo] =
 		React.useState("");
-	const [discountCents, setDiscountCents] =
-		React.useState(0);
 	const [items, setItems] = React.useState<
 		PurchaseItemForm[]
 	>(
@@ -4118,7 +4327,6 @@ function AddPurchaseForm({
 						cases: "",
 						singles: "",
 						lineSubtotalCents: 0,
-						discountCents: 0,
 					},
 				],
 	);
@@ -4135,7 +4343,6 @@ function AddPurchaseForm({
 				cases: "",
 				singles: "",
 				lineSubtotalCents: 0,
-				discountCents: 0,
 			},
 		]);
 	}, [initialItems, initialSupplierId]);
@@ -4192,10 +4399,6 @@ function AddPurchaseForm({
 					item.lineSubtotalCents > 0
 						? item.lineSubtotalCents
 						: undefined,
-				discountCents:
-					item.discountCents > 0
-						? item.discountCents
-						: undefined,
 			}));
 		if (!validItems.length) {
 			toast.error("Please add at least one item");
@@ -4207,10 +4410,6 @@ function AddPurchaseForm({
 				supplierId: supplierId || undefined,
 				invoiceNo: invoiceNo || undefined,
 				purchaseDate: date,
-				discountCents:
-					discountCents > 0
-						? discountCents
-						: undefined,
 				items: validItems,
 			};
 			const queueResult =
@@ -4291,11 +4490,6 @@ function AddPurchaseForm({
 							placeholder="INV-12345"
 						/>
 					</div>
-					<MoneyInput
-						label="Purchase Discount (optional)"
-						value={discountCents}
-						onChange={setDiscountCents}
-					/>
 					<div className="space-y-2">
 						<Label>Items</Label>
 						<div className="space-y-3">
@@ -4310,11 +4504,6 @@ function AddPurchaseForm({
 												subtotalCents / units,
 										  )
 										: 0;
-								const netCents = Math.max(
-									0,
-									subtotalCents -
-										item.discountCents,
-								);
 								return (
 									<div
 										key={index}
@@ -4371,7 +4560,7 @@ function AddPurchaseForm({
 											<div className="col-span-8 flex items-end gap-1 sm:col-span-2">
 												<div className="min-w-0 flex-1 space-y-1">
 													<Label className="text-xs">
-														Line Total Price
+														Total
 													</Label>
 														<MoneyInput
 															value={
@@ -4380,23 +4569,6 @@ function AddPurchaseForm({
 															onChange={(v) =>
 																updateItem(index, {
 																	lineSubtotalCents: v,
-															})
-														}
-														placeholder="0.00"
-														className="space-y-0"
-													/>
-												</div>
-												<div className="min-w-0 flex-1 space-y-1">
-													<Label className="text-xs">
-														Item Discount
-													</Label>
-														<MoneyInput
-															value={
-																item.discountCents
-															}
-															onChange={(v) =>
-																updateItem(index, {
-																	discountCents: v,
 															})
 														}
 														placeholder="0.00"
@@ -4424,8 +4596,7 @@ function AddPurchaseForm({
 											</div>
 										</div>
 										<p className="text-[11px] text-muted-foreground">
-											Subtotal {formatZAR(subtotalCents)} | Net{" "}
-											{formatZAR(netCents)}
+											Subtotal {formatZAR(subtotalCents)}
 										</p>
 										<p className="text-[11px] text-muted-foreground">
 											Estimated unit cost:{" "}
@@ -4451,7 +4622,6 @@ function AddPurchaseForm({
 									cases: "",
 									singles: "",
 									lineSubtotalCents: 0,
-									discountCents: 0,
 								},
 							])
 						}
