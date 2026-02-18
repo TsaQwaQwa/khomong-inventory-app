@@ -339,6 +339,10 @@ export function TabsClient({
 			onError: (err) => toast.error(err.message),
 		},
 	);
+	const { data: access } = useSWR<{
+		isAdmin: boolean;
+	}>("/api/session/access", fetcher);
+	const isAdmin = access?.isAdmin ?? false;
 
 	const {
 		data: products,
@@ -499,6 +503,12 @@ export function TabsClient({
 		statementLoading,
 		setStatementLoading,
 	] = React.useState(false);
+	const [deletingCustomerId, setDeletingCustomerId] =
+		React.useState<string | null>(null);
+	const [
+		pendingDeleteCustomer,
+		setPendingDeleteCustomer,
+	] = React.useState<Customer | null>(null);
 
 	React.useEffect(() => {
 		const qsQuery = searchParams.get("q");
@@ -756,6 +766,42 @@ export function TabsClient({
 			setReverseLoading(false);
 		}
 	};
+	const handleDeleteCustomer = React.useCallback(
+		async (customer: Customer) => {
+			setDeletingCustomerId(customer.id);
+			try {
+				const res = await fetch(
+					`/api/customers/${customer.id}`,
+					{
+						method: "DELETE",
+					},
+				);
+				const body = await res
+					.json()
+					.catch(() => ({}));
+				if (!res.ok) {
+					throw new Error(
+						getApiErrorMessage(
+							body,
+							"Failed to delete customer",
+						),
+					);
+				}
+				toast.success("Customer deleted");
+				await mutateCustomers();
+				setPendingDeleteCustomer(null);
+			} catch (error) {
+				toast.error(
+					error instanceof Error
+						? error.message
+						: "Failed to delete customer",
+				);
+			} finally {
+				setDeletingCustomerId(null);
+			}
+		},
+		[mutateCustomers],
+	);
 
 	const repeatSaleFromHistory = (
 		txn: TabTransactionHistory,
@@ -1112,6 +1158,9 @@ export function TabsClient({
 															0;
 														const hasBalance =
 															balanceCents > 0;
+														const canDeleteCustomer =
+															isAdmin &&
+															!hasBalance;
 														const dueDateLabel =
 															customer.dueDate
 																? formatDateDisplay(
@@ -1149,19 +1198,40 @@ export function TabsClient({
 																				"No phone"}
 																		</p>
 																	</div>
-																	<Button
-																		type="button"
-																		size="sm"
-																		variant="outline"
-																		onClick={() =>
-																			setEditingCustomer(
-																				customer,
-																			)
-																		}
-																	>
-																		<Pencil className="mr-2 h-3.5 w-3.5" />
-																		Edit
-																	</Button>
+																	<div className="flex items-center gap-2">
+																		<Button
+																			type="button"
+																			size="sm"
+																			variant="outline"
+																			onClick={() =>
+																				setEditingCustomer(
+																					customer,
+																				)
+																			}
+																		>
+																			<Pencil className="mr-2 h-3.5 w-3.5" />
+																			Edit
+																		</Button>
+																		{canDeleteCustomer && (
+																			<Button
+																				type="button"
+																				size="sm"
+																				variant="destructive"
+																				disabled={
+																					deletingCustomerId ===
+																					customer.id
+																				}
+																				onClick={() =>
+																					setPendingDeleteCustomer(
+																						customer,
+																					)
+																				}
+																			>
+																				<Trash2 className="mr-2 h-3.5 w-3.5" />
+																				Delete
+																			</Button>
+																		)}
+																	</div>
 																</div>
 																<div className="mt-3 grid grid-cols-2 gap-2 text-sm">
 																	<div>
@@ -1247,6 +1317,9 @@ export function TabsClient({
 																const hasBalance =
 																	balanceCents >
 																	0;
+																const canDeleteCustomer =
+																	isAdmin &&
+																	!hasBalance;
 																const dueDateLabel =
 																	customer.dueDate
 																		? formatDateDisplay(
@@ -1322,19 +1395,40 @@ export function TabsClient({
 																				"-"}
 																		</TableCell>
 																		<TableCell className="text-right">
-																			<Button
-																				type="button"
-																				size="sm"
-																				variant="outline"
-																				onClick={() =>
-																					setEditingCustomer(
-																						customer,
-																					)
-																				}
-																			>
-																				<Pencil className="mr-2 h-3.5 w-3.5" />
-																				Edit
-																			</Button>
+																			<div className="flex items-center justify-end gap-2">
+																				<Button
+																					type="button"
+																					size="sm"
+																					variant="outline"
+																					onClick={() =>
+																						setEditingCustomer(
+																							customer,
+																						)
+																					}
+																				>
+																					<Pencil className="mr-2 h-3.5 w-3.5" />
+																					Edit
+																				</Button>
+																				{canDeleteCustomer && (
+																					<Button
+																						type="button"
+																						size="sm"
+																						variant="destructive"
+																						disabled={
+																							deletingCustomerId ===
+																							customer.id
+																						}
+																						onClick={() =>
+																							setPendingDeleteCustomer(
+																								customer,
+																							)
+																						}
+																					>
+																						<Trash2 className="mr-2 h-3.5 w-3.5" />
+																						Delete
+																					</Button>
+																				)}
+																			</div>
 																		</TableCell>
 																	</TableRow>
 																);
@@ -1979,6 +2073,62 @@ export function TabsClient({
 					</TabsContent>
 				)}
 			</Tabs>
+
+			<Dialog
+				open={Boolean(pendingDeleteCustomer)}
+				onOpenChange={(open) => {
+					if (!open) {
+						setPendingDeleteCustomer(null);
+					}
+				}}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>
+							Delete Customer
+						</DialogTitle>
+						<DialogDescription>
+							Delete{" "}
+							<strong>
+								{pendingDeleteCustomer?.name}
+							</strong>
+							? This is only allowed when their balance is zero.
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<DialogClose asChild>
+							<Button
+								type="button"
+								variant="outline"
+							>
+								Cancel
+							</Button>
+						</DialogClose>
+						<Button
+							type="button"
+							variant="destructive"
+							disabled={
+								!pendingDeleteCustomer ||
+								deletingCustomerId ===
+									pendingDeleteCustomer.id
+							}
+							onClick={() => {
+								if (!pendingDeleteCustomer)
+									return;
+								void handleDeleteCustomer(
+									pendingDeleteCustomer,
+								);
+							}}
+						>
+							{pendingDeleteCustomer &&
+							deletingCustomerId ===
+								pendingDeleteCustomer.id
+								? "Deleting..."
+								: "Delete"}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 
 			<Dialog
 				open={Boolean(reversingTxn)}

@@ -1,12 +1,16 @@
 export const runtime = "nodejs";
 
 import { connectDB } from "@/lib/db";
-import { requireOrgAuth } from "@/lib/authz";
+import {
+	requireOrgAuth,
+	requireAdminEmail,
+} from "@/lib/authz";
 import { ok, fail } from "@/lib/http";
 import { parseJson } from "@/lib/validate";
 import { customerUpdateSchema } from "@/lib/schemas";
 import { Customer } from "@/models/Customer";
 import { TabAccount } from "@/models/TabAccount";
+import { TabTransaction } from "@/models/TabTransaction";
 import { serializeDoc } from "@/lib/serialize";
 import {
 	getScopeIdFromAuth,
@@ -156,4 +160,142 @@ export async function PATCH(
 			code: "SERVER_ERROR",
 		});
 	}
+}
+
+export async function DELETE(
+	_: Request,
+	ctx: { params: Promise<{ id: string }> },
+) {
+	let a;
+	try {
+		a = await requireAdminEmail();
+	} catch (error) {
+		const message = String(
+			(error as Error)?.message ?? "",
+		);
+		if (message === "FORBIDDEN_ADMIN") {
+			return fail("Admin access required", {
+				status: 403,
+				code: "FORBIDDEN",
+			});
+		}
+		return fail("Unauthorized", {
+			status: 401,
+			code: "UNAUTHORIZED",
+		});
+	}
+
+	const { id } = await ctx.params;
+	await connectDB();
+
+	const [customer, accountBefore] = await Promise.all([
+		Customer.findOne({
+			_id: id,
+			isActive: true,
+		}).lean(),
+		TabAccount.findOne({ customerId: id }).lean(),
+	]);
+	if (!customer) {
+		return fail("Customer not found", {
+			status: 404,
+			code: "NOT_FOUND",
+		});
+	}
+	const [balance] = await TabTransaction.aggregate<{
+		_id: string;
+		charges: number;
+		payments: number;
+		adjustments: number;
+	}>([
+		{
+			$match: {
+				customerId: id,
+			},
+		},
+		{
+			$group: {
+				_id: "$customerId",
+				charges: {
+					$sum: {
+						$cond: [
+							{ $eq: ["$type", "CHARGE"] },
+							"$amountCents",
+							0,
+						],
+					},
+				},
+				payments: {
+					$sum: {
+						$cond: [
+							{ $eq: ["$type", "PAYMENT"] },
+							"$amountCents",
+							0,
+						],
+					},
+				},
+				adjustments: {
+					$sum: {
+						$cond: [
+							{
+								$eq: [
+									"$type",
+									"ADJUSTMENT",
+								],
+							},
+							"$amountCents",
+							0,
+						],
+					},
+				},
+			},
+		},
+	]);
+	const balanceCents =
+		(balance?.charges ?? 0) -
+		(balance?.payments ?? 0) +
+		(balance?.adjustments ?? 0);
+	if (balanceCents > 0) {
+		return fail(
+			"Cannot delete customer with outstanding balance.",
+			{
+				status: 400,
+				code: "OUTSTANDING_BALANCE",
+			},
+		);
+	}
+
+	await Promise.all([
+		Customer.updateOne(
+			{ _id: id },
+			{ $set: { isActive: false } },
+		),
+		TabAccount.updateOne(
+			{ customerId: id },
+			{ $set: { status: "BLOCKED" } },
+		),
+	]);
+
+	const [updatedCustomer, updatedAccount] =
+		await Promise.all([
+			Customer.findOne({ _id: id }).lean(),
+			TabAccount.findOne({ customerId: id }).lean(),
+		]);
+
+	await writeAuditLog({
+		scopeId: getScopeIdFromAuth(a),
+		actorUserId: a.userId ?? undefined,
+		action: "DELETE",
+		entityType: "Customer",
+		entityId: id,
+		oldValues: toAuditObject({
+			customer,
+			tabAccount: accountBefore,
+		}),
+		newValues: toAuditObject({
+			customer: updatedCustomer,
+			tabAccount: updatedAccount,
+		}),
+	});
+
+	return ok({ id });
 }

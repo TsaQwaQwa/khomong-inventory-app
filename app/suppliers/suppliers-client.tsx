@@ -8,7 +8,10 @@ import {
 } from "next/navigation";
 import useSWR from "swr";
 import { toast } from "sonner";
-import { AlertCircle } from "lucide-react";
+import {
+	AlertCircle,
+	Trash2,
+} from "lucide-react";
 import { PageWrapper } from "@/components/page-wrapper";
 import { DateRangeControls } from "@/components/date-range-controls";
 import { LoadingTable } from "@/components/loading-state";
@@ -25,6 +28,15 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import {
+	Dialog,
+	DialogClose,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import {
 	Tabs,
 	TabsContent,
@@ -134,6 +146,7 @@ export function SuppliersClient() {
 		items: suppliers,
 		error: effectiveSuppliersError,
 		isLoading: effectiveSuppliersLoading,
+		mutate: mutateSuppliers,
 		usingCachedData: usingCachedSuppliers,
 	} = useOfflineCachedArraySWR<Supplier>({
 		key: "/api/suppliers",
@@ -145,6 +158,12 @@ export function SuppliersClient() {
 		isAdmin: boolean;
 	}>("/api/session/access", fetcher);
 	const isAdmin = access?.isAdmin ?? false;
+	const [
+		pendingDeleteSupplier,
+		setPendingDeleteSupplier,
+	] = React.useState<Supplier | null>(null);
+	const [deletingSupplierId, setDeletingSupplierId] =
+		React.useState<string | null>(null);
 	const [backfillLoading, setBackfillLoading] =
 		React.useState(false);
 	const { items: products } = useOfflineCachedArraySWR<Product>({
@@ -483,6 +502,41 @@ export function SuppliersClient() {
 			setBackfillLoading(false);
 		}
 	};
+	const deleteSupplier = React.useCallback(
+		async (supplier: Supplier) => {
+			setDeletingSupplierId(supplier.id);
+			try {
+				const res = await fetch(
+					`/api/suppliers/${supplier.id}`,
+					{
+						method: "DELETE",
+					},
+				);
+				const json = await res
+					.json()
+					.catch(() => ({}));
+				if (!res.ok) {
+					throw new Error(
+						json?.error?.message ??
+							json?.error ??
+							"Failed to delete supplier",
+					);
+				}
+				toast.success("Supplier deleted");
+				setPendingDeleteSupplier(null);
+				await mutateSuppliers();
+			} catch (error) {
+				toast.error(
+					error instanceof Error
+						? error.message
+						: "Failed to delete supplier",
+				);
+			} finally {
+				setDeletingSupplierId(null);
+			}
+		},
+		[mutateSuppliers],
+	);
 
 	return (
 		<PageWrapper
@@ -614,6 +668,23 @@ export function SuppliersClient() {
 														<p>{supplier.knownCosts}</p>
 													</div>
 												</div>
+												{isAdmin && (
+													<div className="mt-3 flex justify-end">
+														<Button
+															type="button"
+															variant="destructive"
+															size="sm"
+															onClick={() =>
+																setPendingDeleteSupplier(
+																	supplier,
+																)
+															}
+														>
+															<Trash2 className="mr-1 h-3 w-3" />
+															Delete
+														</Button>
+													</div>
+												)}
 											</div>
 										))}
 									</div>
@@ -633,6 +704,11 @@ export function SuppliersClient() {
 													<TableHead className="text-right">
 														Last Purchase
 													</TableHead>
+													{isAdmin && (
+														<TableHead className="text-right">
+															Actions
+														</TableHead>
+													)}
 												</TableRow>
 											</TableHeader>
 											<TableBody>
@@ -653,6 +729,23 @@ export function SuppliersClient() {
 														<TableCell className="text-right">
 															{supplier.lastPurchase}
 														</TableCell>
+														{isAdmin && (
+															<TableCell className="text-right">
+																<Button
+																	type="button"
+																	variant="destructive"
+																	size="sm"
+																	onClick={() =>
+																		setPendingDeleteSupplier(
+																			supplier,
+																		)
+																	}
+																>
+																	<Trash2 className="mr-1 h-3 w-3" />
+																	Delete
+																</Button>
+															</TableCell>
+														)}
 													</TableRow>
 												))}
 											</TableBody>
@@ -931,6 +1024,61 @@ export function SuppliersClient() {
 					</Card>
 				</TabsContent>
 			</Tabs>
+			<Dialog
+				open={Boolean(pendingDeleteSupplier)}
+				onOpenChange={(open) => {
+					if (!open) {
+						setPendingDeleteSupplier(null);
+					}
+				}}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>
+							Delete Supplier
+						</DialogTitle>
+						<DialogDescription>
+							Delete{" "}
+							<strong>
+								{pendingDeleteSupplier?.name}
+							</strong>
+							? This action cannot be undone.
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<DialogClose asChild>
+							<Button
+								type="button"
+								variant="outline"
+							>
+								Cancel
+							</Button>
+						</DialogClose>
+						<Button
+							type="button"
+							variant="destructive"
+							disabled={
+								!pendingDeleteSupplier ||
+								deletingSupplierId ===
+									pendingDeleteSupplier.id
+							}
+							onClick={() => {
+								if (!pendingDeleteSupplier)
+									return;
+								void deleteSupplier(
+									pendingDeleteSupplier,
+								);
+							}}
+						>
+							{pendingDeleteSupplier &&
+							deletingSupplierId ===
+								pendingDeleteSupplier.id
+								? "Deleting..."
+								: "Delete"}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</PageWrapper>
 	);
 }

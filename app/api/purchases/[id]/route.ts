@@ -1,7 +1,10 @@
 export const runtime = "nodejs";
 
 import { connectDB } from "@/lib/db";
-import { requireOrgAuth } from "@/lib/authz";
+import {
+	requireOrgAuth,
+	requireAdminEmail,
+} from "@/lib/authz";
 import { ok, fail } from "@/lib/http";
 import { Purchase } from "@/models/Purchase";
 import { serializeDoc } from "@/lib/serialize";
@@ -172,4 +175,54 @@ export async function PATCH(
 			code: "SERVER_ERROR",
 		});
 	}
+}
+
+export async function DELETE(
+	_: Request,
+	ctx: { params: Promise<{ id: string }> },
+) {
+	let a;
+	try {
+		a = await requireAdminEmail();
+	} catch (error) {
+		const message = String(
+			(error as Error)?.message ?? "",
+		);
+		if (message === "FORBIDDEN_ADMIN") {
+			return fail("Admin access required", {
+				status: 403,
+				code: "FORBIDDEN",
+			});
+		}
+		return fail("Unauthorized", {
+			status: 401,
+			code: "UNAUTHORIZED",
+		});
+	}
+
+	const { id } = await ctx.params;
+	await connectDB();
+
+	const existing = await Purchase.findOne({
+		_id: id,
+	}).lean();
+	if (!existing) {
+		return fail("Purchase not found", {
+			status: 404,
+			code: "NOT_FOUND",
+		});
+	}
+
+	await Purchase.deleteOne({ _id: id });
+	await writeAuditLog({
+		scopeId: getScopeIdFromAuth(a),
+		actorUserId: a.userId ?? undefined,
+		action: "DELETE",
+		entityType: "Purchase",
+		entityId: id,
+		oldValues: toAuditObject(existing),
+		newValues: null,
+	});
+
+	return ok({ id });
 }

@@ -2,6 +2,7 @@
 /* eslint-disable max-len */
 
 import * as React from "react";
+import useSWR from "swr";
 import { toast } from "sonner";
 import {
 	Plus,
@@ -96,6 +97,12 @@ export function PurchasesClient() {
 		React.useState<Purchase | null>(null);
 	const [editingPurchase, setEditingPurchase] =
 		React.useState<Purchase | null>(null);
+	const [
+		pendingDeletePurchase,
+		setPendingDeletePurchase,
+	] = React.useState<Purchase | null>(null);
+	const [deletingPurchaseId, setDeletingPurchaseId] =
+		React.useState<string | null>(null);
 
 	const {
 		items: purchases,
@@ -119,6 +126,10 @@ export function PurchasesClient() {
 		cacheKey: "suppliers:list",
 		fetcher,
 	});
+	const { data: access } = useSWR<{
+		isAdmin: boolean;
+	}>("/api/session/access", fetcher);
+	const isAdmin = access?.isAdmin ?? false;
 
 	const normalizedProducts = React.useMemo(
 		() => (Array.isArray(products) ? products : []),
@@ -130,6 +141,41 @@ export function PurchasesClient() {
 				? purchases[0]
 				: null,
 		[purchases],
+	);
+	const deletePurchase = React.useCallback(
+		async (purchase: Purchase) => {
+			setDeletingPurchaseId(purchase.id);
+			try {
+				const res = await fetch(
+					`/api/purchases/${purchase.id}`,
+					{
+						method: "DELETE",
+					},
+				);
+				const json = await res
+					.json()
+					.catch(() => ({}));
+				if (!res.ok) {
+					throw new Error(
+						json?.error?.message ??
+							json?.error ??
+							"Failed to delete purchase",
+					);
+				}
+				toast.success("Purchase deleted");
+				setPendingDeletePurchase(null);
+				await mutate();
+			} catch (error) {
+				toast.error(
+					error instanceof Error
+						? error.message
+						: "Failed to delete purchase",
+				);
+			} finally {
+				setDeletingPurchaseId(null);
+			}
+		},
+		[mutate],
 	);
 
 	return (
@@ -232,10 +278,71 @@ export function PurchasesClient() {
 							onEditPurchase={() =>
 								setEditingPurchase(purchase)
 							}
+							onDeletePurchase={
+								isAdmin
+									? () =>
+										setPendingDeletePurchase(
+											purchase,
+										)
+									: undefined
+							}
 						/>
 					))}
 				</div>
 			)}
+
+			<Dialog
+				open={Boolean(pendingDeletePurchase)}
+				onOpenChange={(open) => {
+					if (!open) {
+						setPendingDeletePurchase(null);
+					}
+				}}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>
+							Delete Purchase
+						</DialogTitle>
+						<DialogDescription>
+							Delete this purchase record?
+							This action cannot be undone.
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<DialogClose asChild>
+							<Button
+								type="button"
+								variant="outline"
+							>
+								Cancel
+							</Button>
+						</DialogClose>
+						<Button
+							type="button"
+							variant="destructive"
+							disabled={
+								!pendingDeletePurchase ||
+								deletingPurchaseId ===
+									pendingDeletePurchase.id
+							}
+							onClick={() => {
+								if (!pendingDeletePurchase)
+									return;
+								void deletePurchase(
+									pendingDeletePurchase,
+								);
+							}}
+						>
+							{pendingDeletePurchase &&
+							deletingPurchaseId ===
+								pendingDeletePurchase.id
+								? "Deleting..."
+								: "Delete"}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 
 			<Dialog
 				open={Boolean(editingPurchase)}
@@ -263,10 +370,12 @@ function PurchaseCard({
 	purchase,
 	products,
 	onEditPurchase,
+	onDeletePurchase,
 }: {
 	purchase: Purchase;
 	products: Product[];
 	onEditPurchase?: () => void;
+	onDeletePurchase?: () => void;
 }) {
 	const attachments =
 		purchase.attachmentIds?.filter(Boolean) ?? [];
@@ -313,6 +422,16 @@ function PurchaseCard({
 							>
 								<Edit className="mr-2 h-4 w-4" />
 								Edit Purchase
+							</Button>
+						)}
+						{onDeletePurchase && (
+							<Button
+								variant="destructive"
+								size="sm"
+								onClick={onDeletePurchase}
+							>
+								<Trash2 className="mr-2 h-4 w-4" />
+								Delete
 							</Button>
 						)}
 					</div>

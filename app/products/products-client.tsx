@@ -15,6 +15,7 @@ import {
 	AlertCircle,
 	Edit,
 	ClipboardEdit,
+	Trash2,
 } from "lucide-react";
 import { PageWrapper } from "@/components/page-wrapper";
 import { LoadingTable } from "@/components/loading-state";
@@ -63,6 +64,7 @@ import { jsonFetcher } from "@/lib/swr";
 import { useOfflineCachedArraySWR } from "@/lib/use-offline-cached-swr";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/lib/types";
+import useSWR from "swr";
 
 const CATEGORIES = [
 	"Beer",
@@ -125,6 +127,12 @@ export function ProductsClient({
 		fetcher: (url) => jsonFetcher<ProductWithStock[]>(url),
 		onError: (err) => toast.error(err.message),
 	});
+	const { data: access } = useSWR<{
+		isAdmin: boolean;
+	}>("/api/session/access", (url: string) =>
+		jsonFetcher<{ isAdmin: boolean }>(url),
+	);
+	const isAdmin = access?.isAdmin ?? false;
 	const visibleProducts = React.useMemo(() => {
 		if (!products) return [];
 		let filtered = products;
@@ -172,6 +180,12 @@ export function ProductsClient({
 		React.useState<Product | null>(null);
 	const [editingProduct, setEditingProduct] =
 		React.useState<Product | null>(null);
+	const [
+		pendingDeleteProduct,
+		setPendingDeleteProduct,
+	] = React.useState<ProductWithStock | null>(null);
+	const [deletingProductId, setDeletingProductId] =
+		React.useState<string | null>(null);
 
 	const handlePriceClick = (product: Product) => {
 		setSelectedProduct(product);
@@ -211,6 +225,44 @@ export function ProductsClient({
 		stockStatusUiValue !== "all" ||
 		priceFilterUiValue !== "all" ||
 		Boolean(focusedProductId);
+	const deleteProduct = React.useCallback(
+		async (product: ProductWithStock) => {
+			setDeletingProductId(product.id);
+			try {
+				await mutate(
+					async (current = []) => {
+						const deleted = await jsonFetcher<Product>(
+							`/api/products/${product.id}`,
+							{
+								method: "DELETE",
+							},
+						);
+						return current.filter(
+							(item) => item.id !== deleted.id,
+						);
+					},
+					{
+						optimisticData: (current = []) =>
+							current.filter(
+								(item) => item.id !== product.id,
+							),
+						rollbackOnError: true,
+					},
+				);
+				toast.success("Product deleted");
+				setPendingDeleteProduct(null);
+			} catch (error) {
+				toast.error(
+					error instanceof Error
+						? error.message
+						: "Failed to delete product",
+				);
+			} finally {
+				setDeletingProductId(null);
+			}
+		},
+		[mutate],
+	);
 
 	return (
 		<PageWrapper
@@ -349,6 +401,9 @@ export function ProductsClient({
 												product.currentPriceCents,
 										  )
 										: "-";
+								const canDeleteProduct =
+									isAdmin &&
+									(product.currentUnits ?? 0) <= 0;
 								return (
 									<div
 										key={product.id}
@@ -431,6 +486,20 @@ export function ProductsClient({
 												<Edit className="mr-1 h-3 w-3" />
 												Edit
 											</Button>
+											{canDeleteProduct && (
+												<Button
+													variant="destructive"
+													size="sm"
+													onClick={() =>
+														setPendingDeleteProduct(
+															product,
+														)
+													}
+												>
+													<Trash2 className="mr-1 h-3 w-3" />
+													Delete
+												</Button>
+											)}
 										</div>
 									</div>
 								);
@@ -468,6 +537,9 @@ export function ProductsClient({
 														product.currentPriceCents,
 												  )
 												: "-";
+										const canDeleteProduct =
+											isAdmin &&
+											(product.currentUnits ?? 0) <= 0;
 										return (
 											<TableRow
 												key={product.id}
@@ -530,6 +602,20 @@ export function ProductsClient({
 															<Edit className="mr-1 h-3 w-3" />
 															Edit
 														</Button>
+														{canDeleteProduct && (
+															<Button
+																variant="destructive"
+																size="sm"
+																onClick={() =>
+																	setPendingDeleteProduct(
+																		product,
+																	)
+																}
+															>
+																<Trash2 className="mr-1 h-3 w-3" />
+																Delete
+															</Button>
+														)}
 													</div>
 												</TableCell>
 											</TableRow>
@@ -542,6 +628,63 @@ export function ProductsClient({
 					</Card>
 				</div>
 			)}
+
+			{/* Edit Product Dialog */}
+			<Dialog
+				open={Boolean(pendingDeleteProduct)}
+				onOpenChange={(open) => {
+					if (!open) {
+						setPendingDeleteProduct(null);
+					}
+				}}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>
+							Delete Product
+						</DialogTitle>
+						<DialogDescription>
+							Delete{" "}
+							<strong>
+								{pendingDeleteProduct?.name}
+							</strong>
+							? This action cannot be undone.
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<DialogClose asChild>
+							<Button
+								type="button"
+								variant="outline"
+							>
+								Cancel
+							</Button>
+						</DialogClose>
+						<Button
+							type="button"
+							variant="destructive"
+							disabled={
+								!pendingDeleteProduct ||
+								deletingProductId ===
+									pendingDeleteProduct.id
+							}
+							onClick={() => {
+								if (!pendingDeleteProduct)
+									return;
+								void deleteProduct(
+									pendingDeleteProduct,
+								);
+							}}
+						>
+							{pendingDeleteProduct &&
+							deletingProductId ===
+								pendingDeleteProduct.id
+								? "Deleting..."
+								: "Delete"}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 
 			{/* Edit Product Dialog */}
 			<Dialog
