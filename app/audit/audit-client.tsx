@@ -239,7 +239,9 @@ export function AuditClient() {
 				<Alert variant="destructive">
 					<AlertCircle className="h-4 w-4" />
 					<AlertTitle>Error</AlertTitle>
-					<AlertDescription>{effectiveError.message}</AlertDescription>
+					<AlertDescription>
+						{effectiveError.message}
+					</AlertDescription>
 				</Alert>
 			) : effectiveLoading ? (
 				<p className="text-sm text-muted-foreground">Loading audit logs...</p>

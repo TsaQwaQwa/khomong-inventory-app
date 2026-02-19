@@ -225,7 +225,11 @@ export async function GET(req: Request) {
 				customerName: doc.type === "EXPENSE"
 					? (doc.payee ?? "Business Expense")
 					:
-					customerById.get(doc.customerId) ??
+					(
+						doc.customerId
+							? customerById.get(doc.customerId)
+							: undefined
+					) ??
 					"(unknown customer)",
 			})),
 			...directSalesDocs.map((doc) => ({
