@@ -173,12 +173,16 @@ interface TabTransactionHistory {
 		| "CHARGE"
 		| "PAYMENT"
 		| "ADJUSTMENT"
+		| "EXPENSE"
 		| "DIRECT_SALE";
 	amountCents: number;
 	paymentMethod?: PaymentMethod;
 	cashReceivedCents?: number;
 	changeCents?: number;
 	note?: string;
+	reason?: string;
+	expenseCategory?: string;
+	payee?: string;
 	reference?: string;
 	createdAt?: string;
 	items?: {
@@ -244,6 +248,7 @@ type TransactionKindFilter =
 	| "direct-sales"
 	| "account-sales"
 	| "account-payments"
+	| "expense-transactions"
 	| "reversal-transactions";
 
 const normalizeTransactionKind = (
@@ -259,6 +264,10 @@ const normalizeTransactionKind = (
 		case "payment":
 		case "account-payments":
 			return "account-payments";
+		case "expense":
+		case "expenses":
+		case "expense-transactions":
+			return "expense-transactions";
 		case "reversals":
 		case "reversal-transactions":
 			return "reversal-transactions";
@@ -297,6 +306,15 @@ const SEARCH_KIND_OPTIONS: Array<{
 		aliases: [
 			"account payments",
 			"account-payments",
+		],
+	},
+	{
+		kind: "expense-transactions",
+		label: "Expenses",
+		aliases: [
+			"expense",
+			"expenses",
+			"expense-transactions",
 		],
 	},
 	{
@@ -617,6 +635,9 @@ export function TabsClient({
 									  "account-payments"
 									? txn.type === "PAYMENT"
 									: effectiveKind ===
+										  "expense-transactions"
+										? txn.type === "EXPENSE"
+									: effectiveKind ===
 										  "reversal-transactions"
 										? Boolean(txn.isReversal)
 										: true;
@@ -650,7 +671,10 @@ export function TabsClient({
 						.toLowerCase();
 					const searchable = [
 						txn.customerName,
+						txn.payee,
+						txn.expenseCategory,
 						txn.reference,
+						txn.reason,
 						txn.note,
 						txn.paymentMethod,
 						txn.type,
@@ -995,7 +1019,7 @@ export function TabsClient({
 			}
 			description={
 				isTransactionsOnly
-					? "Record direct sales, account sales, and payments."
+					? "Record direct sales, account sales, payments, and expenses."
 					: "Track customer credit balances and account settings."
 			}
 			actions={
@@ -1827,6 +1851,9 @@ export function TabsClient({
 																			: txn.type ===
 																				  "PAYMENT"
 																				? "Payment"
+																				: txn.type ===
+																					  "EXPENSE"
+																					? "Expense"
 																				: "Adjustment"}
 																</span>
 																<span className="text-muted-foreground">
@@ -1851,6 +1878,21 @@ export function TabsClient({
 																				txn.changeCents,
 																		  )
 																		: "-"}
+																</p>
+															)}
+															{txn.payee && (
+																<p className="mt-1 text-xs text-muted-foreground">
+																	Payee: {txn.payee}
+																</p>
+															)}
+															{txn.expenseCategory && (
+																<p className="mt-1 text-xs text-muted-foreground">
+																	Category: {txn.expenseCategory.replaceAll("_", " ")}
+																</p>
+															)}
+															{txn.reason && (
+																<p className="mt-1 text-xs text-muted-foreground">
+																	Reason: {txn.reason}
 																</p>
 															)}
 															<div className="mt-3 flex items-center justify-end gap-2">
@@ -1890,7 +1932,9 @@ export function TabsClient({
 																		txn.type ===
 																			"CHARGE" ||
 																		txn.type ===
-																			"PAYMENT") && (
+																			"PAYMENT" ||
+																		txn.type ===
+																			"EXPENSE") && (
 																		<Button
 																			type="button"
 																			size="sm"
@@ -1963,6 +2007,9 @@ export function TabsClient({
 																				: txn.type ===
 																					  "PAYMENT"
 																					? "Payment"
+																					: txn.type ===
+																						  "EXPENSE"
+																						? "Expense"
 																					: "Adjustment"}
 																	</TableCell>
 																	<TableCell className="text-right">
@@ -2001,6 +2048,21 @@ export function TabsClient({
 																					{txn.reference}
 																				</p>
 																			)}
+																			{txn.payee && (
+																				<p className="text-xs truncate max-w-48">
+																					Payee: {txn.payee}
+																				</p>
+																			)}
+																			{txn.expenseCategory && (
+																				<p className="text-xs truncate max-w-48">
+																					Category: {txn.expenseCategory.replaceAll("_", " ")}
+																				</p>
+																			)}
+																			{txn.reason && (
+																				<p className="text-xs truncate max-w-48">
+																					Reason: {txn.reason}
+																				</p>
+																			)}
 																			{txn.note && (
 																				<p className="text-xs truncate max-w-48">
 																					{txn.note}
@@ -2022,7 +2084,9 @@ export function TabsClient({
 																		  txn.type ===
 																				"CHARGE" ||
 																		  txn.type ===
-																				"PAYMENT" ? (
+																				"PAYMENT" ||
+																		  txn.type ===
+																				"EXPENSE" ? (
 																			<div className="inline-flex items-center gap-2">
 																				{(txn.type ===
 																					"DIRECT_SALE" ||

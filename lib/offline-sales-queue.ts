@@ -2,6 +2,7 @@ type QueueEndpoint =
 	| "/api/sales"
 	| "/api/tabs/charge"
 	| "/api/tabs/payment"
+	| "/api/tabs/expense"
 	| "/api/purchases"
 	| "/api/adjustments";
 
@@ -152,6 +153,12 @@ export async function postTabPaymentWithOfflineQueue(
 	body: Record<string, unknown>,
 ): Promise<PostSaleResult> {
 	return postWithOfflineQueue("/api/tabs/payment", body);
+}
+
+export async function postTabExpenseWithOfflineQueue(
+	body: Record<string, unknown>,
+): Promise<PostSaleResult> {
+	return postWithOfflineQueue("/api/tabs/expense", body);
 }
 
 export async function flushOfflineQueue(): Promise<FlushResult> {

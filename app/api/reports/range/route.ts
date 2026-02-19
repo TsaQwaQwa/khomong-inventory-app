@@ -19,7 +19,8 @@ type ReportKind =
 	| "account"
 	| "payment"
 	| "purchase"
-	| "adjustment";
+	| "adjustment"
+	| "expense";
 
 const VALID_KINDS = new Set<ReportKind>([
 	"all",
@@ -28,6 +29,7 @@ const VALID_KINDS = new Set<ReportKind>([
 	"payment",
 	"purchase",
 	"adjustment",
+	"expense",
 ]);
 
 const isYMD = (value: string) =>
@@ -109,6 +111,8 @@ export async function GET(req: Request) {
 		kind === "all" || kind === "purchase";
 	const includeAdjustments =
 		kind === "all" || kind === "adjustment";
+	const includeExpenses =
+		kind === "all" || kind === "expense";
 
 	try {
 		await connectDB();
@@ -136,6 +140,10 @@ export async function GET(req: Request) {
 			string,
 			unknown
 		> = {};
+		const expenseMatch: Record<
+			string,
+			unknown
+		> = {};
 		const adjustmentMatch: Record<
 			string,
 			unknown
@@ -149,6 +157,7 @@ export async function GET(req: Request) {
 			tabPaymentMatch.businessDayId = {
 				$in: dayIds,
 			};
+			expenseMatch.businessDayId = { $in: dayIds };
 			adjustmentMatch.businessDayId = {
 				$in: dayIds,
 			};
@@ -156,6 +165,7 @@ export async function GET(req: Request) {
 			saleMatch.businessDayId = "__none__";
 			tabChargeMatch.businessDayId = "__none__";
 			tabPaymentMatch.businessDayId = "__none__";
+			expenseMatch.businessDayId = "__none__";
 			adjustmentMatch.businessDayId = "__none__";
 		}
 
@@ -171,6 +181,7 @@ export async function GET(req: Request) {
 		}
 		tabChargeMatch.type = "CHARGE";
 		tabPaymentMatch.type = "PAYMENT";
+		expenseMatch.type = "EXPENSE";
 
 		const purchaseMatch: Record<
 			string,
@@ -186,6 +197,7 @@ export async function GET(req: Request) {
 			directSales,
 			accountCharges,
 			accountPayments,
+			expenses,
 			purchases,
 			adjustments,
 		] = await Promise.all([
@@ -223,6 +235,20 @@ export async function GET(req: Request) {
 							amountCents: 1,
 							paymentMethod: 1,
 							reference: 1,
+							note: 1,
+							createdAt: 1,
+						})
+						.lean()
+				: Promise.resolve([]),
+			includeExpenses
+				? TabTransaction.find(expenseMatch)
+						.select({
+							businessDayId: 1,
+							amountCents: 1,
+							reference: 1,
+							reason: 1,
+							expenseCategory: 1,
+							payee: 1,
 							note: 1,
 							createdAt: 1,
 						})
@@ -346,6 +372,7 @@ export async function GET(req: Request) {
 				directSalesCents: number;
 				accountSalesCents: number;
 				paymentsCents: number;
+				expensesCents: number;
 				purchaseCostCents: number;
 				adjustmentUnits: number;
 				discountCents: number;
@@ -357,6 +384,7 @@ export async function GET(req: Request) {
 				directSalesCents: 0,
 				accountSalesCents: 0,
 				paymentsCents: 0,
+				expensesCents: 0,
 				purchaseCostCents: 0,
 				adjustmentUnits: 0,
 				discountCents: 0,
@@ -392,6 +420,7 @@ export async function GET(req: Request) {
 		let directSalesCents = 0;
 		let accountSalesCents = 0;
 		let paymentsCents = 0;
+		let expensesCents = 0;
 		let purchaseCostCents = 0;
 		let salesDiscountCents = 0;
 		let purchaseDiscountCents = 0;
@@ -404,6 +433,7 @@ export async function GET(req: Request) {
 				| "DIRECT_SALE"
 				| "ACCOUNT_SALE"
 				| "ACCOUNT_PAYMENT"
+				| "EXPENSE"
 				| "PURCHASE"
 				| "ADJUSTMENT";
 			amountCents: number | null;
@@ -524,6 +554,33 @@ export async function GET(req: Request) {
 					: undefined,
 			});
 		}
+		for (const expense of expenses) {
+			const date =
+				dateByDayId.get(expense.businessDayId) ??
+				from;
+			const amount = toNumber(expense.amountCents);
+			expensesCents += amount;
+			const day = byDay.get(date);
+			if (day) day.expensesCents += amount;
+			activity.push({
+				id: String(expense._id),
+				date,
+				type: "EXPENSE",
+				amountCents: amount,
+				counterpartyName: expense.payee,
+				reference: expense.reference,
+				note:
+					typeof expense.reason === "string" &&
+					expense.reason.length > 0
+						? `${expense.expenseCategory ?? "OTHER"}: ${expense.reason}`
+						: expense.note,
+				createdAt: expense.createdAt
+					? new Date(
+							expense.createdAt,
+					  ).toISOString()
+					: undefined,
+			});
+		}
 
 		for (const purchase of purchases) {
 			const date = purchase.purchaseDate;
@@ -630,6 +687,7 @@ export async function GET(req: Request) {
 				netCashflowCents:
 					day.directSalesCents +
 					day.paymentsCents -
+					day.expensesCents -
 					day.purchaseCostCents,
 			}))
 			.sort((a, b) => a.date.localeCompare(b.date));
@@ -637,7 +695,7 @@ export async function GET(req: Request) {
 		const salesCents =
 			directSalesCents + accountSalesCents;
 		const grossProfitEstimateCents =
-			salesCents - purchaseCostCents;
+			salesCents - purchaseCostCents - expensesCents;
 
 		activity.sort((a, b) => {
 			if (a.date !== b.date)
@@ -661,6 +719,7 @@ export async function GET(req: Request) {
 				directSalesCents,
 				accountSalesCents,
 				paymentsCents,
+				expensesCents,
 				purchaseCostCents,
 				grossProfitEstimateCents,
 				salesDiscountCents,
@@ -673,6 +732,7 @@ export async function GET(req: Request) {
 					(day) =>
 						day.salesCents !== 0 ||
 						day.paymentsCents !== 0 ||
+						day.expensesCents !== 0 ||
 						day.purchaseCostCents !== 0 ||
 						day.adjustmentUnits !== 0,
 				).length,
@@ -697,4 +757,3 @@ export async function GET(req: Request) {
 		});
 	}
 }
-

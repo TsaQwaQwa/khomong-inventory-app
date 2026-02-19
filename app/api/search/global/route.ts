@@ -69,6 +69,9 @@ export async function GET(req: Request) {
 				TabTransaction.find({
 					$or: [
 						{ reference: regex },
+						{ reason: regex },
+						{ payee: regex },
+						{ expenseCategory: regex },
 						{ note: regex },
 					],
 				})
@@ -77,6 +80,9 @@ export async function GET(req: Request) {
 						_id: 1,
 						type: 1,
 						reference: 1,
+						reason: 1,
+						payee: 1,
+						expenseCategory: 1,
 						note: 1,
 						businessDayId: 1,
 					})
@@ -140,12 +146,16 @@ export async function GET(req: Request) {
 				dayById.get(txn.businessDayId) ?? "";
 			const reference =
 				txn.reference ??
+				txn.reason ??
 				txn.note ??
 				"(no reference)";
 			results.push({
 				id: `tabtxn_${String(txn._id)}`,
 				type: "TRANSACTION",
-				title: `Account ${txn.type}`,
+				title:
+					txn.type === "EXPENSE"
+						? "Expense"
+						: `Account ${txn.type}`,
 				description: `${reference}${date ? ` | ${date}` : ""}`,
 				href: date
 					? `/transactions?date=${date}`

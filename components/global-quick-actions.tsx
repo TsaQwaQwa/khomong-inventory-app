@@ -56,6 +56,7 @@ import {
 	postSaleWithOfflineQueue,
 	postPurchaseWithOfflineQueue,
 	postAdjustmentWithOfflineQueue,
+	postTabExpenseWithOfflineQueue,
 	postTabPaymentWithOfflineQueue,
 } from "@/lib/offline-sales-queue";
 import type {
@@ -114,6 +115,7 @@ type QuickAction =
 	| "quick-fast-repeat"
 	| "account-sale"
 	| "account-payment"
+	| "expense"
 	| "restock"
 	| "opening-stock"
 	| "customer"
@@ -131,6 +133,7 @@ const QUICK_ACTION_ALL: QuickAction[] = [
 	"quick-fast-repeat",
 	"account-sale",
 	"account-payment",
+	"expense",
 	"restock",
 	"opening-stock",
 	"customer",
@@ -299,6 +302,8 @@ const getQuickActionLabel = (
 			return "Add Sale to Account";
 		case "account-payment":
 			return "Add Account Payment";
+		case "expense":
+			return "Add Expense";
 		case "restock":
 			return `Restock Low Stock (${restockCount})`;
 		case "opening-stock":
@@ -328,6 +333,7 @@ const getQuickActionIcon = (
 		case "account-sale":
 			return <Receipt className="mr-2 h-4 w-4" />;
 		case "account-payment":
+		case "expense":
 			return <CreditCard className="mr-2 h-4 w-4" />;
 		case "restock":
 		case "purchase":
@@ -943,6 +949,12 @@ export function GlobalQuickActions() {
 												renderQuickActionButton(
 													"account-payment",
 												)}
+											{showInMoreActions(
+												"expense",
+											) &&
+												renderQuickActionButton(
+													"expense",
+												)}
 										</div>
 									</div>
 									<div className="space-y-2 pt-1">
@@ -1133,6 +1145,17 @@ export function GlobalQuickActions() {
 					>
 						<AccountPaymentForm
 							customers={customers}
+							date={date}
+							onSuccess={onSaved}
+						/>
+					</ActionDialog>
+				)}
+				{activeAction === "expense" && (
+					<ActionDialog
+						title="Record Expense"
+						description={`Save a business expense for ${formatDateDisplay(date)}.`}
+					>
+						<ExpenseForm
 							date={date}
 							onSuccess={onSaved}
 						/>
@@ -3692,6 +3715,198 @@ function AccountPaymentForm({
 						? "Confirm Payment"
 						: "Save"
 				}
+			/>
+		</form>
+	);
+}
+
+function ExpenseForm({
+	date,
+	onSuccess,
+}: {
+	date: string;
+	onSuccess: () => void;
+}) {
+	const [loading, setLoading] =
+		React.useState(false);
+	const [amountCents, setAmountCents] =
+		React.useState(0);
+	const [category, setCategory] = React.useState<
+		| "RENT"
+		| "UTILITIES"
+		| "TRANSPORT"
+		| "WAGES"
+		| "REPAIRS"
+		| "SUPPLIES"
+		| "MARKETING"
+		| "TAX"
+		| "OTHER"
+		| ""
+	>("");
+	const [payee, setPayee] = React.useState("");
+	const [reference, setReference] =
+		React.useState("");
+	const [showReference, setShowReference] =
+		React.useState(false);
+	const [reason, setReason] = React.useState("");
+
+	const handleSubmit = async (
+		e: React.FormEvent,
+	) => {
+		e.preventDefault();
+		setLoading(true);
+		try {
+			const payload = {
+				date,
+				amountCents,
+				category,
+				payee: payee.trim(),
+				reason: reason.trim(),
+				reference:
+					showReference && reference
+						? reference
+						: undefined,
+			};
+			const queueResult =
+				await postTabExpenseWithOfflineQueue(
+					payload,
+				);
+			if (queueResult.queued) {
+				toast.success(
+					"Offline: expense queued and will sync automatically.",
+				);
+				onSuccess();
+				return;
+			}
+			const res = queueResult.response;
+			if (!res.ok) {
+				const errorBody = await res
+					.json()
+					.catch(() => ({}));
+				throw new Error(
+					getApiErrorMessage(
+						errorBody,
+						"Failed to record expense",
+					),
+				);
+			}
+			toast.success(
+				"Expense recorded successfully",
+			);
+			onSuccess();
+		} catch (err) {
+			toast.error(
+				err instanceof Error
+					? err.message
+					: "Failed to record expense",
+			);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	return (
+		<form
+			onSubmit={handleSubmit}
+			className="flex flex-col h-[60vh]"
+		>
+			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
+				<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+					<MoneyInput
+						label="Amount"
+						value={amountCents}
+						onChange={setAmountCents}
+					/>
+					<div className="space-y-2">
+						<Label>Category</Label>
+						<Select
+							value={category}
+							onValueChange={(v) =>
+								setCategory(v as typeof category)
+							}
+						>
+							<SelectTrigger>
+								<SelectValue placeholder="Select category" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="RENT">Rent</SelectItem>
+								<SelectItem value="UTILITIES">Utilities</SelectItem>
+								<SelectItem value="TRANSPORT">Transport</SelectItem>
+								<SelectItem value="WAGES">Wages</SelectItem>
+								<SelectItem value="REPAIRS">Repairs</SelectItem>
+								<SelectItem value="SUPPLIES">Supplies</SelectItem>
+								<SelectItem value="MARKETING">Marketing</SelectItem>
+								<SelectItem value="TAX">Tax</SelectItem>
+								<SelectItem value="OTHER">Other</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+					<div className="space-y-2">
+						<Label>Payee</Label>
+						<Input
+							value={payee}
+							onChange={(e) =>
+								setPayee(e.target.value)
+							}
+							placeholder="Who was paid"
+							required
+						/>
+					</div>
+					<div className="space-y-2">
+						<Label>Reason</Label>
+						<Textarea
+							value={reason}
+							onChange={(e) =>
+								setReason(e.target.value)
+							}
+							placeholder="Why is money leaving the business?"
+							rows={2}
+							required
+						/>
+					</div>
+				</div>
+
+				<div className="space-y-2">
+					<div className="grid grid-cols-2 gap-2">
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="w-full"
+							onClick={() =>
+								setShowReference((prev) => !prev)
+							}
+						>
+							{showReference
+								? "Hide Ref"
+								: "Add Ref"}
+						</Button>
+						<div />
+					</div>
+					{showReference && (
+						<div className="space-y-2">
+							<Label>Reference (optional)</Label>
+							<Input
+								value={reference}
+								onChange={(e) =>
+									setReference(e.target.value)
+								}
+								placeholder="e.g. Receipt/Invoice #"
+							/>
+						</div>
+					)}
+				</div>
+			</div>
+			<SaveFooter
+				disabled={
+					loading ||
+					!category ||
+					payee.trim().length < 2 ||
+					reason.trim().length < 3 ||
+					amountCents <= 0
+				}
+				loading={loading}
+				label="Save"
 			/>
 		</form>
 	);

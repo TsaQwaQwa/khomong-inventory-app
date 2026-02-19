@@ -84,7 +84,8 @@ type ReportKind =
 	| "account"
 	| "payment"
 	| "purchase"
-	| "adjustment";
+	| "adjustment"
+	| "expense";
 type RangePreset =
 	| "day"
 	| "week"
@@ -110,6 +111,7 @@ interface RangeReport {
 		directSalesCents: number;
 		accountSalesCents: number;
 		paymentsCents: number;
+		expensesCents: number;
 		purchaseCostCents: number;
 		grossProfitEstimateCents: number;
 		salesDiscountCents: number;
@@ -123,6 +125,7 @@ interface RangeReport {
 		directSalesCents: number;
 		accountSalesCents: number;
 		paymentsCents: number;
+		expensesCents: number;
 		purchaseCostCents: number;
 		adjustmentUnits: number;
 		discountCents: number;
@@ -146,6 +149,7 @@ interface RangeReport {
 			| "DIRECT_SALE"
 			| "ACCOUNT_SALE"
 			| "ACCOUNT_PAYMENT"
+			| "EXPENSE"
 			| "PURCHASE"
 			| "ADJUSTMENT";
 		amountCents: number | null;
@@ -205,7 +209,8 @@ const isKind = (
 	value === "account" ||
 	value === "payment" ||
 	value === "purchase" ||
-	value === "adjustment";
+	value === "adjustment" ||
+	value === "expense";
 const isRangePreset = (
 	value: string | null,
 ): value is RangePreset =>
@@ -605,6 +610,15 @@ export function ReportsClient() {
 		lines.push(
 			[
 				"Summary",
+				"Expenses",
+				report.summary.expensesCents,
+			]
+				.map(asCsvCell)
+				.join(","),
+		);
+		lines.push(
+			[
+				"Summary",
 				"Purchase Cost",
 				report.summary.purchaseCostCents,
 			]
@@ -623,7 +637,7 @@ export function ReportsClient() {
 
 		lines.push("");
 		lines.push(
-			["Timeline Date", "Sales", "Payments", "Purchases", "Discounts", "Net Cashflow"]
+			["Timeline Date", "Sales", "Payments", "Expenses", "Purchases", "Discounts", "Net Cashflow"]
 				.map(asCsvCell)
 				.join(","),
 		);
@@ -633,6 +647,7 @@ export function ReportsClient() {
 					day.date,
 					day.salesCents,
 					day.paymentsCents,
+					day.expensesCents,
 					day.purchaseCostCents,
 					day.discountCents,
 					day.netCashflowCents,
@@ -708,6 +723,10 @@ export function ReportsClient() {
 					report.summary.paymentsCents,
 				],
 				[
+					"Expenses",
+					report.summary.expensesCents,
+				],
+				[
 					"Purchase Cost",
 					report.summary.purchaseCostCents,
 				],
@@ -729,6 +748,7 @@ export function ReportsClient() {
 					"Date",
 					"Sales",
 					"Payments",
+					"Expenses",
 					"Purchases",
 					"Discounts",
 					"Net Cashflow",
@@ -737,6 +757,7 @@ export function ReportsClient() {
 					day.date,
 					day.salesCents,
 					day.paymentsCents,
+					day.expensesCents,
 					day.purchaseCostCents,
 					day.discountCents,
 					day.netCashflowCents,
@@ -826,6 +847,11 @@ export function ReportsClient() {
 			? report.summary.purchaseCostCents -
 				compareReport.summary.purchaseCostCents
 			: null;
+	const expenseDeltaCents =
+		report && compareReport
+			? report.summary.expensesCents -
+				compareReport.summary.expensesCents
+			: null;
 	const marginDeltaCents =
 		report && compareReport
 			? report.summary.grossProfitEstimateCents -
@@ -888,6 +914,7 @@ export function ReportsClient() {
 									<SelectItem value="direct">Direct Sales</SelectItem>
 									<SelectItem value="account">Account Sales</SelectItem>
 									<SelectItem value="payment">Account Payments</SelectItem>
+									<SelectItem value="expense">Expenses</SelectItem>
 									<SelectItem value="purchase">Purchases</SelectItem>
 									<SelectItem value="adjustment">Adjustments</SelectItem>
 								</SelectContent>
@@ -1042,6 +1069,7 @@ export function ReportsClient() {
 							<SummaryCard label="Direct Sales" value={report.summary.directSalesCents} />
 							<SummaryCard label="Account Sales" value={report.summary.accountSalesCents} />
 							<SummaryCard label="Account Payments" value={report.summary.paymentsCents} />
+							<SummaryCard label="Expenses" value={report.summary.expensesCents} />
 							<Card>
 								<CardHeader className="pb-2">
 									<CardTitle className="text-sm text-muted-foreground">Activity Days</CardTitle>
@@ -1051,9 +1079,10 @@ export function ReportsClient() {
 								</CardContent>
 							</Card>
 						</div>
-						<div className="grid gap-4 md:grid-cols-3">
+						<div className="grid gap-4 md:grid-cols-4">
 							<DeltaCard title="Sales vs previous period" deltaCents={salesDeltaCents} />
 							<DeltaCard title="Purchases vs previous period" deltaCents={purchaseDeltaCents} />
+							<DeltaCard title="Expenses vs previous period" deltaCents={expenseDeltaCents} />
 							<DeltaCard title="Margin vs previous period" deltaCents={marginDeltaCents} />
 						</div>
 						<p className="text-sm text-muted-foreground">
@@ -1073,6 +1102,7 @@ export function ReportsClient() {
 												<TableHead>Date</TableHead>
 												<TableHead>Sales</TableHead>
 												<TableHead>Payments</TableHead>
+												<TableHead>Expenses</TableHead>
 												<TableHead>Purchases</TableHead>
 												<TableHead>Discounts</TableHead>
 												<TableHead>Net Cashflow</TableHead>
@@ -1084,6 +1114,7 @@ export function ReportsClient() {
 													<TableCell>{formatDateDisplay(day.date)}</TableCell>
 													<TableCell>{formatZAR(day.salesCents)}</TableCell>
 													<TableCell>{formatZAR(day.paymentsCents)}</TableCell>
+													<TableCell>{formatZAR(day.expensesCents)}</TableCell>
 													<TableCell>{formatZAR(day.purchaseCostCents)}</TableCell>
 													<TableCell>{formatZAR(day.discountCents)}</TableCell>
 													<TableCell>{formatZAR(day.netCashflowCents)}</TableCell>
@@ -1101,6 +1132,7 @@ export function ReportsClient() {
 											<CardContent className="grid grid-cols-2 gap-2 text-sm">
 												<p>Sales: {formatZAR(day.salesCents)}</p>
 												<p>Payments: {formatZAR(day.paymentsCents)}</p>
+												<p>Expenses: {formatZAR(day.expensesCents)}</p>
 												<p>Purchases: {formatZAR(day.purchaseCostCents)}</p>
 												<p>Discounts: {formatZAR(day.discountCents)}</p>
 												<p className="col-span-2 font-medium">Net Cashflow: {formatZAR(day.netCashflowCents)}</p>

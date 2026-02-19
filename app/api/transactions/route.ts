@@ -39,10 +39,12 @@ export async function GET(req: Request) {
 		| "CHARGE"
 		| "PAYMENT"
 		| "ADJUSTMENT"
+		| "EXPENSE"
 		| "DIRECT_SALE" =
 		typeParam === "CHARGE" ||
 		typeParam === "PAYMENT" ||
 		typeParam === "ADJUSTMENT" ||
+		typeParam === "EXPENSE" ||
 		typeParam === "DIRECT_SALE"
 			? typeParam
 			: "ALL";
@@ -114,6 +116,9 @@ export async function GET(req: Request) {
 										cashReceivedCents: 1,
 										changeCents: 1,
 										reference: 1,
+										reason: 1,
+										expenseCategory: 1,
+										payee: 1,
 										note: 1,
 										createdAt: 1,
 										reversalOfId: 1,
@@ -173,7 +178,13 @@ export async function GET(req: Request) {
 				  );
 		const customerIds = Array.from(
 			new Set(
-				tabDocs.map((doc) => doc.customerId),
+				tabDocs
+					.map((doc) => doc.customerId)
+					.filter(
+						(customerId): customerId is string =>
+							typeof customerId === "string" &&
+							customerId.length > 0,
+					),
 			),
 		);
 
@@ -211,7 +222,9 @@ export async function GET(req: Request) {
 					date ??
 					dayById.get(doc.businessDayId) ??
 					null,
-				customerName:
+				customerName: doc.type === "EXPENSE"
+					? (doc.payee ?? "Business Expense")
+					:
 					customerById.get(doc.customerId) ??
 					"(unknown customer)",
 			})),

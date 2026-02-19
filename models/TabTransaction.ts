@@ -1,7 +1,7 @@
 import { Schema } from 'mongoose';
 import { getModel } from './_shared';
 
-export type TabTxnType = 'CHARGE' | 'PAYMENT' | 'ADJUSTMENT';
+export type TabTxnType = 'CHARGE' | 'PAYMENT' | 'ADJUSTMENT' | 'EXPENSE';
 export type PaymentMethod = 'CASH' | 'CARD' | 'EFT';
 
 export interface TabTxnItem {
@@ -14,7 +14,7 @@ export interface TabTxnItem {
 }
 
 export interface TabTransactionDoc {
-  customerId: string;
+  customerId?: string;
   businessDayId: string;
   type: TabTxnType;
   subtotalCents?: number;
@@ -25,6 +25,9 @@ export interface TabTransactionDoc {
 
   paymentMethod?: PaymentMethod;
   reference?: string;
+  reason?: string;
+  expenseCategory?: string;
+  payee?: string;
 
   items?: TabTxnItem[];
   note?: string;
@@ -39,7 +42,7 @@ export interface TabTransactionDoc {
 
 const TabTransactionSchema = new Schema<TabTransactionDoc>(
   {
-    customerId: { type: String, required: true },
+    customerId: { type: String },
     businessDayId: { type: String, required: true, index: true },
     type: { type: String, required: true },
     subtotalCents: { type: Number },
@@ -50,6 +53,9 @@ const TabTransactionSchema = new Schema<TabTransactionDoc>(
 
     paymentMethod: { type: String },
     reference: { type: String },
+    reason: { type: String },
+    expenseCategory: { type: String },
+    payee: { type: String },
 
     items: [
       {

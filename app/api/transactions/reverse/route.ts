@@ -179,6 +179,9 @@ export async function POST(req: Request) {
 			changeCents: -(original.changeCents ?? 0),
 			paymentMethod: original.paymentMethod,
 			reference: original.reference,
+			reason: original.reason,
+			expenseCategory: original.expenseCategory,
+			payee: original.payee,
 			items:
 				original.type === "CHARGE"
 					? reversedItems

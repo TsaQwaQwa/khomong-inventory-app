@@ -104,6 +104,7 @@ interface DashboardTransactionEntry {
 		| "CHARGE"
 		| "PAYMENT"
 		| "ADJUSTMENT"
+		| "EXPENSE"
 		| "DIRECT_SALE";
 	amountCents: number;
 	paymentMethod?: string;

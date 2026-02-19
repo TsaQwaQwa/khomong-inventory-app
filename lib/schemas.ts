@@ -149,6 +149,26 @@ export const tabPaymentSchema = z.object({
   note: z.string().optional(),
 });
 
+export const tabExpenseSchema = z.object({
+  date: ymdSchema.optional(),
+  amountCents: z.number().int().min(1),
+  reason: z.string().trim().min(3).max(300),
+  category: z.enum([
+    "RENT",
+    "UTILITIES",
+    "TRANSPORT",
+    "WAGES",
+    "REPAIRS",
+    "SUPPLIES",
+    "MARKETING",
+    "TAX",
+    "OTHER",
+  ]),
+  payee: z.string().trim().min(2).max(120),
+  reference: z.string().optional(),
+  note: z.string().optional(),
+});
+
 export const directSaleSchema = z.object({
   date: ymdSchema.optional(),
   paymentMethod: z.enum(['CASH', 'CARD', 'EFT']),
@@ -164,6 +184,6 @@ export const directSaleSchema = z.object({
 
 export const transactionReverseSchema = z.object({
   transactionId: z.string().min(1),
-  type: z.enum(['DIRECT_SALE', 'CHARGE', 'PAYMENT']),
+  type: z.enum(['DIRECT_SALE', 'CHARGE', 'PAYMENT', 'EXPENSE']),
   reason: z.string().min(3),
 });
