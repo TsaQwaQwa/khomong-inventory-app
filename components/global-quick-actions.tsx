@@ -287,6 +287,31 @@ const getApiErrorMessage = (
 	return fallback;
 };
 
+const getApiErrorCode = (
+	payload: unknown,
+): string | null => {
+	if (!payload || typeof payload !== "object")
+		return null;
+	const maybePayload = payload as Record<
+		string,
+		unknown
+	>;
+	const maybeError = maybePayload.error;
+	if (
+		maybeError &&
+		typeof maybeError === "object"
+	) {
+		const maybeErrorObj = maybeError as Record<
+			string,
+			unknown
+		>;
+		return typeof maybeErrorObj.code === "string"
+			? maybeErrorObj.code
+			: null;
+	}
+	return null;
+};
+
 const getQuickActionLabel = (
 	action: QuickAction,
 	restockCount: number,
@@ -1834,7 +1859,7 @@ function QuickCheckoutForm({
 		}
 
 		try {
-			const payload = {
+			const payload: Record<string, unknown> = {
 				date,
 				paymentMethod,
 				cashReceivedCents:
@@ -1843,7 +1868,7 @@ function QuickCheckoutForm({
 						: undefined,
 				items: validItems,
 			};
-			const queueResult = await postSaleWithOfflineQueue(
+			let queueResult = await postSaleWithOfflineQueue(
 				"/api/sales",
 				payload,
 			);
@@ -1862,17 +1887,67 @@ function QuickCheckoutForm({
 				onSuccess();
 				return;
 			}
-			const res = queueResult.response;
+			let res = queueResult.response;
 			if (!res.ok) {
-				const errorBody = await res
+				let errorBody = await res
 					.json()
 					.catch(() => ({}));
+				const errorCode =
+					getApiErrorCode(errorBody);
+				if (errorCode === "BELOW_COST") {
+					const proceed = window.confirm(
+						`${getApiErrorMessage(
+							errorBody,
+							"Below-cost sale detected.",
+						)}\n\nProceed with override?`,
+					);
+					if (proceed) {
+						payload.belowCostApproved = true;
+						payload.belowCostReason =
+							"User override from quick checkout";
+						queueResult =
+							await postSaleWithOfflineQueue(
+								"/api/sales",
+								payload,
+							);
+						if (queueResult.queued) {
+							toast.success(
+								"Offline: checkout queued and will sync automatically.",
+							);
+							setItems([]);
+							setScanInput("");
+							setCashReceivedCents(0);
+							fastKeyStreakRef.current = 0;
+							setJourneyStep(
+								isJourneyMode
+									? 1
+									: 2,
+							);
+							requestAnimationFrame(() =>
+								scanInputRef.current?.focus(),
+							);
+							onSuccess();
+							return;
+						}
+						res = queueResult.response;
+						if (!res.ok) {
+							errorBody =
+								await res
+									.json()
+									.catch(
+										() => ({}),
+									);
+						}
+					}
+				}
+				if (!res.ok) {
 				throw new Error(
 					getApiErrorMessage(
 						errorBody,
 						"Failed to complete checkout",
 					),
 				);
+				}
 			}
 			toast.success("Checkout saved");
 			setItems([]);
@@ -2991,7 +3066,7 @@ function DirectSaleForm({
 			return;
 		}
 		try {
-			const payload = {
+			const payload: Record<string, unknown> = {
 				date,
 				paymentMethod,
 				cashReceivedCents:
@@ -3002,7 +3077,7 @@ function DirectSaleForm({
 				note:
 					showNote && note ? note : undefined,
 			};
-			const queueResult = await postSaleWithOfflineQueue(
+			let queueResult = await postSaleWithOfflineQueue(
 				"/api/sales",
 				payload,
 			);
@@ -3015,17 +3090,57 @@ function DirectSaleForm({
 				onSuccess();
 				return;
 			}
-			const res = queueResult.response;
+			let res = queueResult.response;
 			if (!res.ok) {
-				const errorBody = await res
+				let errorBody = await res
 					.json()
 					.catch(() => ({}));
+				const errorCode =
+					getApiErrorCode(errorBody);
+				if (errorCode === "BELOW_COST") {
+					const proceed = window.confirm(
+						`${getApiErrorMessage(
+							errorBody,
+							"Below-cost sale detected.",
+						)}\n\nProceed with override?`,
+					);
+					if (proceed) {
+						payload.belowCostApproved = true;
+						payload.belowCostReason =
+							"User override from quick direct sale";
+						queueResult =
+							await postSaleWithOfflineQueue(
+								"/api/sales",
+								payload,
+							);
+						if (queueResult.queued) {
+							toast.success(
+								"Offline: direct sale queued and will sync automatically.",
+							);
+							setCashReceivedCents(0);
+							setCashStep(false);
+							onSuccess();
+							return;
+						}
+						res = queueResult.response;
+						if (!res.ok) {
+							errorBody =
+								await res
+									.json()
+									.catch(
+										() => ({}),
+									);
+						}
+					}
+				}
+				if (!res.ok) {
 				throw new Error(
 					getApiErrorMessage(
 						errorBody,
 						"Failed to save direct sale",
 					),
 				);
+				}
 			}
 			toast.success("Direct sale saved");
 			setCashReceivedCents(0);
@@ -3269,14 +3384,14 @@ function AccountSaleForm({
 			return;
 		}
 		try {
-			const payload = {
+			const payload: Record<string, unknown> = {
 				date,
 				customerId,
 				items: validItems,
 				note:
 					showNote && note ? note : undefined,
 			};
-			const queueResult = await postSaleWithOfflineQueue(
+			let queueResult = await postSaleWithOfflineQueue(
 				"/api/tabs/charge",
 				payload,
 			);
@@ -3287,17 +3402,55 @@ function AccountSaleForm({
 				onSuccess();
 				return;
 			}
-			const res = queueResult.response;
+			let res = queueResult.response;
 			if (!res.ok) {
-				const errorBody = await res
+				let errorBody = await res
 					.json()
 					.catch(() => ({}));
+				const errorCode =
+					getApiErrorCode(errorBody);
+				if (errorCode === "BELOW_COST") {
+					const proceed = window.confirm(
+						`${getApiErrorMessage(
+							errorBody,
+							"Below-cost sale detected.",
+						)}\n\nProceed with override?`,
+					);
+					if (proceed) {
+						payload.belowCostApproved = true;
+						payload.belowCostReason =
+							"User override from quick account sale";
+						queueResult =
+							await postSaleWithOfflineQueue(
+								"/api/tabs/charge",
+								payload,
+							);
+						if (queueResult.queued) {
+							toast.success(
+								"Offline: account sale queued and will sync automatically.",
+							);
+							onSuccess();
+							return;
+						}
+						res = queueResult.response;
+						if (!res.ok) {
+							errorBody =
+								await res
+									.json()
+									.catch(
+										() => ({}),
+									);
+						}
+					}
+				}
+				if (!res.ok) {
 				throw new Error(
 					getApiErrorMessage(
 						errorBody,
 						"Failed to add sale to account",
 					),
 				);
+				}
 			}
 			toast.success(
 				"Sale added to customer account",
