@@ -155,9 +155,11 @@ const aggregateSummaries = (
 	let collectedSalesCents = 0;
 	let tabChargesCents = 0;
 	let accountedSalesCents = 0;
+	let expensesCents = 0;
 	let revenueVarianceCents = 0;
 	let estimatedCogsCents = 0;
 	let grossProfitCents = 0;
+	let netProfitAfterExpensesCents = 0;
 
 	for (const summary of summaries) {
 		expectedRevenueCents +=
@@ -165,6 +167,7 @@ const aggregateSummaries = (
 		collectedSalesCents += summary.collectedSalesCents;
 		tabChargesCents += summary.tabChargesCents;
 		accountedSalesCents += summary.accountedSalesCents;
+		expensesCents += summary.expensesCents ?? 0;
 		revenueVarianceCents += summary.revenueVarianceCents;
 		payments.CASH += summary.tabPaymentsByMethodCents.CASH;
 		payments.CARD += summary.tabPaymentsByMethodCents.CARD;
@@ -265,6 +268,8 @@ const aggregateSummaries = (
 			summary.grossProfit.estimatedCogsCents;
 		grossProfitCents +=
 			summary.grossProfit.grossProfitCents;
+		netProfitAfterExpensesCents +=
+			summary.netProfitAfterExpensesCents ?? 0;
 	}
 
 	const byProduct = Array.from(byProductMap.values())
@@ -299,7 +304,9 @@ const aggregateSummaries = (
 		collectedSalesCents,
 		tabChargesCents,
 		accountedSalesCents,
+		expensesCents,
 		revenueVarianceCents,
+		netProfitAfterExpensesCents,
 		tabPaymentsByMethodCents: payments,
 		dayChecklist: checklist,
 		warnings: Array.from(warningsSet),

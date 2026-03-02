@@ -114,7 +114,9 @@ export interface DailyReport {
 	collectedSalesCents: number;
 	tabChargesCents: number;
 	accountedSalesCents: number;
+	expensesCents: number;
 	revenueVarianceCents: number;
+	netProfitAfterExpensesCents: number;
 	tabPaymentsByMethodCents: {
 		CASH: number;
 		CARD: number;

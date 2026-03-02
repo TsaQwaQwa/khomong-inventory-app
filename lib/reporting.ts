@@ -259,6 +259,12 @@ export async function computeDailySummary(
 		businessDayId: String(day._id),
 		type: "PAYMENT",
 	}).lean();
+	const expenses = await TabTransaction.find({
+		businessDayId: String(day._id),
+		type: "EXPENSE",
+	})
+		.select({ amountCents: 1 })
+		.lean();
 	const tabPaymentsByMethodCents = {
 		CASH: 0,
 		CARD: 0,
@@ -268,6 +274,10 @@ export async function computeDailySummary(
 		const m = p.paymentMethod ?? "CASH";
 		tabPaymentsByMethodCents[m] += p.amountCents;
 	}
+	const expensesCents = expenses.reduce(
+		(sum, expense) => sum + (expense.amountCents ?? 0),
+		0,
+	);
 
 	const accountedSalesCents =
 		collectedSalesCents + tabChargesCents;
@@ -534,6 +544,8 @@ export async function computeDailySummary(
 			? (grossProfitCents / expectedRevenueCents) *
 				100
 			: null;
+	const netProfitAfterExpensesCents =
+		grossProfitCents - expensesCents;
 
 	const inventoryRows = Array.from(
 		productById.entries(),
@@ -700,7 +712,9 @@ export async function computeDailySummary(
 		collectedSalesCents,
 		tabChargesCents,
 		accountedSalesCents,
+		expensesCents,
 		revenueVarianceCents,
+		netProfitAfterExpensesCents,
 		tabPaymentsByMethodCents,
 		dayChecklist: {
 			hasSalesEntries,

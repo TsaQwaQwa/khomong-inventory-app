@@ -122,7 +122,8 @@ interface TransactionDrilldownState {
 		| "all-transactions"
 		| "direct-sales"
 		| "account-sales"
-		| "account-payments";
+		| "account-payments"
+		| "expenses";
 	productId?: string;
 }
 interface ExceptionsSummary {
@@ -312,6 +313,8 @@ export function DashboardClient() {
 							: kind ===
 								  "account-payments"
 								? txn.type === "PAYMENT"
+								: kind === "expenses"
+									? txn.type === "EXPENSE"
 								: true;
 				if (!kindMatch) return false;
 				if (!txDrilldown.productId) return true;
@@ -590,6 +593,18 @@ export function DashboardClient() {
 								}
 							/>
 							<SummaryCard
+								title="Expenses"
+								value={
+									report.expensesCents ?? 0
+								}
+								onClick={() =>
+									openTxDrilldown({
+										title: "Expenses",
+										kind: "expenses",
+									})
+								}
+							/>
+							<SummaryCard
 								title="Est. Gross Profit"
 								value={
 									report.grossProfit
@@ -598,6 +613,29 @@ export function DashboardClient() {
 								variant={
 									report.grossProfit
 										.grossProfitCents < 0
+										? "negative"
+										: "default"
+								}
+							/>
+							<SummaryCard
+								title="Net After Expenses"
+								value={
+									report.netProfitAfterExpensesCents ??
+									(
+										report.grossProfit
+											.grossProfitCents -
+										(report.expensesCents ?? 0)
+									)
+								}
+								variant={
+									(
+										report.netProfitAfterExpensesCents ??
+										(
+											report.grossProfit
+												.grossProfitCents -
+											(report.expensesCents ?? 0)
+										)
+									) < 0
 										? "negative"
 										: "default"
 								}
