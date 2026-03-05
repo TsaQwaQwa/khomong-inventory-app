@@ -731,7 +731,8 @@ export function GlobalQuickActions() {
 		/>
 	);
 	const showInMoreActions = (action: QuickAction) =>
-		!favoriteActions.includes(action);
+		!favoriteActions.includes(action) &&
+		!pagePrimaryActions.includes(action);
 	const pagePrimaryActions = React.useMemo<
 		QuickAction[]
 	>(() => {
@@ -753,7 +754,7 @@ export function GlobalQuickActions() {
 			return ["adjustment"];
 		}
 		if (pathname.startsWith("/tabs")) {
-			return ["account-sale"];
+			return ["customer"];
 		}
 		if (pathname.startsWith("/transactions")) {
 			return ["quick-checkout"];
@@ -766,17 +767,15 @@ export function GlobalQuickActions() {
 		}
 		return [];
 	}, [pathname]);
-	const visiblePagePrimaryActions =
-		React.useMemo(
-			() =>
-				pagePrimaryActions.filter(
-					(action) =>
-						!favoriteActions.includes(
-							action,
-						),
-				),
-			[pagePrimaryActions, favoriteActions],
-		);
+	const visiblePagePrimaryActions = pagePrimaryActions;
+	const visiblePinnedActions = React.useMemo(
+		() =>
+			favoriteActions.filter(
+				(action) =>
+					!pagePrimaryActions.includes(action),
+			),
+		[favoriteActions, pagePrimaryActions],
+	);
 
 	if (!show) return null;
 
@@ -832,12 +831,12 @@ export function GlobalQuickActions() {
 							<p className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
 								Pinned
 							</p>
-							{favoriteActions.length === 0 ? (
+							{visiblePinnedActions.length === 0 ? (
 								<p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
 									No pinned actions. Use Pin Shortcuts to manage pins.
 								</p>
 							) : (
-								favoriteActions.map((action) => (
+								visiblePinnedActions.map((action) => (
 									<React.Fragment key={action}>
 										{renderQuickActionButton(
 											action,

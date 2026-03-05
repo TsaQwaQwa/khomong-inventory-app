@@ -647,7 +647,7 @@ export function DashboardClient() {
 									Gross Profit Estimate
 								</CardTitle>
 							</CardHeader>
-							<CardContent className="grid gap-3 sm:grid-cols-3">
+							<CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
 								<div className="rounded-lg border p-3">
 									<p className="text-xs text-muted-foreground">
 										Estimated COGS
@@ -667,6 +667,45 @@ export function DashboardClient() {
 										{formatZAR(
 											report.grossProfit
 												.grossProfitCents,
+										)}
+									</p>
+								</div>
+								<div className="rounded-lg border p-3">
+									<p className="text-xs text-muted-foreground">
+										Expenses
+									</p>
+									<p className="text-lg font-semibold text-destructive">
+										{formatZAR(
+											-(report.expensesCents ?? 0),
+										)}
+									</p>
+								</div>
+								<div className="rounded-lg border p-3">
+									<p className="text-xs text-muted-foreground">
+										Net After Expenses
+									</p>
+									<p
+										className={cn(
+											"text-lg font-semibold",
+											(
+												report.netProfitAfterExpensesCents ??
+												(
+													report.grossProfit
+														.grossProfitCents -
+													(report.expensesCents ?? 0)
+												)
+											) < 0
+												? "text-destructive"
+												: undefined,
+										)}
+									>
+										{formatZAR(
+											report.netProfitAfterExpensesCents ??
+											(
+												report.grossProfit
+													.grossProfitCents -
+												(report.expensesCents ?? 0)
+											),
 										)}
 									</p>
 								</div>

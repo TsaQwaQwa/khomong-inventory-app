@@ -328,6 +328,82 @@ const SEARCH_KIND_OPTIONS: Array<{
 	},
 ];
 
+const timeFormatter = new Intl.DateTimeFormat(
+	undefined,
+	{
+		hour: "2-digit",
+		minute: "2-digit",
+		hour12: false,
+	},
+);
+
+const dateFormatter = new Intl.DateTimeFormat(
+	undefined,
+	{
+		year: "numeric",
+		month: "short",
+		day: "numeric",
+	},
+);
+
+const relativeTimeFormatter =
+	new Intl.RelativeTimeFormat(undefined, {
+		numeric: "always",
+	});
+
+const formatRelativeFromNow = (
+	date: Date,
+	now: Date,
+) => {
+	const diffMs = now.getTime() - date.getTime();
+	if (diffMs < 60_000) return "just now";
+
+	const minutes = Math.floor(diffMs / 60_000);
+	if (minutes < 60) {
+		return relativeTimeFormatter.format(
+			-minutes,
+			"minute",
+		);
+	}
+
+	const hours = Math.floor(minutes / 60);
+	return relativeTimeFormatter.format(
+		-hours,
+		"hour",
+	);
+};
+
+const formatTransactionHistoryTime = (
+	createdAt?: string,
+) => {
+	if (!createdAt) return "-";
+	const created = new Date(createdAt);
+	if (Number.isNaN(created.getTime())) return "-";
+
+	const now = new Date();
+	const startOfToday = new Date(
+		now.getFullYear(),
+		now.getMonth(),
+		now.getDate(),
+	);
+	const startOfYesterday = new Date(
+		startOfToday.getTime() - 24 * 60 * 60 * 1000,
+	);
+
+	if (created >= startOfToday) {
+		return formatRelativeFromNow(created, now);
+	}
+
+	if (
+		created >= startOfYesterday &&
+		created < startOfToday
+	) {
+		return `Yesterday ${timeFormatter.format(created)}`;
+	}
+
+	return `${dateFormatter.format(created)} ${timeFormatter.format(created)}`;
+};
+
 export function TabsClient({
 	view = "both",
 }: TabsClientProps) {
@@ -485,6 +561,12 @@ export function TabsClient({
 	] = React.useState(false);
 	const [reverseReason, setReverseReason] =
 		React.useState("");
+	const [
+		historyDetailTxn,
+		setHistoryDetailTxn,
+	] = React.useState<TabTransactionHistory | null>(
+		null,
+	);
 	const [reversingTxn, setReversingTxn] =
 		React.useState<TabTransactionHistory | null>(
 			null,
@@ -742,6 +824,12 @@ export function TabsClient({
 					),
 			) ?? null,
 		[transactionsHistory],
+	);
+	const openHistoryDetails = React.useCallback(
+		(txn: TabTransactionHistory) => {
+			setHistoryDetailTxn(txn);
+		},
+		[],
 	);
 
 	const handleReverseTransaction = async () => {
@@ -1817,7 +1905,26 @@ export function TabsClient({
 													(txn) => (
 														<div
 															key={txn.id}
-															className="rounded-lg border p-3"
+															role="button"
+															tabIndex={0}
+															className="rounded-lg border p-3 cursor-pointer transition-colors hover:bg-muted/40"
+															onClick={() =>
+																openHistoryDetails(
+																	txn,
+																)
+															}
+															onKeyDown={(event) => {
+																if (
+																	event.key ===
+																		"Enter" ||
+																	event.key === " "
+																) {
+																	event.preventDefault();
+																	openHistoryDetails(
+																		txn,
+																	);
+																}
+															}}
 														>
 															<div className="flex items-start justify-between gap-2">
 																<div>
@@ -1827,11 +1934,9 @@ export function TabsClient({
 																		}
 																	</p>
 																	<p className="text-xs text-muted-foreground">
-																		{txn.createdAt
-																			? new Date(
-																					txn.createdAt,
-																				).toLocaleTimeString()
-																			: "-"}
+																		{formatTransactionHistoryTime(
+																			txn.createdAt,
+																		)}
 																	</p>
 																</div>
 																<p className="font-semibold">
@@ -1916,11 +2021,12 @@ export function TabsClient({
 																			type="button"
 																			size="sm"
 																			variant="secondary"
-																			onClick={() =>
+																			onClick={(event) => {
+																				event.stopPropagation();
 																				repeatSaleFromHistory(
 																					txn,
-																				)
-																			}
+																				);
+																			}}
 																		>
 																			Repeat
 																		</Button>
@@ -1939,11 +2045,12 @@ export function TabsClient({
 																			type="button"
 																			size="sm"
 																			variant="outline"
-																			onClick={() =>
+																			onClick={(event) => {
+																				event.stopPropagation();
 																				setReversingTxn(
 																					txn,
-																				)
-																			}
+																				);
+																			}}
 																		>
 																			<RotateCcw className="mr-2 h-3.5 w-3.5" />
 																			Reverse
@@ -1984,13 +2091,17 @@ export function TabsClient({
 															(txn) => (
 																<TableRow
 																	key={txn.id}
+																	className="cursor-pointer"
+																	onClick={() =>
+																		openHistoryDetails(
+																			txn,
+																		)
+																	}
 																>
 																	<TableCell className="text-muted-foreground">
-																		{txn.createdAt
-																			? new Date(
-																					txn.createdAt,
-																				).toLocaleTimeString()
-																			: "-"}
+																		{formatTransactionHistoryTime(
+																			txn.createdAt,
+																		)}
 																	</TableCell>
 																	<TableCell>
 																		{
@@ -2096,11 +2207,12 @@ export function TabsClient({
 																						type="button"
 																						size="sm"
 																						variant="secondary"
-																						onClick={() =>
+																						onClick={(event) => {
+																							event.stopPropagation();
 																							repeatSaleFromHistory(
 																								txn,
-																							)
-																						}
+																							);
+																						}}
 																					>
 																						Repeat
 																					</Button>
@@ -2109,11 +2221,12 @@ export function TabsClient({
 																					type="button"
 																					size="sm"
 																					variant="outline"
-																					onClick={() =>
+																					onClick={(event) => {
+																						event.stopPropagation();
 																						setReversingTxn(
 																							txn,
-																						)
-																					}
+																						);
+																					}}
 																				>
 																					<RotateCcw className="mr-2 h-3.5 w-3.5" />
 																					Reverse
@@ -2191,6 +2304,94 @@ export function TabsClient({
 								: "Delete"}
 						</Button>
 					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			<Dialog
+				open={Boolean(historyDetailTxn)}
+				onOpenChange={(open) => {
+					if (!open) {
+						setHistoryDetailTxn(null);
+					}
+				}}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>
+							Transaction Details
+						</DialogTitle>
+						<DialogDescription>
+							{historyDetailTxn?.customerName}{" "}
+							at{" "}
+							{formatTransactionHistoryTime(
+								historyDetailTxn?.createdAt,
+							)}
+						</DialogDescription>
+					</DialogHeader>
+					<div className="space-y-3">
+						<div className="rounded-md border p-3 text-sm">
+							<p>
+								Type:{" "}
+								{historyDetailTxn?.type ===
+								"DIRECT_SALE"
+									? "Direct Sale"
+									: historyDetailTxn?.type ===
+										  "CHARGE"
+										? "Sale"
+										: historyDetailTxn?.type ===
+											  "PAYMENT"
+											? "Payment"
+											: historyDetailTxn?.type ===
+												  "EXPENSE"
+												? "Expense"
+												: "Adjustment"}
+							</p>
+							<p>
+								Amount:{" "}
+								{formatZAR(
+									historyDetailTxn?.amountCents ??
+										0,
+								)}
+							</p>
+						</div>
+						<div className="space-y-2">
+							<p className="text-sm font-medium">
+								Items bought
+							</p>
+							{(historyDetailTxn?.items ?? []).length >
+							0 ? (
+								<div className="max-h-60 space-y-1 overflow-y-auto rounded-md border p-3">
+									{(historyDetailTxn?.items ?? [])
+										.filter(
+											(item) =>
+												(item.units ?? 0) >
+												0,
+										)
+										.map((item, index) => (
+											<div
+												key={`${item.productId}-${index}`}
+												className="flex items-center justify-between text-sm"
+											>
+												<span className="truncate pr-2">
+													{productNameById.get(
+														item.productId,
+													) ??
+														"Unknown product"}
+												</span>
+												<span className="text-muted-foreground">
+													x{item.units}
+												</span>
+											</div>
+										))}
+								</div>
+							) : (
+								<p className="text-sm text-muted-foreground">
+									No sale items on this
+									transaction.
+								</p>
+							)}
+						</div>
+					</div>
 				</DialogContent>
 			</Dialog>
 
