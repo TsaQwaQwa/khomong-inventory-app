@@ -97,6 +97,8 @@ export function PurchasesClient() {
 		React.useState<Purchase | null>(null);
 	const [editingPurchase, setEditingPurchase] =
 		React.useState<Purchase | null>(null);
+	const [viewingPurchase, setViewingPurchase] =
+		React.useState<Purchase | null>(null);
 	const [
 		pendingDeletePurchase,
 		setPendingDeletePurchase,
@@ -275,6 +277,9 @@ export function PurchasesClient() {
 							key={purchase.id}
 							purchase={purchase}
 							products={normalizedProducts}
+							onViewPurchase={() =>
+								setViewingPurchase(purchase)
+							}
 							onEditPurchase={() =>
 								setEditingPurchase(purchase)
 							}
@@ -290,6 +295,34 @@ export function PurchasesClient() {
 					))}
 				</div>
 			)}
+
+			<Dialog
+				open={Boolean(viewingPurchase)}
+				onOpenChange={(open) => {
+					if (!open) setViewingPurchase(null);
+				}}
+			>
+				{viewingPurchase && (
+					<DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+						<DialogHeader>
+							<DialogTitle>
+								Purchase Details
+							</DialogTitle>
+							<DialogDescription>
+								{viewingPurchase.supplierName ||
+									"Unknown Supplier"}
+								{viewingPurchase.invoiceNo
+									? ` - Invoice ${viewingPurchase.invoiceNo}`
+									: ""}
+							</DialogDescription>
+						</DialogHeader>
+						<PurchaseDetailsContent
+							purchase={viewingPurchase}
+							products={normalizedProducts}
+						/>
+					</DialogContent>
+				)}
+			</Dialog>
 
 			<Dialog
 				open={Boolean(pendingDeletePurchase)}
@@ -369,11 +402,13 @@ export function PurchasesClient() {
 function PurchaseCard({
 	purchase,
 	products,
+	onViewPurchase,
 	onEditPurchase,
 	onDeletePurchase,
 }: {
 	purchase: Purchase;
 	products: Product[];
+	onViewPurchase?: () => void;
 	onEditPurchase?: () => void;
 	onDeletePurchase?: () => void;
 }) {
@@ -504,6 +539,17 @@ function PurchaseCard({
 								items
 							</p>
 						)}
+						{onViewPurchase && (
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="w-full"
+								onClick={onViewPurchase}
+							>
+								View Details
+							</Button>
+						)}
 					</div>
 				</div>
 
@@ -613,6 +659,96 @@ function PurchaseCard({
 				</div>
 			)}
 		</Card>
+	);
+}
+
+function PurchaseDetailsContent({
+	purchase,
+	products,
+}: {
+	purchase: Purchase;
+	products: Product[];
+}) {
+	const productMap = React.useMemo(
+		() => new Map(products.map((p) => [p.id, p])),
+		[products],
+	);
+	const totalUnits = purchase.items.reduce(
+		(sum, item) => sum + item.units,
+		0,
+	);
+	const subtotalCost = purchase.items.reduce(
+		(sum, item) =>
+			sum +
+			(item.lineTotalCostCents ??
+				(item.unitCostCents || 0) * item.units),
+		0,
+	);
+	const totalCost =
+		typeof purchase.totalCostCents === "number"
+			? purchase.totalCostCents
+			: subtotalCost;
+
+	return (
+		<div className="space-y-3">
+			<div className="grid grid-cols-3 gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
+				<div>
+					<p className="text-muted-foreground">
+						Items
+					</p>
+					<p className="font-medium">
+						{purchase.items.length}
+					</p>
+				</div>
+				<div className="text-right">
+					<p className="text-muted-foreground">
+						Units
+					</p>
+					<p className="font-medium">{totalUnits}</p>
+				</div>
+				<div className="text-right">
+					<p className="text-muted-foreground">
+						Total
+					</p>
+					<p className="font-semibold">
+						{formatZAR(totalCost)}
+					</p>
+				</div>
+			</div>
+			<div className="space-y-2">
+				{purchase.items.map((item, index) => {
+					const product = productMap.get(
+						item.productId,
+					);
+					const lineTotal =
+						item.lineTotalCostCents ??
+						(item.unitCostCents || 0) * item.units;
+					return (
+						<div
+							key={`${item.productId}-${index}`}
+							className="rounded border p-2"
+						>
+							<div className="flex items-start justify-between gap-2">
+								<p className="font-medium">
+									{product?.name ??
+										item.productId}
+								</p>
+								<p className="font-medium">
+									{item.unitCostCents
+										? formatZAR(lineTotal)
+										: "-"}
+								</p>
+							</div>
+							<p className="text-xs text-muted-foreground">
+								Cases: {item.cases} | Singles:{" "}
+								{item.singles} | Units:{" "}
+								{item.units}
+							</p>
+						</div>
+					);
+				})}
+			</div>
+		</div>
 	);
 }
 
