@@ -41,7 +41,7 @@ CustomerSchema.index(
   {
     unique: true,
     partialFilterExpression: {
-      phone: { $type: "string", $ne: "" },
+      phone: { $type: "string" },
     },
   },
 );
@@ -76,7 +76,7 @@ export async function ensureCustomerPhoneIndex() {
             name: "phone_1",
             unique: true,
             partialFilterExpression: {
-              phone: { $type: "string", $ne: "" },
+              phone: { $type: "string" },
             },
           },
         );
