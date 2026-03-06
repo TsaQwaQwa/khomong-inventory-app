@@ -8,7 +8,10 @@ import {
 import { ok, fail } from "@/lib/http";
 import { parseJson } from "@/lib/validate";
 import { customerUpdateSchema } from "@/lib/schemas";
-import { Customer } from "@/models/Customer";
+import {
+	Customer,
+	ensureCustomerPhoneIndex,
+} from "@/models/Customer";
 import { TabAccount } from "@/models/TabAccount";
 import { TabTransaction } from "@/models/TabTransaction";
 import { serializeDoc } from "@/lib/serialize";
@@ -42,6 +45,7 @@ export async function PATCH(
 
 	const { id } = await ctx.params;
 	await connectDB();
+	await ensureCustomerPhoneIndex();
 
 	try {
 		const input = await parseJson(

@@ -3296,6 +3296,8 @@ function AccountSaleForm({
 		React.useState("");
 	const [tempTabNote, setTempTabNote] =
 		React.useState("");
+	const [tempTabOpeningBalanceCents, setTempTabOpeningBalanceCents] =
+		React.useState(0);
 	const [createAnotherTempTab, setCreateAnotherTempTab] =
 		React.useState(false);
 	const { mutate } = useSWRConfig();
@@ -3354,6 +3356,8 @@ function AccountSaleForm({
 					note: tempTabNote.trim() || undefined,
 					customerMode: "DEBT_ONLY",
 					isTemporaryTab: true,
+					openingBalanceCents:
+						tempTabOpeningBalanceCents,
 					creditLimitCents: 0,
 				}),
 			});
@@ -3382,6 +3386,7 @@ function AccountSaleForm({
 			setTempTabName("");
 			setTempTabPhone("");
 			setTempTabNote("");
+			setTempTabOpeningBalanceCents(0);
 			if (!createAnotherTempTab) {
 				setTempTabOpen(false);
 			}
@@ -3597,6 +3602,13 @@ function AccountSaleForm({
 										placeholder="Quick identifier or context..."
 									/>
 								</div>
+								<MoneyInput
+									label="Opening Owing Amount"
+									value={tempTabOpeningBalanceCents}
+									onChange={
+										setTempTabOpeningBalanceCents
+									}
+								/>
 								<label className="flex items-center gap-2 text-sm">
 									<Input
 										type="checkbox"
@@ -4163,6 +4175,8 @@ function AddCustomerForm({
 		React.useState<"ACCOUNT" | "DEBT_ONLY">(
 			"ACCOUNT",
 		);
+	const [openingBalanceCents, setOpeningBalanceCents] =
+		React.useState(0);
 	const [creditLimitCents, setCreditLimitCents] =
 		React.useState(0);
 	const [dueDays, setDueDays] =
@@ -4181,9 +4195,10 @@ function AddCustomerForm({
 				},
 				body: JSON.stringify({
 					name,
-					phone: phone || undefined,
+					phone: phone.trim() || undefined,
 					note: note || undefined,
 					customerMode,
+					openingBalanceCents,
 					creditLimitCents:
 						customerMode === "ACCOUNT"
 							? creditLimitCents
@@ -4273,8 +4288,13 @@ function AddCustomerForm({
 						}
 						placeholder="072 123 4567"
 					/>
-				</div>
-				{customerMode === "ACCOUNT" && (
+					</div>
+					<MoneyInput
+						label="Opening Owing Amount"
+						value={openingBalanceCents}
+						onChange={setOpeningBalanceCents}
+					/>
+					{customerMode === "ACCOUNT" && (
 					<>
 						<MoneyInput
 							label="Credit Limit"

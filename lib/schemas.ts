@@ -114,6 +114,7 @@ export const customerCreateSchema = z.object({
   note: z.string().optional(),
   customerMode: z.enum(["ACCOUNT", "DEBT_ONLY"]).default("ACCOUNT"),
   isTemporaryTab: z.boolean().optional().default(false),
+  openingBalanceCents: z.number().int().min(0).default(0),
   creditLimitCents: z.number().int().min(0).default(0),
   dueDays: z.number().int().min(1).max(365).optional(),
 });

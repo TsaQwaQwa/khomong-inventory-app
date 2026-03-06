@@ -10,11 +10,13 @@ import { TabAccount } from "@/models/TabAccount";
 import { TabTransaction } from "@/models/TabTransaction";
 import { serializeDoc, serializeDocs } from "@/lib/serialize";
 import { todayYMD } from "@/lib/dates";
+import { getOrCreateDay } from "@/lib/businessDay";
 import {
 	getScopeIdFromAuth,
 	toAuditObject,
 	writeAuditLog,
 } from "@/lib/audit";
+import { ensureCustomerPhoneIndex } from "@/models/Customer";
 
 function normalizeOptionalString(
 	value: unknown,
@@ -35,6 +37,7 @@ export async function GET() {
 	}
 
 	await connectDB();
+	await ensureCustomerPhoneIndex();
 	const docs = await Customer.find({
 		isActive: true,
 	})
@@ -221,6 +224,7 @@ export async function POST(req: Request) {
 
 	await connectDB();
 	try {
+		await ensureCustomerPhoneIndex();
 		const input = await parseJson(
 			req,
 			customerCreateSchema,
@@ -245,6 +249,21 @@ export async function POST(req: Request) {
 			status: "ACTIVE",
 			dueDays: input.dueDays,
 		});
+		let openingBalanceTxn = null;
+		if ((input.openingBalanceCents ?? 0) > 0) {
+			const day = await getOrCreateDay(
+				todayYMD(),
+				a.userId!,
+			);
+			openingBalanceTxn = await TabTransaction.create({
+				customerId: String(customer._id),
+				businessDayId: String(day._id),
+				type: "ADJUSTMENT",
+				amountCents: input.openingBalanceCents,
+				note: "Opening balance",
+				createdByUserId: a.userId!,
+			});
+		}
 		await writeAuditLog({
 			scopeId: getScopeIdFromAuth(a),
 			actorUserId: a.userId ?? undefined,
@@ -255,6 +274,8 @@ export async function POST(req: Request) {
 			newValues: toAuditObject({
 				customer: customer.toObject(),
 				tabAccount: account.toObject(),
+				openingBalance:
+					openingBalanceTxn?.toObject() ?? null,
 			}),
 		});
 

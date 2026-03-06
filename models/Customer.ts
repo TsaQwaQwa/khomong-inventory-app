@@ -48,3 +48,44 @@ CustomerSchema.index(
 CustomerSchema.index({ name: 1 });
 
 export const Customer = getModel<CustomerDoc>('Customer', CustomerSchema);
+
+let phoneIndexEnsured: Promise<void> | null = null;
+
+export async function ensureCustomerPhoneIndex() {
+  if (!phoneIndexEnsured) {
+    phoneIndexEnsured = (async () => {
+      await Customer.createCollection().catch(() => undefined);
+      const indexes = await Customer.collection.indexes();
+      const phoneIndex = indexes.find((index) => index.key?.phone === 1);
+      const partialFilterExpression = phoneIndex?.partialFilterExpression as
+        | Record<string, unknown>
+        | undefined;
+      const isExpected =
+        Boolean(phoneIndex?.unique) &&
+        partialFilterExpression?.phone &&
+        typeof partialFilterExpression.phone === "object";
+
+      if (phoneIndex && !isExpected) {
+        await Customer.collection.dropIndex(phoneIndex.name);
+      }
+
+      if (!phoneIndex || !isExpected) {
+        await Customer.collection.createIndex(
+          { phone: 1 },
+          {
+            name: "phone_1",
+            unique: true,
+            partialFilterExpression: {
+              phone: { $type: "string", $ne: "" },
+            },
+          },
+        );
+      }
+    })().catch((error) => {
+      phoneIndexEnsured = null;
+      throw error;
+    });
+  }
+
+  await phoneIndexEnsured;
+}

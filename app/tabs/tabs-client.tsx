@@ -2496,6 +2496,7 @@ function AddCustomerDialog({
 		customerMode: "ACCOUNT" as
 			| "ACCOUNT"
 			| "DEBT_ONLY",
+		openingBalanceCents: 0,
 		creditLimitCents: 0,
 		dueDays: "",
 	});
@@ -2514,9 +2515,12 @@ function AddCustomerDialog({
 				},
 				body: JSON.stringify({
 					name: formData.name,
-					phone: formData.phone || undefined,
+					phone:
+						formData.phone.trim() || undefined,
 					note: formData.note || undefined,
 					customerMode: formData.customerMode,
+					openingBalanceCents:
+						formData.openingBalanceCents,
 					creditLimitCents:
 						formData.customerMode === "ACCOUNT"
 							? formData.creditLimitCents
@@ -2625,6 +2629,16 @@ function AddCustomerDialog({
 							placeholder="072 123 4567"
 						/>
 					</div>
+					<MoneyInput
+						label="Opening Owing Amount"
+						value={formData.openingBalanceCents}
+						onChange={(v) =>
+							setFormData({
+								...formData,
+								openingBalanceCents: v,
+							})
+						}
+					/>
 					{formData.customerMode ===
 						"ACCOUNT" && (
 						<>
@@ -3074,6 +3088,8 @@ function TabChargeForm({
 		React.useState("");
 	const [tempTabNote, setTempTabNote] =
 		React.useState("");
+	const [tempTabOpeningBalanceCents, setTempTabOpeningBalanceCents] =
+		React.useState(0);
 	const [createAnotherTempTab, setCreateAnotherTempTab] =
 		React.useState(false);
 	const [showNote, setShowNote] = React.useState(
@@ -3357,6 +3373,8 @@ function TabChargeForm({
 					note: tempTabNote.trim() || undefined,
 					customerMode: "DEBT_ONLY",
 					isTemporaryTab: true,
+					openingBalanceCents:
+						tempTabOpeningBalanceCents,
 					creditLimitCents: 0,
 				}),
 			});
@@ -3386,6 +3404,7 @@ function TabChargeForm({
 			setTempTabName("");
 			setTempTabPhone("");
 			setTempTabNote("");
+			setTempTabOpeningBalanceCents(0);
 			if (!createAnotherTempTab) {
 				setTempTabOpen(false);
 			}
@@ -3547,6 +3566,13 @@ function TabChargeForm({
 										placeholder="Quick identifier or context..."
 									/>
 								</div>
+								<MoneyInput
+									label="Opening Owing Amount"
+									value={tempTabOpeningBalanceCents}
+									onChange={
+										setTempTabOpeningBalanceCents
+									}
+								/>
 								<label className="flex items-center gap-2 text-sm">
 									<Input
 										type="checkbox"
