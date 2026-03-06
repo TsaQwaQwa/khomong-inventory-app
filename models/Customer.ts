@@ -39,7 +39,6 @@ const CustomerSchema = new Schema<CustomerDoc>(
 CustomerSchema.index(
   { phone: 1 },
   {
-    unique: true,
     partialFilterExpression: {
       phone: { $type: "string" },
     },
