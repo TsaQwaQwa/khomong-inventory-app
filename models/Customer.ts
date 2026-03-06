@@ -65,7 +65,7 @@ export async function ensureCustomerPhoneIndex() {
         partialFilterExpression?.phone &&
         typeof partialFilterExpression.phone === "object";
 
-      if (phoneIndex && !isExpected) {
+      if (phoneIndex && !isExpected && phoneIndex.name) {
         await Customer.collection.dropIndex(phoneIndex.name);
       }
 
