@@ -180,6 +180,8 @@ export function ProductsClient({
 		React.useState<Product | null>(null);
 	const [editingProduct, setEditingProduct] =
 		React.useState<Product | null>(null);
+	const [editingStockProduct, setEditingStockProduct] =
+		React.useState<ProductWithStock | null>(null);
 	const [
 		pendingDeleteProduct,
 		setPendingDeleteProduct,
@@ -466,6 +468,18 @@ export function ProductsClient({
 												variant="outline"
 												size="sm"
 												onClick={() =>
+													setEditingStockProduct(
+														product,
+													)
+												}
+											>
+												<ClipboardEdit className="mr-1 h-3 w-3" />
+												Edit Stock
+											</Button>
+											<Button
+												variant="outline"
+												size="sm"
+												onClick={() =>
 													handlePriceClick(
 														product,
 													)
@@ -578,6 +592,18 @@ export function ProductsClient({
 												</TableCell>
 												<TableCell className="text-right">
 													<div className="flex items-center justify-end gap-2">
+														<Button
+															variant="outline"
+															size="sm"
+															onClick={() =>
+																setEditingStockProduct(
+																	product,
+																)
+															}
+														>
+															<ClipboardEdit className="mr-1 h-3 w-3" />
+															Edit Stock
+														</Button>
 														<Button
 															variant="outline"
 															size="sm"
@@ -699,6 +725,23 @@ export function ProductsClient({
 						mutateProducts={mutate}
 						onSuccess={() =>
 							setEditingProduct(null)
+						}
+					/>
+				)}
+			</Dialog>
+
+			<Dialog
+				open={Boolean(editingStockProduct)}
+				onOpenChange={(open) => {
+					if (!open) setEditingStockProduct(null);
+				}}
+			>
+				{editingStockProduct && (
+					<EditStockDialog
+						product={editingStockProduct}
+						mutateProducts={mutate}
+						onSuccess={() =>
+							setEditingStockProduct(null)
 						}
 					/>
 				)}
@@ -1172,6 +1215,213 @@ function EditProductDialog({
 						{loading
 							? "Saving..."
 							: "Save"}
+					</Button>
+				</DialogFooter>
+			</form>
+		</DialogContent>
+	);
+}
+
+function EditStockDialog({
+	product,
+	mutateProducts,
+	onSuccess,
+}: {
+	product: ProductWithStock;
+	mutateProducts: KeyedMutator<ProductWithStock[]>;
+	onSuccess: () => void;
+}) {
+	const [loading, setLoading] =
+		React.useState(false);
+	const [targetUnits, setTargetUnits] =
+		React.useState(
+			String(product.currentUnits ?? 0),
+		);
+	const [note, setNote] = React.useState("");
+	const [date, setDate] = React.useState(
+		getTodayJHB(),
+	);
+
+	React.useEffect(() => {
+		setTargetUnits(String(product.currentUnits ?? 0));
+		setNote("");
+		setDate(getTodayJHB());
+	}, [product]);
+
+	const currentUnits = product.currentUnits ?? 0;
+	const parsedTargetUnits = React.useMemo(() => {
+		const parsed = parseInt(targetUnits, 10);
+		return Number.isFinite(parsed)
+			? Math.max(parsed, 0)
+			: 0;
+	}, [targetUnits]);
+	const deltaUnits =
+		parsedTargetUnits - currentUnits;
+	const nextStockStatus: ProductWithStock["stockStatus"] =
+		parsedTargetUnits <= 0
+			? "OUT"
+			: parsedTargetUnits <=
+				  (product.reorderLevelUnits ?? 0)
+				? "LOW"
+				: "OK";
+
+	const handleSubmit = async (
+		e: React.FormEvent,
+	) => {
+		e.preventDefault();
+		if (deltaUnits === 0) {
+			toast.error("Current stock is already set to that value");
+			return;
+		}
+		setLoading(true);
+
+		try {
+			await mutateProducts(
+				async (current = []) => {
+					await jsonFetcher("/api/adjustments", {
+						method: "POST",
+						headers: {
+							"Content-Type": "application/json",
+						},
+						body: JSON.stringify({
+							date,
+							items: [
+								{
+									productId: product.id,
+									unitsDelta: deltaUnits,
+									reason: "COUNT_CORRECTION",
+									note:
+										note.trim() ||
+										`Stock set from ${currentUnits} to ${parsedTargetUnits}`,
+								},
+							],
+						}),
+					});
+
+					return current.map((item) =>
+						item.id === product.id
+							? {
+									...item,
+									currentUnits:
+										parsedTargetUnits,
+									stockStatus:
+										nextStockStatus,
+							  }
+							: item,
+					);
+				},
+				{
+					optimisticData: (current = []) =>
+						current.map((item) =>
+							item.id === product.id
+								? {
+										...item,
+										currentUnits:
+											parsedTargetUnits,
+										stockStatus:
+											nextStockStatus,
+								  }
+								: item,
+						),
+					rollbackOnError: true,
+				},
+			);
+
+			toast.success("Current stock updated");
+			onSuccess();
+		} catch (err) {
+			toast.error(
+				err instanceof Error
+					? err.message
+					: "Failed to update current stock",
+			);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	return (
+		<DialogContent>
+			<DialogHeader>
+				<DialogTitle>
+					Edit Current Stock
+				</DialogTitle>
+				<DialogDescription>
+					Set the stock on hand for {product.name}. This
+					creates a count correction adjustment.
+				</DialogDescription>
+			</DialogHeader>
+			<form onSubmit={handleSubmit}>
+				<div className="grid gap-4 py-4">
+					<div className="rounded-md border p-3 text-sm">
+						<p>
+							Current stock: {currentUnits}
+						</p>
+						<p>
+							New stock: {parsedTargetUnits}
+						</p>
+						<p>
+							Adjustment delta:{" "}
+							{deltaUnits > 0 ? "+" : ""}
+							{deltaUnits}
+						</p>
+					</div>
+					<div className="space-y-2">
+						<Label htmlFor="stock-date">
+							Adjustment Date
+						</Label>
+						<Input
+							id="stock-date"
+							type="date"
+							value={date}
+							onChange={(e) =>
+								setDate(e.target.value)
+							}
+						/>
+					</div>
+					<div className="space-y-2">
+						<Label htmlFor="targetUnits">
+							Current Stock
+						</Label>
+						<Input
+							id="targetUnits"
+							type="number"
+							min="0"
+							value={targetUnits}
+							onChange={(e) =>
+								setTargetUnits(e.target.value)
+							}
+							required
+						/>
+					</div>
+					<div className="space-y-2">
+						<Label htmlFor="stock-note">
+							Note (optional)
+						</Label>
+						<Input
+							id="stock-note"
+							value={note}
+							onChange={(e) =>
+								setNote(e.target.value)
+							}
+							placeholder="Reason for the stock correction"
+						/>
+					</div>
+				</div>
+				<DialogFooter>
+					<DialogClose asChild>
+						<Button
+							type="button"
+							variant="outline"
+						>
+							Cancel
+						</Button>
+					</DialogClose>
+					<Button
+						type="submit"
+						disabled={loading || deltaUnits === 0}
+					>
+						{loading ? "Saving..." : "Save"}
 					</Button>
 				</DialogFooter>
 			</form>

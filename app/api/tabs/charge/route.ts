@@ -85,7 +85,7 @@ export async function POST(req: Request) {
 			});
 
 		// Compute amount from line items (price locked per line)
-		const productIds = input.items.map(
+		const productIds = (input.items ?? []).map(
 			(i) => i.productId,
 		);
 		const products =
@@ -108,7 +108,7 @@ export async function POST(req: Request) {
 			string,
 			number
 		>();
-		for (const item of input.items) {
+		for (const item of input.items ?? []) {
 			requestedUnitsByProduct.set(
 				item.productId,
 				(requestedUnitsByProduct.get(
@@ -163,7 +163,7 @@ export async function POST(req: Request) {
 			units: number;
 			unitPriceCents: number;
 		}[] = [];
-		for (const it of input.items) {
+		for (const it of input.items ?? []) {
 			const unitPriceCents = await getPrice(
 				it.productId,
 				date,
