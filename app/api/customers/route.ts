@@ -16,6 +16,14 @@ import {
 	writeAuditLog,
 } from "@/lib/audit";
 
+function normalizeOptionalString(
+	value: unknown,
+): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const trimmed = value.trim();
+	return trimmed.length > 0 ? trimmed : undefined;
+}
+
 export async function GET() {
 	try {
 		await requireOrgAuth();
@@ -217,11 +225,15 @@ export async function POST(req: Request) {
 			req,
 			customerCreateSchema,
 		);
+		const phone = normalizeOptionalString(
+			input.phone,
+		);
+		const note = normalizeOptionalString(input.note);
 
 		const customer = await Customer.create({
 			name: input.name,
-			phone: input.phone,
-			note: input.note,
+			...(phone ? { phone } : {}),
+			...(note ? { note } : {}),
 			customerMode: input.customerMode,
 			isTemporaryTab: input.isTemporaryTab,
 			isActive: true,

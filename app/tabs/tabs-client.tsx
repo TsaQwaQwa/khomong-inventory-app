@@ -2706,6 +2706,8 @@ function EditCustomerDialog({
 }) {
 	const [loading, setLoading] =
 		React.useState(false);
+	const currentBalanceCents =
+		customer.balanceCents ?? 0;
 	const [formData, setFormData] = React.useState({
 		name: customer.name ?? "",
 		phone: customer.phone ?? "",
@@ -2718,6 +2720,10 @@ function EditCustomerDialog({
 			? String(customer.dueDays)
 			: "",
 	});
+	const [targetBalanceCents, setTargetBalanceCents] =
+		React.useState(currentBalanceCents);
+	const [balanceAdjustmentNote, setBalanceAdjustmentNote] =
+		React.useState("");
 
 	React.useEffect(() => {
 		setFormData({
@@ -2732,7 +2738,12 @@ function EditCustomerDialog({
 				? String(customer.dueDays)
 				: "",
 		});
+		setTargetBalanceCents(customer.balanceCents ?? 0);
+		setBalanceAdjustmentNote("");
 	}, [customer]);
+
+	const balanceDeltaCents =
+		targetBalanceCents - currentBalanceCents;
 
 	const handleSubmit = async (
 		e: React.FormEvent,
@@ -2777,6 +2788,41 @@ function EditCustomerDialog({
 						"Failed to update customer",
 					),
 				);
+			}
+
+			if (balanceDeltaCents !== 0) {
+				const adjustmentRes = await fetch(
+					"/api/tabs/adjustment",
+					{
+						method: "POST",
+						headers: {
+							"Content-Type":
+								"application/json",
+						},
+						body: JSON.stringify({
+							customerId: customer.id,
+							amountCents: balanceDeltaCents,
+							note:
+								balanceAdjustmentNote.trim() ||
+								`Customer balance set from ${formatZAR(
+									currentBalanceCents,
+								)} to ${formatZAR(
+									targetBalanceCents,
+								)}`,
+						}),
+					},
+				);
+				if (!adjustmentRes.ok) {
+					const errorBody = await adjustmentRes
+						.json()
+						.catch(() => ({}));
+					throw new Error(
+						getApiErrorMessage(
+							errorBody,
+							"Failed to update customer owing amount",
+						),
+					);
+				}
 			}
 
 			toast.success("Customer updated");
@@ -2909,6 +2955,42 @@ function EditCustomerDialog({
 							rows={2}
 						/>
 					</div>
+					<div className="rounded-md border p-3 text-sm">
+						<p>
+							Current owing:{" "}
+							{formatZAR(currentBalanceCents)}
+						</p>
+						<p>
+							New owing:{" "}
+							{formatZAR(targetBalanceCents)}
+						</p>
+						<p>
+							Adjustment:{" "}
+							{balanceDeltaCents > 0 ? "+" : ""}
+							{formatZAR(balanceDeltaCents)}
+						</p>
+					</div>
+					<MoneyInput
+						label="Set Current Owing"
+						value={targetBalanceCents}
+						onChange={setTargetBalanceCents}
+					/>
+					<div className="space-y-2">
+						<Label htmlFor="edit-balance-note">
+							Owing Adjustment Note (optional)
+						</Label>
+						<Textarea
+							id="edit-balance-note"
+							value={balanceAdjustmentNote}
+							onChange={(e) =>
+								setBalanceAdjustmentNote(
+									e.target.value,
+								)
+							}
+							placeholder="Reason for changing the customer's owing amount"
+							rows={2}
+						/>
+					</div>
 				</div>
 				<DialogFooter>
 					<DialogClose asChild>
@@ -2992,6 +3074,8 @@ function TabChargeForm({
 		React.useState("");
 	const [tempTabNote, setTempTabNote] =
 		React.useState("");
+	const [createAnotherTempTab, setCreateAnotherTempTab] =
+		React.useState(false);
 	const [showNote, setShowNote] = React.useState(
 		Boolean(initialData?.note),
 	);
@@ -3292,16 +3376,19 @@ function TabChargeForm({
 				body?.data?.id ?? body?.id;
 			if (
 				typeof createdId === "string" &&
-				createdId
+				createdId &&
+				!createAnotherTempTab
 			) {
 				setCustomerId(createdId);
 			}
 			onCustomerCreated?.();
 			toast.success("Temporary tab opened");
-			setTempTabOpen(false);
 			setTempTabName("");
 			setTempTabPhone("");
 			setTempTabNote("");
+			if (!createAnotherTempTab) {
+				setTempTabOpen(false);
+			}
 		} catch (err) {
 			toast.error(
 				err instanceof Error
@@ -3460,6 +3547,21 @@ function TabChargeForm({
 										placeholder="Quick identifier or context..."
 									/>
 								</div>
+								<label className="flex items-center gap-2 text-sm">
+									<Input
+										type="checkbox"
+										checked={createAnotherTempTab}
+										onChange={(e) =>
+											setCreateAnotherTempTab(
+												e.target.checked,
+											)
+										}
+										className="h-4 w-4"
+									/>
+									<span>
+										Keep this open to add another temporary tab
+									</span>
+								</label>
 								<DialogFooter>
 									<DialogClose asChild>
 										<Button

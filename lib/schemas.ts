@@ -100,11 +100,12 @@ export const adjustmentSchema = z.object({
 
 const optionalPhoneSchema = z.preprocess(
 	(value) => {
+		if (value === null) return null;
 		if (typeof value !== "string") return value;
 		const trimmed = value.trim();
-		return trimmed === "" ? undefined : trimmed;
+		return trimmed === "" ? null : trimmed;
 	},
-	z.string().min(7).optional(),
+	z.union([z.string().min(7), z.null()]).optional(),
 );
 
 export const customerCreateSchema = z.object({
@@ -155,6 +156,15 @@ export const tabPaymentSchema = z.object({
   paymentMethod: z.enum(['CASH', 'CARD', 'EFT']),
   cashReceivedCents: z.number().int().min(0).optional(),
   reference: z.string().optional(),
+  note: z.string().optional(),
+});
+
+export const tabAdjustmentSchema = z.object({
+  date: ymdSchema.optional(),
+  customerId: z.string().min(1),
+  amountCents: z.number().int().refine((value) => value !== 0, {
+    message: "Adjustment amount must not be zero",
+  }),
   note: z.string().optional(),
 });
 

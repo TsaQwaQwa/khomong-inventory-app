@@ -18,6 +18,14 @@ import {
 	writeAuditLog,
 } from "@/lib/audit";
 
+function normalizeOptionalString(
+	value: unknown,
+): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const trimmed = value.trim();
+	return trimmed.length > 0 ? trimmed : undefined;
+}
+
 export async function PATCH(
 	req: Request,
 	ctx: { params: Promise<{ id: string }> },
@@ -45,12 +53,29 @@ export async function PATCH(
 			string,
 			unknown
 		> = {};
+		const customerUnset: Record<string, 1> = {};
 		if (input.name !== undefined)
 			customerPatch.name = input.name;
-		if (input.phone !== undefined)
-			customerPatch.phone = input.phone;
-		if (input.note !== undefined)
-			customerPatch.note = input.note;
+		if (input.phone !== undefined) {
+			const phone = normalizeOptionalString(
+				input.phone,
+			);
+			if (phone) {
+				customerPatch.phone = phone;
+			} else {
+				customerUnset.phone = 1;
+			}
+		}
+		if (input.note !== undefined) {
+			const note = normalizeOptionalString(
+				input.note,
+			);
+			if (note) {
+				customerPatch.note = note;
+			} else {
+				customerUnset.note = 1;
+			}
+		}
 		if (input.customerMode !== undefined)
 			customerPatch.customerMode = input.customerMode;
 		if (input.isTemporaryTab !== undefined)
@@ -82,11 +107,23 @@ export async function PATCH(
 			});
 
 		const updates: Promise<unknown>[] = [];
-		if (Object.keys(customerPatch).length > 0) {
+		if (
+			Object.keys(customerPatch).length > 0 ||
+			Object.keys(customerUnset).length > 0
+		) {
 			updates.push(
 				Customer.updateOne(
 					{ _id: id },
-					{ $set: customerPatch },
+					{
+						...(Object.keys(customerPatch).length >
+						0
+							? { $set: customerPatch }
+							: {}),
+						...(Object.keys(customerUnset).length >
+						0
+							? { $unset: customerUnset }
+							: {}),
+					},
 				),
 			);
 		}

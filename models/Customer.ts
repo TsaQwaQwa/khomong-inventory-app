@@ -15,7 +15,14 @@ export interface CustomerDoc {
 const CustomerSchema = new Schema<CustomerDoc>(
   {
     name: { type: String, required: true },
-    phone: { type: String },
+    phone: {
+      type: String,
+      set: (value: unknown) => {
+        if (typeof value !== "string") return undefined;
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? trimmed : undefined;
+      },
+    },
     note: { type: String },
     customerMode: {
       type: String,
@@ -29,7 +36,15 @@ const CustomerSchema = new Schema<CustomerDoc>(
   { timestamps: true }
 );
 
-CustomerSchema.index({ phone: 1 }, { unique: true, sparse: true });
+CustomerSchema.index(
+  { phone: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      phone: { $type: "string", $ne: "" },
+    },
+  },
+);
 CustomerSchema.index({ name: 1 });
 
 export const Customer = getModel<CustomerDoc>('Customer', CustomerSchema);

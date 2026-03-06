@@ -3296,6 +3296,8 @@ function AccountSaleForm({
 		React.useState("");
 	const [tempTabNote, setTempTabNote] =
 		React.useState("");
+	const [createAnotherTempTab, setCreateAnotherTempTab] =
+		React.useState(false);
 	const { mutate } = useSWRConfig();
 	const productPriceById = React.useMemo(
 		() =>
@@ -3368,15 +3370,21 @@ function AccountSaleForm({
 			}
 
 			const createdId = body?.data?.id ?? body?.id;
-			if (typeof createdId === "string" && createdId) {
+			if (
+				typeof createdId === "string" &&
+				createdId &&
+				!createAnotherTempTab
+			) {
 				setCustomerId(createdId);
 			}
 			await mutate("/api/customers");
 			toast.success("Temporary tab opened");
-			setTempTabOpen(false);
 			setTempTabName("");
 			setTempTabPhone("");
 			setTempTabNote("");
+			if (!createAnotherTempTab) {
+				setTempTabOpen(false);
+			}
 		} catch (err) {
 			toast.error(
 				err instanceof Error
@@ -3589,6 +3597,21 @@ function AccountSaleForm({
 										placeholder="Quick identifier or context..."
 									/>
 								</div>
+								<label className="flex items-center gap-2 text-sm">
+									<Input
+										type="checkbox"
+										checked={createAnotherTempTab}
+										onChange={(e) =>
+											setCreateAnotherTempTab(
+												e.target.checked,
+											)
+										}
+										className="h-4 w-4"
+									/>
+									<span>
+										Keep this open to add another temporary tab
+									</span>
+								</label>
 								<div className="flex justify-end gap-2">
 									<Button
 										type="button"
