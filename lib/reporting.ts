@@ -6,6 +6,7 @@ import { Adjustment } from "@/models/Adjustment";
 import { Product } from "@/models/Product";
 import { TabTransaction } from "@/models/TabTransaction";
 import { SaleTransaction } from "@/models/SaleTransaction";
+import { TabAccount } from "@/models/TabAccount";
 import type { DailyReport, DailyReportProduct } from "@/lib/types";
 
 export async function getOrCreateBusinessDay(
@@ -58,6 +59,105 @@ async function getAccountedSalesForDate(
 		]).then((r) => r?.[0]?.total ?? 0);
 
 	return collectedSalesCents + tabChargesCents;
+}
+
+async function getOutstandingTabBalances(date: string) {
+	const day = await BusinessDay.findOne({ date }).lean();
+	if (!day) {
+		return {
+			outstandingTabBalanceCents: 0,
+			overdueTabBalanceCents: 0,
+		};
+	}
+
+	const customersWithAccounts = await TabTransaction.aggregate<{
+		_id: string;
+		charges: number;
+		payments: number;
+		adjustments: number;
+		lastChargeAt: Date | null;
+	}>([
+		{
+			$group: {
+				_id: "$customerId",
+				charges: {
+					$sum: {
+						$cond: [{ $eq: ["$type", "CHARGE"] }, "$amountCents", 0],
+					},
+				},
+				payments: {
+					$sum: {
+						$cond: [{ $eq: ["$type", "PAYMENT"] }, "$amountCents", 0],
+					},
+				},
+				adjustments: {
+					$sum: {
+						$cond: [{ $eq: ["$type", "ADJUSTMENT"] }, "$amountCents", 0],
+					},
+				},
+				lastChargeAt: {
+					$max: {
+						$cond: [{ $eq: ["$type", "CHARGE"] }, "$createdAt", null],
+					},
+				},
+			},
+		},
+		{
+			$match: {
+				_id: { $type: "string" },
+			},
+		},
+	]);
+
+	const customerIds = customersWithAccounts
+		.map((entry) => entry._id)
+		.filter((id): id is string => typeof id === "string" && id.length > 0);
+
+	if (customerIds.length === 0) {
+		return {
+			outstandingTabBalanceCents: 0,
+			overdueTabBalanceCents: 0,
+		};
+	}
+
+	const accounts = await TabAccount.find({
+		customerId: { $in: customerIds },
+	})
+		.select({
+			customerId: 1,
+			dueDays: 1,
+		})
+		.lean();
+	const dueDaysByCustomerId = new Map(
+		accounts.map((account) => [
+			String(account.customerId),
+			typeof account.dueDays === "number" ? account.dueDays : undefined,
+		]),
+	);
+
+	let outstandingTabBalanceCents = 0;
+	let overdueTabBalanceCents = 0;
+	for (const entry of customersWithAccounts) {
+		const balance =
+			(entry.charges ?? 0) -
+			(entry.payments ?? 0) +
+			(entry.adjustments ?? 0);
+		if (balance <= 0) continue;
+		outstandingTabBalanceCents += balance;
+
+		const dueDays = dueDaysByCustomerId.get(entry._id);
+		if (!dueDays || !entry.lastChargeAt) continue;
+		const dueAt = new Date(entry.lastChargeAt);
+		dueAt.setDate(dueAt.getDate() + dueDays);
+		if (dueAt < new Date(`${date}T23:59:59.999Z`)) {
+			overdueTabBalanceCents += balance;
+		}
+	}
+
+	return {
+		outstandingTabBalanceCents,
+		overdueTabBalanceCents,
+	};
 }
 
 export async function computeDailySummary(
@@ -594,7 +694,7 @@ export async function computeDailySummary(
 		.sort((a, b) => b.currentUnits - a.currentUnits)
 		.slice(0, 5);
 
-		const stockRecommendations: DailyReport["stockRecommendations"] =
+	const stockRecommendations: DailyReport["stockRecommendations"] =
 			Array.from(productById.entries())
 				.map(([productId, productMeta]) => {
 				const purchasedUnits =
@@ -706,11 +806,18 @@ export async function computeDailySummary(
 		});
 	}
 
+	const {
+		outstandingTabBalanceCents,
+		overdueTabBalanceCents,
+	} = await getOutstandingTabBalances(date);
+
 	return {
 		date,
 		expectedRevenueCents,
 		collectedSalesCents,
 		tabChargesCents,
+		outstandingTabBalanceCents,
+		overdueTabBalanceCents,
 		accountedSalesCents,
 		expensesCents,
 		revenueVarianceCents,

@@ -113,6 +113,8 @@ export interface DailyReport {
 	expectedRevenueCents: number;
 	collectedSalesCents: number;
 	tabChargesCents: number;
+	outstandingTabBalanceCents: number;
+	overdueTabBalanceCents: number;
 	accountedSalesCents: number;
 	expensesCents: number;
 	revenueVarianceCents: number;

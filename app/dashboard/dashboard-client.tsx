@@ -566,6 +566,25 @@ export function DashboardClient() {
 								}
 							/>
 							<SummaryCard
+								title="Customers Owe"
+								value={
+									report.outstandingTabBalanceCents
+								}
+								href="/tabs"
+							/>
+							<SummaryCard
+								title="Overdue Tab Balance"
+								value={
+									report.overdueTabBalanceCents
+								}
+								variant={
+									report.overdueTabBalanceCents > 0
+										? "negative"
+										: "default"
+								}
+								href="/tabs?customerFilter=overdue"
+							/>
+							<SummaryCard
 								title="Sales Accounted For"
 								value={report.accountedSalesCents}
 								onClick={() =>
@@ -1483,6 +1502,7 @@ interface SummaryCardProps {
 	value: number;
 	variant?: "default" | "negative";
 	onClick?: () => void;
+	href?: string;
 }
 
 function SummaryCard({
@@ -1490,6 +1510,7 @@ function SummaryCard({
 	value,
 	variant = "default",
 	onClick,
+	href,
 }: SummaryCardProps) {
 	const card = (
 		<Card className="shadow-md">
@@ -1511,6 +1532,16 @@ function SummaryCard({
 			</CardContent>
 		</Card>
 	);
+	if (href) {
+		return (
+			<Link
+				href={href}
+				className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			>
+				{card}
+			</Link>
+		);
+	}
 	if (!onClick) return card;
 	return (
 		<button

@@ -154,6 +154,8 @@ const aggregateSummaries = (
 	let expectedRevenueCents = 0;
 	let collectedSalesCents = 0;
 	let tabChargesCents = 0;
+	let outstandingTabBalanceCents = 0;
+	let overdueTabBalanceCents = 0;
 	let accountedSalesCents = 0;
 	let expensesCents = 0;
 	let revenueVarianceCents = 0;
@@ -166,6 +168,10 @@ const aggregateSummaries = (
 			summary.expectedRevenueCents;
 		collectedSalesCents += summary.collectedSalesCents;
 		tabChargesCents += summary.tabChargesCents;
+		outstandingTabBalanceCents =
+			summary.outstandingTabBalanceCents;
+		overdueTabBalanceCents =
+			summary.overdueTabBalanceCents;
 		accountedSalesCents += summary.accountedSalesCents;
 		expensesCents += summary.expensesCents ?? 0;
 		revenueVarianceCents += summary.revenueVarianceCents;
@@ -303,6 +309,8 @@ const aggregateSummaries = (
 		expectedRevenueCents,
 		collectedSalesCents,
 		tabChargesCents,
+		outstandingTabBalanceCents,
+		overdueTabBalanceCents,
 		accountedSalesCents,
 		expensesCents,
 		revenueVarianceCents,

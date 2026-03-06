@@ -5,7 +5,7 @@ import * as React from "react";
 import {
 	useSearchParams,
 } from "next/navigation";
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import { toast } from "sonner";
 import {
 	Plus,
@@ -422,6 +422,7 @@ export function TabsClient({
 	const isAccountsOnly = view === "accounts";
 	const isTransactionsOnly =
 		view === "transactions";
+	const { mutate: mutateGlobal } = useSWRConfig();
 
 	const {
 		data: customers,
@@ -514,6 +515,27 @@ export function TabsClient({
 			transactionsCacheKey,
 		],
 	);
+	const refreshConnectedViews = React.useCallback(async () => {
+		await Promise.all([
+			mutateTransactions(),
+			mutateCustomers(),
+			mutateGlobal(
+				(key) =>
+					typeof key === "string" &&
+					(key.startsWith("/api/reports") ||
+						key.startsWith("/api/transactions") ||
+						key.startsWith("/api/customers") ||
+						key.startsWith("/api/tabs") ||
+						key.startsWith("/api/products") ||
+						key.startsWith("/api/exceptions") ||
+						key.startsWith("/api/header")),
+			),
+		]);
+	}, [
+		mutateCustomers,
+		mutateGlobal,
+		mutateTransactions,
+	]);
 	const normalizedProducts = React.useMemo(
 		() =>
 			Array.isArray(products) ? products : [],
@@ -870,8 +892,7 @@ export function TabsClient({
 			toast.success("Transaction reversed");
 			setReversingTxn(null);
 			setReverseReason("");
-			mutateTransactions();
-			mutateCustomers();
+			await refreshConnectedViews();
 		} catch (err) {
 			toast.error(
 				err instanceof Error
@@ -904,7 +925,7 @@ export function TabsClient({
 					);
 				}
 				toast.success("Customer deleted");
-				await mutateCustomers();
+				await refreshConnectedViews();
 				setPendingDeleteCustomer(null);
 			} catch (error) {
 				toast.error(
@@ -916,7 +937,7 @@ export function TabsClient({
 				setDeletingCustomerId(null);
 			}
 		},
-		[mutateCustomers],
+		[refreshConnectedViews],
 	);
 
 	const repeatSaleFromHistory = (
@@ -1184,10 +1205,10 @@ export function TabsClient({
 											</Button>
 										</DialogTrigger>
 										<AddCustomerDialog
-											onSuccess={() => {
-												setAddCustomerOpen(false);
-												mutateCustomers();
-											}}
+										onSuccess={() => {
+											setAddCustomerOpen(false);
+											void refreshConnectedViews();
+										}}
 										/>
 									</Dialog>
 								</div>
@@ -1571,7 +1592,7 @@ export function TabsClient({
 									customer={editingCustomer}
 									onSuccess={() => {
 										setEditingCustomer(null);
-										mutateCustomers();
+										void refreshConnectedViews();
 									}}
 								/>
 							)}
@@ -1650,7 +1671,7 @@ export function TabsClient({
 													undefined
 												}
 												onSuccess={() => {
-													mutateTransactions();
+													void refreshConnectedViews();
 													setDirectSaleDialogOpen(
 														false,
 													);
@@ -1728,11 +1749,10 @@ export function TabsClient({
 													undefined
 												}
 												onCustomerCreated={() => {
-													mutateCustomers();
+													void refreshConnectedViews();
 												}}
 												onSuccess={() => {
-													mutateCustomers();
-													mutateTransactions();
+													void refreshConnectedViews();
 													setSaleDialogOpen(
 														false,
 													);
@@ -1791,8 +1811,7 @@ export function TabsClient({
 												}
 												date={date}
 												onSuccess={() => {
-													mutateCustomers();
-													mutateTransactions();
+													void refreshConnectedViews();
 													setPaymentDialogOpen(
 														false,
 													);
