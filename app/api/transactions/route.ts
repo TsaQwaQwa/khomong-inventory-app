@@ -111,6 +111,7 @@ export async function GET(req: Request) {
 										customerId: 1,
 										businessDayId: 1,
 										type: 1,
+										manualAmountCents: 1,
 										amountCents: 1,
 										paymentMethod: 1,
 										cashReceivedCents: 1,

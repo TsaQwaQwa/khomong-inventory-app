@@ -130,14 +130,23 @@ export const customerUpdateSchema = z.object({
 export const tabChargeSchema = z.object({
   date: ymdSchema.optional(),
   customerId: z.string().min(1),
+  manualAmountCents: z.number().int().min(0).optional(),
   belowCostApproved: z.boolean().optional(),
   belowCostReason: z.string().max(300).optional(),
   items: z.array(z.object({
     productId: z.string().min(1),
     units: z.number().int().min(1),
-  })).min(1),
+  })).default([]),
   note: z.string().optional(),
-});
+}).refine(
+  (value) =>
+    value.items.length > 0 ||
+    (value.manualAmountCents ?? 0) > 0,
+  {
+    message: "Add at least one item or an owed amount",
+    path: ["items"],
+  },
+);
 
 export const tabPaymentSchema = z.object({
   date: ymdSchema.optional(),

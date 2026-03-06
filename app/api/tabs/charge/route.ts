@@ -58,6 +58,8 @@ export async function POST(req: Request) {
 			tabChargeSchema,
 		);
 		const date = input.date ?? todayYMD();
+		const manualAmountCents =
+			input.manualAmountCents ?? 0;
 		const day = await getOrCreateDay(
 			date,
 			a.userId!,
@@ -86,9 +88,12 @@ export async function POST(req: Request) {
 		const productIds = input.items.map(
 			(i) => i.productId,
 		);
-		const products = await Product.find({
-			_id: { $in: productIds },
-		}).lean();
+		const products =
+			productIds.length > 0
+				? await Product.find({
+						_id: { $in: productIds },
+				  }).lean()
+				: [];
 		const productSet = new Set(
 			products.map((p) => String(p._id)),
 		);
@@ -112,9 +117,13 @@ export async function POST(req: Request) {
 			);
 		}
 		const stockByProduct =
-			await getCurrentStockByProductIds(
-				Array.from(requestedUnitsByProduct.keys()),
-			);
+			requestedUnitsByProduct.size > 0
+				? await getCurrentStockByProductIds(
+						Array.from(
+							requestedUnitsByProduct.keys(),
+						),
+				  )
+				: new Map<string, number>();
 		const productNameById = new Map(
 			products.map((product) => [
 				String(product._id),
@@ -251,9 +260,11 @@ export async function POST(req: Request) {
 			(agg.adjustments ?? 0);
 		const enforceCreditLimit =
 			customer?.customerMode !== "DEBT_ONLY";
+		const totalChargeAmountCents =
+			totals.amountCents + manualAmountCents;
 		if (
 			enforceCreditLimit &&
-			balance + totals.amountCents >
+			balance + totalChargeAmountCents >
 			account.creditLimitCents
 		) {
 			return fail("Credit limit exceeded", {
@@ -266,8 +277,13 @@ export async function POST(req: Request) {
 			customerId: input.customerId,
 			businessDayId: String(day._id),
 			type: "CHARGE",
-			subtotalCents: totals.subtotalCents,
-			amountCents: totals.amountCents,
+			manualAmountCents:
+				manualAmountCents > 0
+					? manualAmountCents
+					: undefined,
+			subtotalCents:
+				totals.subtotalCents + manualAmountCents,
+			amountCents: totalChargeAmountCents,
 			items: itemsWithPrice,
 			note: input.note,
 			createdByUserId: a.userId!,

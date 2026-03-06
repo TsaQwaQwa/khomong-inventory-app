@@ -17,6 +17,7 @@ export interface TabTransactionDoc {
   customerId?: string;
   businessDayId: string;
   type: TabTxnType;
+  manualAmountCents?: number;
   subtotalCents?: number;
   discountCents?: number;
   amountCents: number;
@@ -45,6 +46,7 @@ const TabTransactionSchema = new Schema<TabTransactionDoc>(
     customerId: { type: String },
     businessDayId: { type: String, required: true, index: true },
     type: { type: String, required: true },
+    manualAmountCents: { type: Number },
     subtotalCents: { type: Number },
     discountCents: { type: Number },
     amountCents: { type: Number, required: true },

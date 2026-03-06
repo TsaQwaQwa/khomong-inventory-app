@@ -176,6 +176,7 @@ interface TabTransactionHistory {
 		| "EXPENSE"
 		| "DIRECT_SALE";
 	amountCents: number;
+	manualAmountCents?: number;
 	paymentMethod?: PaymentMethod;
 	cashReceivedCents?: number;
 	changeCents?: number;
@@ -201,6 +202,7 @@ interface QueuedTransactionDraft {
 	customerId: string | null;
 	customerName: string;
 	amountCents: number;
+	manualAmountCents?: number;
 	paymentMethod?: PaymentMethod;
 	cashReceivedCents?: number;
 	changeCents?: number;
@@ -470,6 +472,8 @@ export function TabsClient({
 				customerName: draft.customerName,
 				type: draft.type,
 				amountCents: draft.amountCents,
+				manualAmountCents:
+					draft.manualAmountCents,
 				paymentMethod: draft.paymentMethod,
 				cashReceivedCents:
 					draft.cashReceivedCents,
@@ -2353,6 +2357,17 @@ export function TabsClient({
 										0,
 								)}
 							</p>
+							{typeof historyDetailTxn?.manualAmountCents ===
+								"number" &&
+							historyDetailTxn.manualAmountCents >
+								0 ? (
+								<p>
+									Extra owed:{" "}
+									{formatZAR(
+										historyDetailTxn.manualAmountCents,
+									)}
+								</p>
+							) : null}
 						</div>
 						<div className="space-y-2">
 							<p className="text-sm font-medium">
@@ -2936,6 +2951,7 @@ function TabChargeForm({
 	initialData?: {
 		customerId: string;
 		items: ChargeItem[];
+		manualAmountCents?: number;
 		note: string;
 	};
 	onCustomerCreated?: () => void;
@@ -2962,6 +2978,10 @@ function TabChargeForm({
 	const [note, setNote] = React.useState(
 		initialData?.note ?? "",
 	);
+	const [manualAmountCents, setManualAmountCents] =
+		React.useState(
+			initialData?.manualAmountCents ?? 0,
+		);
 	const [tempTabOpen, setTempTabOpen] =
 		React.useState(false);
 	const [tempTabLoading, setTempTabLoading] =
@@ -2985,6 +3005,19 @@ function TabChargeForm({
 			),
 		[products],
 	);
+	const itemsSubtotalCents = React.useMemo(
+		() =>
+			items.reduce((total, item) => {
+				const units =
+					parseInt(item.units, 10) || 0;
+				const unitPrice =
+					productPriceById.get(item.productId) ?? 0;
+				return total + units * unitPrice;
+			}, 0),
+		[items, productPriceById],
+	);
+	const totalChargeCents =
+		itemsSubtotalCents + manualAmountCents;
 	React.useEffect(() => {
 		if (!initialData) return;
 		setCustomerId(initialData.customerId);
@@ -2997,6 +3030,9 @@ function TabChargeForm({
 							units: "",
 						},
 					],
+		);
+		setManualAmountCents(
+			initialData.manualAmountCents ?? 0,
 		);
 		setNote(initialData.note);
 		setShowNote(Boolean(initialData.note));
@@ -3043,21 +3079,18 @@ function TabChargeForm({
 				productId: item.productId,
 				units: parseInt(item.units) || 0,
 			}));
-		const estimatedAmountCents = validItems.reduce(
-			(total, item) =>
-				total +
-				(item.units > 0
-					? (productPriceById.get(item.productId) ??
-						0) * item.units
-					: 0),
-			0,
-		);
+		const estimatedAmountCents = totalChargeCents;
 		const selectedCustomer = customers.find(
 			(customer) => customer.id === customerId,
 		);
 
-		if (validItems.length === 0) {
-			toast.error("Please add at least one item");
+		if (
+			validItems.length === 0 &&
+			manualAmountCents <= 0
+		) {
+			toast.error(
+				"Add at least one item or an owed amount",
+			);
 			setLoading(false);
 			return;
 		}
@@ -3067,6 +3100,10 @@ function TabChargeForm({
 				date,
 				customerId,
 				items: validItems,
+				manualAmountCents:
+					manualAmountCents > 0
+						? manualAmountCents
+						: undefined,
 				note: showNote && note ? note : undefined,
 			};
 			let queueResult =
@@ -3083,6 +3120,10 @@ function TabChargeForm({
 						selectedCustomer?.name ??
 						"Account Customer",
 					amountCents: estimatedAmountCents,
+					manualAmountCents:
+						manualAmountCents > 0
+							? manualAmountCents
+							: undefined,
 					note:
 						showNote && note ? note : undefined,
 					items: validItems,
@@ -3098,6 +3139,7 @@ function TabChargeForm({
 						units: "",
 					},
 				]);
+				setManualAmountCents(0);
 				setNote("");
 				return;
 			}
@@ -3135,6 +3177,10 @@ function TabChargeForm({
 									"Account Customer",
 								amountCents:
 									estimatedAmountCents,
+								manualAmountCents:
+									manualAmountCents > 0
+										? manualAmountCents
+										: undefined,
 								note:
 									showNote && note
 										? note
@@ -3152,6 +3198,7 @@ function TabChargeForm({
 									units: "",
 								},
 							]);
+							setManualAmountCents(0);
 							setNote("");
 							return;
 						}
@@ -3188,6 +3235,7 @@ function TabChargeForm({
 					units: "",
 				},
 			]);
+			setManualAmountCents(0);
 			setNote("");
 			setShowNote(false);
 		} catch (err) {
@@ -3437,6 +3485,31 @@ function TabChargeForm({
 						</DialogContent>
 					</Dialog>
 				</div>
+				<div className="space-y-3">
+					<MoneyInput
+						label="Extra Owed Amount"
+						value={manualAmountCents}
+						onChange={setManualAmountCents}
+					/>
+					<p className="text-xs text-muted-foreground">
+						Use this for money added to the tab that is
+						not tied to stock items.
+					</p>
+					<div className="rounded-md border p-3 text-sm">
+						<p>
+							Items subtotal:{" "}
+							{formatZAR(itemsSubtotalCents)}
+						</p>
+						<p>
+							Extra owed:{" "}
+							{formatZAR(manualAmountCents)}
+						</p>
+						<p className="font-medium">
+							Total charge:{" "}
+							{formatZAR(totalChargeCents)}
+						</p>
+					</div>
+				</div>
 				<div className="space-y-2">
 					<div className="grid grid-cols-2 gap-2">
 						<Button
@@ -3479,7 +3552,11 @@ function TabChargeForm({
 				<Button
 					type="submit"
 					className="w-full"
-					disabled={loading || !customerId}
+					disabled={
+						loading ||
+						!customerId ||
+						totalChargeCents <= 0
+					}
 				>
 					{loading ? "Saving..." : "Save"}
 				</Button>

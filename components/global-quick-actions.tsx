@@ -3281,6 +3281,8 @@ function AccountSaleForm({
 	const [items, setItems] = React.useState<
 		ChargeItem[]
 	>([]);
+	const [manualAmountCents, setManualAmountCents] =
+		React.useState(0);
 	const [note, setNote] = React.useState("");
 	const [showNote, setShowNote] =
 		React.useState(false);
@@ -3295,6 +3297,29 @@ function AccountSaleForm({
 	const [tempTabNote, setTempTabNote] =
 		React.useState("");
 	const { mutate } = useSWRConfig();
+	const productPriceById = React.useMemo(
+		() =>
+			new Map(
+				products.map((product) => [
+					product.id,
+					product.currentPriceCents ?? 0,
+				]),
+			),
+		[products],
+	);
+	const itemsSubtotalCents = React.useMemo(
+		() =>
+			items.reduce((total, item) => {
+				const units =
+					parseInt(item.units, 10) || 0;
+				const unitPrice =
+					productPriceById.get(item.productId) ?? 0;
+				return total + units * unitPrice;
+			}, 0),
+		[items, productPriceById],
+	);
+	const totalChargeCents =
+		itemsSubtotalCents + manualAmountCents;
 	React.useEffect(() => {
 		pushQuickAddDebugLog("account_sale_form_mounted", {
 			date,
@@ -3377,8 +3402,13 @@ function AccountSaleForm({
 				units: parseInt(item.units, 10) || 0,
 			}))
 			.filter((item) => item.units > 0);
-		if (!validItems.length) {
-			toast.error("Please add at least one item");
+		if (
+			!validItems.length &&
+			manualAmountCents <= 0
+		) {
+			toast.error(
+				"Add at least one item or an owed amount",
+			);
 			setLoading(false);
 			return;
 		}
@@ -3387,6 +3417,10 @@ function AccountSaleForm({
 				date,
 				customerId,
 				items: validItems,
+				manualAmountCents:
+					manualAmountCents > 0
+						? manualAmountCents
+						: undefined,
 				note:
 					showNote && note ? note : undefined,
 			};
@@ -3398,6 +3432,7 @@ function AccountSaleForm({
 				toast.success(
 					"Offline: account sale queued and will sync automatically.",
 				);
+				setManualAmountCents(0);
 				onSuccess();
 				return;
 			}
@@ -3428,6 +3463,7 @@ function AccountSaleForm({
 							toast.success(
 								"Offline: account sale queued and will sync automatically.",
 							);
+							setManualAmountCents(0);
 							onSuccess();
 							return;
 						}
@@ -3454,6 +3490,7 @@ function AccountSaleForm({
 			toast.success(
 				"Sale added to customer account",
 			);
+			setManualAmountCents(0);
 			onSuccess();
 		} catch (err) {
 			toast.error(
@@ -3578,6 +3615,31 @@ function AccountSaleForm({
 						</DialogContent>
 					</Dialog>
 				</div>
+				<div className="space-y-3">
+					<MoneyInput
+						label="Extra Owed Amount"
+						value={manualAmountCents}
+						onChange={setManualAmountCents}
+					/>
+					<p className="text-xs text-muted-foreground">
+						Use this for money added to the tab that is
+						not tied to stock items.
+					</p>
+					<div className="rounded-md border p-3 text-sm">
+						<p>
+							Items subtotal:{" "}
+							{formatZAR(itemsSubtotalCents)}
+						</p>
+						<p>
+							Extra owed:{" "}
+							{formatZAR(manualAmountCents)}
+						</p>
+						<p className="font-medium">
+							Total charge:{" "}
+							{formatZAR(totalChargeCents)}
+						</p>
+					</div>
+				</div>
 				<div className="space-y-2">
 					<Button
 						type="button"
@@ -3606,7 +3668,7 @@ function AccountSaleForm({
 				disabled={
 					loading ||
 					!customerId ||
-					items.length === 0
+					totalChargeCents <= 0
 				}
 				loading={loading}
 			/>
