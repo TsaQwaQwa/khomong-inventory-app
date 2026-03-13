@@ -166,7 +166,6 @@ export function DashboardClient() {
 		data: report,
 		error: effectiveError,
 		isLoading: effectiveLoading,
-		usingCachedData: usingCachedReport,
 	} = useOfflineCachedSWR<DailyReport>({
 		key: `/api/reports/daily?from=${from}&to=${to}`,
 		cacheKey: `dashboard:daily-report:${from}:${to}`,
@@ -343,11 +342,6 @@ export function DashboardClient() {
 				/>
 			}
 		>
-			{usingCachedReport && report && (
-				<p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700">
-					Offline mode: showing cached dashboard data from this device.
-				</p>
-			)}
 			{effectiveLoading ? (
 				<>
 					<LoadingCards className="mb-6" />

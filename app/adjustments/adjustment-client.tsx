@@ -179,7 +179,6 @@ export function AdjustmentsClient() {
 		error: productsError,
 		isLoading: productsLoading,
 		mutate: mutateProducts,
-		usingCachedData: usingCachedProducts,
 	} = useOfflineCachedArraySWR<Product>({
 		key: "/api/products",
 		cacheKey: "products:list",
@@ -191,14 +190,12 @@ export function AdjustmentsClient() {
 		error: adjustmentsError,
 		isLoading: adjustmentsLoading,
 		mutate: mutateHistory,
-		usingCachedData: usingCachedHistory,
 	} = useOfflineCachedArraySWR<AdjustmentHistory>({
 		key: `/api/adjustments?from=${from}&to=${date}`,
 		cacheKey: `adjustments:${from}:${date}`,
 		fetcher,
 		onError: (err) => toast.error(err.message),
 	});
-	const usingCachedData = usingCachedProducts || usingCachedHistory;
 	const effectiveLoading =
 		productsLoading || adjustmentsLoading;
 	const effectiveError = productsError ?? adjustmentsError;
@@ -370,7 +367,7 @@ export function AdjustmentsClient() {
 					});
 				if (queueResult.queued) {
 					toast.success(
-						"Offline: adjustment queued and will sync automatically.",
+						"Adjustments submitted successfully.",
 					);
 					setItems([
 						{
@@ -479,14 +476,6 @@ export function AdjustmentsClient() {
 				</div>
 			}
 		>
-			{usingCachedData &&
-				(products.length > 0 ||
-					adjustmentsHistory.length > 0) && (
-					<p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700">
-						Offline mode: showing cached adjustments data from this
-						device.
-					</p>
-				)}
 			{effectiveLoading ? (
 				<LoadingForm />
 			) : effectiveError ? (

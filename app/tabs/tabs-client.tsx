@@ -80,9 +80,6 @@ import {
 	postSaleWithOfflineQueue,
 	postTabPaymentWithOfflineQueue,
 } from "@/lib/offline-sales-queue";
-import {
-	writeOfflineResource,
-} from "@/lib/offline-resource-cache";
 import { useOfflineCachedArraySWR } from "@/lib/use-offline-cached-swr";
 import { formatZAR } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -194,21 +191,6 @@ interface TabTransactionHistory {
 	reversalReason?: string;
 	isReversal?: boolean;
 	isReversed?: boolean;
-}
-
-interface QueuedTransactionDraft {
-	type: TabTransactionHistory["type"];
-	date: string | null;
-	customerId: string | null;
-	customerName: string;
-	amountCents: number;
-	manualAmountCents?: number;
-	paymentMethod?: PaymentMethod;
-	cashReceivedCents?: number;
-	changeCents?: number;
-	note?: string;
-	reference?: string;
-	items?: TabTransactionHistory["items"];
 }
 
 interface TabsClientProps {
@@ -452,69 +434,14 @@ export function TabsClient({
 	);
 	const {
 		items: transactionsHistory,
-		cachedData: cachedTransactions,
 		isLoading: effectiveTransactionsLoading,
 		mutate: mutateTransactions,
-		usingCachedData: usingCachedTransactions,
 	} = useOfflineCachedArraySWR<TabTransactionHistory>({
 		key: `/api/transactions?from=${from}&to=${date}&limit=200`,
 		cacheKey: transactionsCacheKey,
 		fetcher,
 		onError: (err) => toast.error(err.message),
 	});
-	const appendQueuedTransaction = React.useCallback(
-		(draft: QueuedTransactionDraft) => {
-			const optimisticTxn: TabTransactionHistory = {
-				id: `offline_${Date.now()}_${Math.random()
-					.toString(36)
-					.slice(2, 8)}`,
-				date: draft.date,
-				customerId: draft.customerId,
-				customerName: draft.customerName,
-				type: draft.type,
-				amountCents: draft.amountCents,
-				manualAmountCents:
-					draft.manualAmountCents,
-				paymentMethod: draft.paymentMethod,
-				cashReceivedCents:
-					draft.cashReceivedCents,
-				changeCents: draft.changeCents,
-				note: draft.note,
-				reference: draft.reference,
-				createdAt: new Date().toISOString(),
-				items: draft.items,
-				isReversal: false,
-				isReversed: false,
-			};
-			void mutateTransactions(
-				(current) => {
-					const base = Array.isArray(current)
-						? current
-						: Array.isArray(cachedTransactions)
-							? cachedTransactions
-							: [];
-					const next = [
-						optimisticTxn,
-						...base,
-					];
-					void writeOfflineResource(
-						transactionsCacheKey,
-						next,
-					);
-					return next;
-				},
-				{
-					revalidate: false,
-					populateCache: true,
-				},
-			);
-		},
-		[
-			cachedTransactions,
-			mutateTransactions,
-			transactionsCacheKey,
-		],
-	);
 	const refreshConnectedViews = React.useCallback(async () => {
 		await Promise.all([
 			mutateTransactions(),
@@ -1670,29 +1597,16 @@ export function TabsClient({
 													repeatDirectSeed ??
 													undefined
 												}
-												onSuccess={() => {
-													void refreshConnectedViews();
-													setDirectSaleDialogOpen(
-														false,
-													);
-													setRepeatDirectSeed(
-														null,
-													);
-												}}
-												onQueued={(
-													draft,
-												) => {
-													appendQueuedTransaction(
-														draft,
-													);
-													setDirectSaleDialogOpen(
-														false,
-													);
-													setRepeatDirectSeed(
-														null,
-													);
-												}}
-											/>
+											onSuccess={() => {
+												void refreshConnectedViews();
+												setDirectSaleDialogOpen(
+													false,
+												);
+												setRepeatDirectSeed(
+													null,
+												);
+											}}
+										/>
 										</DialogContent>
 									</Dialog>
 
@@ -1751,29 +1665,16 @@ export function TabsClient({
 												onCustomerCreated={() => {
 													void refreshConnectedViews();
 												}}
-												onSuccess={() => {
-													void refreshConnectedViews();
-													setSaleDialogOpen(
-														false,
-													);
-													setRepeatAccountSeed(
-														null,
-													);
-												}}
-												onQueued={(
-													draft,
-												) => {
-													appendQueuedTransaction(
-														draft,
-													);
-													setSaleDialogOpen(
-														false,
-													);
-													setRepeatAccountSeed(
-														null,
-													);
-												}}
-											/>
+											onSuccess={() => {
+												void refreshConnectedViews();
+												setSaleDialogOpen(
+													false,
+												);
+												setRepeatAccountSeed(
+													null,
+												);
+											}}
+										/>
 										</DialogContent>
 									</Dialog>
 
@@ -1810,23 +1711,13 @@ export function TabsClient({
 													normalizedCustomers
 												}
 												date={date}
-												onSuccess={() => {
-													void refreshConnectedViews();
-													setPaymentDialogOpen(
-														false,
-													);
-												}}
-												onQueued={(
-													draft,
-												) => {
-													appendQueuedTransaction(
-														draft,
-													);
-													setPaymentDialogOpen(
-														false,
-													);
-												}}
-											/>
+											onSuccess={() => {
+												void refreshConnectedViews();
+												setPaymentDialogOpen(
+													false,
+												);
+											}}
+										/>
 										</DialogContent>
 									</Dialog>
 								</div>
@@ -1897,12 +1788,6 @@ export function TabsClient({
 									</div>
 								</CardHeader>
 								<CardContent>
-									{usingCachedTransactions && (
-										<p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700">
-											Offline mode: showing cached transactions from this
-											device.
-										</p>
-									)}
 									{effectiveTransactionsLoading ? (
 										<LoadingTable />
 									) : !filteredTransactions.length ? (
@@ -3058,7 +2943,6 @@ function TabChargeForm({
 	initialData,
 	onCustomerCreated,
 	onSuccess,
-	onQueued,
 }: {
 	customers: Customer[];
 	products: Product[];
@@ -3071,7 +2955,6 @@ function TabChargeForm({
 	};
 	onCustomerCreated?: () => void;
 	onSuccess?: () => void;
-	onQueued?: (draft: QueuedTransactionDraft) => void;
 }) {
 	const [loading, setLoading] =
 		React.useState(false);
@@ -3198,11 +3081,6 @@ function TabChargeForm({
 				productId: item.productId,
 				units: parseInt(item.units) || 0,
 			}));
-		const estimatedAmountCents = totalChargeCents;
-		const selectedCustomer = customers.find(
-			(customer) => customer.id === customerId,
-		);
-
 		if (
 			validItems.length === 0 &&
 			manualAmountCents <= 0
@@ -3225,44 +3103,12 @@ function TabChargeForm({
 						: undefined,
 				note: showNote && note ? note : undefined,
 			};
-			let queueResult =
-				await postSaleWithOfflineQueue(
-					"/api/tabs/charge",
-					payload,
-				);
-			if (queueResult.queued) {
-				onQueued?.({
-					type: "CHARGE",
-					date,
-					customerId,
-					customerName:
-						selectedCustomer?.name ??
-						"Account Customer",
-					amountCents: estimatedAmountCents,
-					manualAmountCents:
-						manualAmountCents > 0
-							? manualAmountCents
-							: undefined,
-					note:
-						showNote && note ? note : undefined,
-					items: validItems,
-				});
-				toast.success(
-					"Offline: account sale queued and will sync automatically.",
-				);
-				onSuccess?.();
-				setCustomerId("");
-				setItems([
-					{
-						productId: "",
-						units: "",
-					},
-				]);
-				setManualAmountCents(0);
-				setNote("");
-				return;
-			}
-			let res = queueResult.response;
+			let {
+				response: res,
+			} = await postSaleWithOfflineQueue(
+				"/api/tabs/charge",
+				payload,
+			);
 
 			if (!res.ok) {
 				let errorBody = await res
@@ -3281,47 +3127,12 @@ function TabChargeForm({
 						payload.belowCostApproved = true;
 						payload.belowCostReason =
 							"User override from account sale form";
-						queueResult =
-							await postSaleWithOfflineQueue(
-								"/api/tabs/charge",
-								payload,
-							);
-						if (queueResult.queued) {
-							onQueued?.({
-								type: "CHARGE",
-								date,
-								customerId,
-								customerName:
-									selectedCustomer?.name ??
-									"Account Customer",
-								amountCents:
-									estimatedAmountCents,
-								manualAmountCents:
-									manualAmountCents > 0
-										? manualAmountCents
-										: undefined,
-								note:
-									showNote && note
-										? note
-										: undefined,
-								items: validItems,
-							});
-							toast.success(
-								"Offline: account sale queued and will sync automatically.",
-							);
-							onSuccess?.();
-							setCustomerId("");
-							setItems([
-								{
-									productId: "",
-									units: "",
-								},
-							]);
-							setManualAmountCents(0);
-							setNote("");
-							return;
-						}
-						res = queueResult.response;
+						({
+							response: res,
+						} = await postSaleWithOfflineQueue(
+							"/api/tabs/charge",
+							payload,
+						));
 						if (!res.ok) {
 							errorBody = await res
 								.json()
@@ -3716,12 +3527,10 @@ function TabPaymentForm({
 	customers,
 	date,
 	onSuccess,
-	onQueued,
 }: {
 	customers: Customer[];
 	date: string;
 	onSuccess: () => void;
-	onQueued?: (draft: QueuedTransactionDraft) => void;
 }) {
 	const [loading, setLoading] =
 		React.useState(false);
@@ -3803,58 +3612,11 @@ function TabPaymentForm({
 				note:
 					showNote && note ? note : undefined,
 			};
-			const queueResult =
-				await postTabPaymentWithOfflineQueue(
-					payload,
-				);
-			const selectedCustomer = customers.find(
-				(customer) => customer.id === customerId,
+			const {
+				response: res,
+			} = await postTabPaymentWithOfflineQueue(
+				payload,
 			);
-			if (queueResult.queued) {
-				onQueued?.({
-					type: "PAYMENT",
-					date,
-					customerId,
-					customerName:
-						selectedCustomer?.name ??
-						"Account Customer",
-					amountCents,
-					paymentMethod:
-						paymentMethod || undefined,
-					cashReceivedCents:
-						paymentMethod === "CASH"
-							? cashReceivedCents
-							: undefined,
-					changeCents:
-						paymentMethod === "CASH"
-							? Math.max(
-									0,
-									cashReceivedCents -
-										amountCents,
-							  )
-							: undefined,
-					reference:
-						showReference && reference
-							? reference
-							: undefined,
-					note:
-						showNote && note ? note : undefined,
-				});
-				toast.success(
-					"Offline: payment queued and will sync automatically.",
-				);
-				setCustomerId("");
-				setAmountCents(0);
-				setCashReceivedCents(0);
-				setCashStep(false);
-				setReference("");
-				setShowReference(false);
-				setNote("");
-				setShowNote(false);
-				onSuccess();
-				return;
-			}
-			const res = queueResult.response;
 
 			if (!res.ok) {
 				const errorBody = await res
@@ -4059,7 +3821,6 @@ function DirectSaleForm({
 	date,
 	initialData,
 	onSuccess,
-	onQueued,
 }: {
 	products: Product[];
 	date: string;
@@ -4069,7 +3830,6 @@ function DirectSaleForm({
 		note: string;
 	};
 	onSuccess: () => void;
-	onQueued?: (draft: QueuedTransactionDraft) => void;
 }) {
 	const [loading, setLoading] =
 		React.useState(false);
@@ -4238,53 +3998,12 @@ function DirectSaleForm({
 				items: validItems,
 				note: showNote && note ? note : undefined,
 			};
-			let queueResult =
-				await postSaleWithOfflineQueue(
-					"/api/sales",
-					payload,
-				);
-			if (queueResult.queued) {
-				onQueued?.({
-					type: "DIRECT_SALE",
-					date,
-					customerId: null,
-					customerName: "Walk-in Customer",
-					amountCents: estimatedAmountCents,
-					paymentMethod:
-						paymentMethod || undefined,
-					cashReceivedCents:
-						paymentMethod === "CASH"
-							? cashReceivedCents
-							: undefined,
-					changeCents:
-						paymentMethod === "CASH"
-							? Math.max(
-									0,
-									cashReceivedCents -
-										estimatedAmountCents,
-							  )
-							: undefined,
-					note:
-						showNote && note ? note : undefined,
-					items: validItems,
-				});
-				toast.success(
-					"Offline: direct sale queued and will sync automatically.",
-				);
-				setItems([
-					{
-						productId: "",
-						units: "",
-					},
-				]);
-				setPaymentMethod("");
-				setCashReceivedCents(0);
-				setCashStep(false);
-				setNote("");
-				onSuccess();
-				return;
-			}
-			let res = queueResult.response;
+			let {
+				response: res,
+			} = await postSaleWithOfflineQueue(
+				"/api/sales",
+				payload,
+			);
 
 			if (!res.ok) {
 				let errorBody = await res
@@ -4303,60 +4022,12 @@ function DirectSaleForm({
 						payload.belowCostApproved = true;
 						payload.belowCostReason =
 							"User override from direct sale form";
-						queueResult =
-							await postSaleWithOfflineQueue(
-								"/api/sales",
-								payload,
-							);
-						if (queueResult.queued) {
-							onQueued?.({
-								type: "DIRECT_SALE",
-								date,
-								customerId: null,
-								customerName:
-									"Walk-in Customer",
-								amountCents:
-									estimatedAmountCents,
-								paymentMethod:
-									paymentMethod ||
-									undefined,
-								cashReceivedCents:
-									paymentMethod ===
-									"CASH"
-										? cashReceivedCents
-										: undefined,
-								changeCents:
-									paymentMethod ===
-									"CASH"
-										? Math.max(
-												0,
-												cashReceivedCents -
-													estimatedAmountCents,
-										  )
-										: undefined,
-								note:
-									showNote && note
-										? note
-										: undefined,
-								items: validItems,
-							});
-							toast.success(
-								"Offline: direct sale queued and will sync automatically.",
-							);
-							setItems([
-								{
-									productId: "",
-									units: "",
-								},
-							]);
-							setPaymentMethod("");
-							setCashReceivedCents(0);
-							setCashStep(false);
-							setNote("");
-							onSuccess();
-							return;
-						}
-						res = queueResult.response;
+						({
+							response: res,
+						} = await postSaleWithOfflineQueue(
+							"/api/sales",
+							payload,
+						));
 						if (!res.ok) {
 							errorBody = await res
 								.json()

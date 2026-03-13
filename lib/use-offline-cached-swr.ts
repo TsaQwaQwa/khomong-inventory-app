@@ -1,11 +1,6 @@
 "use client";
 
-import * as React from "react";
 import useSWR, { type KeyedMutator } from "swr";
-import {
-	readOfflineResource,
-	writeOfflineResource,
-} from "@/lib/offline-resource-cache";
 
 interface UseOfflineCachedSwrOptions<T> {
 	key: string | null;
@@ -46,95 +41,33 @@ export function useOfflineCachedSWR<T>(
 ): UseOfflineCachedSwrResult<T> {
 	const {
 		key,
-		cacheKey,
 		fetcher,
 		maxAgeMs = DEFAULT_MAX_AGE_MS,
 		isCachedDataUsable = (data) => data !== null && data !== undefined,
 		onError,
 	} = options;
 
-	const resolvedCacheKey = cacheKey ?? (key ? `swr:${key}` : null);
-	const [cachedData, setCachedData] = React.useState<T | null>(null);
-	const [usingCachedData, setUsingCachedData] =
-		React.useState(false);
-
 	const {
 		data: liveData,
 		error: swrError,
 		isLoading: swrLoading,
 		mutate,
-	} = useSWR<T>(
-		key,
-		key
-			? async (url: string) => {
-					const data = await fetcher(url);
-					if (resolvedCacheKey) {
-						void writeOfflineResource(
-							resolvedCacheKey,
-							data,
-						);
-					}
-					return data;
-				}
-			: null,
-		{
-			onError: (error) => {
-				const offline =
-					typeof window !== "undefined" &&
-					!navigator.onLine;
-				if (
-					offline &&
-					cachedData !== null &&
-					isCachedDataUsable(cachedData)
-				) {
-					setUsingCachedData(true);
-					return;
-				}
-				onError?.(error as Error);
-			},
+	} = useSWR<T>(key, key ? fetcher : null, {
+		onError: (error) => {
+			onError?.(error as Error);
 		},
-	);
+	});
 
-	React.useEffect(() => {
-		if (!resolvedCacheKey) return;
-		let cancelled = false;
-		setUsingCachedData(false);
-
-		const loadCached = async () => {
-			const cached = await readOfflineResource<T>(
-				resolvedCacheKey,
-				maxAgeMs,
-			);
-			if (cancelled || !cached) return;
-			setCachedData(cached.value);
-		};
-
-		void loadCached();
-		return () => {
-			cancelled = true;
-		};
-	}, [resolvedCacheKey, maxAgeMs]);
-
-	React.useEffect(() => {
-		if (liveData === undefined) return;
-		setCachedData(liveData);
-		setUsingCachedData(false);
-	}, [liveData]);
-
-	const data = liveData ?? cachedData ?? undefined;
-	const isLoading = swrLoading && data === undefined;
-	const error =
-		usingCachedData && data !== undefined
-			? undefined
-			: (swrError as Error | undefined);
+	void maxAgeMs;
+	void isCachedDataUsable;
 
 	return {
-		data,
+		data: liveData,
 		liveData,
-		cachedData,
-		error,
-		isLoading,
-		usingCachedData,
+		cachedData: null,
+		error: swrError as Error | undefined,
+		isLoading: swrLoading && liveData === undefined,
+		usingCachedData: false,
 		mutate,
 	};
 }

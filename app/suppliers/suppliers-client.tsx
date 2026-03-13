@@ -147,7 +147,6 @@ export function SuppliersClient() {
 		error: effectiveSuppliersError,
 		isLoading: effectiveSuppliersLoading,
 		mutate: mutateSuppliers,
-		usingCachedData: usingCachedSuppliers,
 	} = useOfflineCachedArraySWR<Supplier>({
 		key: "/api/suppliers",
 		cacheKey: "suppliers:list",
@@ -556,12 +555,6 @@ export function SuppliersClient() {
 				/>
 			}
 		>
-			{usingCachedSuppliers && suppliers.length > 0 && (
-				<p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700">
-					Offline mode: showing cached suppliers data from this
-					device.
-				</p>
-			)}
 			<div className="mb-4 grid gap-3 sm:grid-cols-3">
 				<Card>
 					<CardContent className="pt-4">

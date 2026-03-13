@@ -8,11 +8,6 @@ import { SignOutButton } from "@clerk/nextjs";
 import useSWR from "swr";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { useOfflineAuthMode } from "@/lib/offline-auth-mode";
-import {
-	getOfflineQueueCount,
-	offlineQueueChangedEvent,
-} from "@/lib/offline-sales-queue";
 import {
 	Popover,
 	PopoverContent,
@@ -139,35 +134,9 @@ const headerSummaryFetcher = async (url: string) => {
 	return (json?.data ?? json) as HeaderSummary;
 };
 
-const probeNetworkReachability = async () => {
-	const controller = new AbortController();
-	const timeoutId = window.setTimeout(
-		() => controller.abort(),
-		4000,
-	);
-	try {
-		const res = await fetch("/api/health", {
-			method: "GET",
-			cache: "no-store",
-			signal: controller.signal,
-		});
-		return res.ok;
-	} catch {
-		return false;
-	} finally {
-		window.clearTimeout(timeoutId);
-	}
-};
-
 export function Header() {
 	const pathname = usePathname();
-	const { clerkEnabled, offlineTrusted } = useOfflineAuthMode();
 	const [open, setOpen] = React.useState(false);
-	const [isOnline, setIsOnline] = React.useState(
-		true,
-	);
-	const [offlineQueueCount, setOfflineQueueCount] =
-		React.useState(0);
 	const { data: headerSummary } = useSWR<
 		HeaderSummary
 	>(
@@ -209,50 +178,6 @@ export function Header() {
 		},
 		[outOfStockCount, unreadAlertCount],
 	);
-	React.useEffect(() => {
-		let cancelled = false;
-		const syncStatus = async () => {
-			setOfflineQueueCount(getOfflineQueueCount());
-			if (!navigator.onLine) {
-				if (!cancelled) setIsOnline(false);
-				return;
-			}
-			const reachable = await probeNetworkReachability();
-			if (!cancelled) setIsOnline(reachable);
-		};
-		void syncStatus();
-		const onNetworkChange = () => {
-			void syncStatus();
-		};
-		window.addEventListener("online", onNetworkChange);
-		window.addEventListener(
-			"offline",
-			onNetworkChange,
-		);
-		window.addEventListener(
-			offlineQueueChangedEvent,
-			onNetworkChange,
-		);
-		const id = window.setInterval(() => {
-			void syncStatus();
-		}, 10000);
-		return () => {
-			cancelled = true;
-			window.removeEventListener(
-				"online",
-				onNetworkChange,
-			);
-			window.removeEventListener(
-				"offline",
-				onNetworkChange,
-			);
-			window.removeEventListener(
-				offlineQueueChangedEvent,
-				onNetworkChange,
-			);
-			window.clearInterval(id);
-		};
-	}, []);
 
 	return (
 		<header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60">
@@ -266,7 +191,6 @@ export function Header() {
 					</span>
 				</Link>
 
-				{/* Desktop Navigation */}
 				<nav className="hidden min-w-0 flex-1 items-center space-x-0.5 overflow-x-auto text-sm md:flex">
 					{desktopPrimaryItems.map((item) => {
 						const isActive =
@@ -350,47 +274,20 @@ export function Header() {
 					)}
 				</nav>
 				<div className="ml-auto flex shrink-0 items-center gap-2">
-					<div
-						className={cn(
-							"hidden md:inline-flex items-center rounded-full border px-2 py-1 text-xs font-medium",
-							isOnline
-								? "border-emerald-200 bg-emerald-50 text-emerald-700"
-								: "border-amber-200 bg-amber-50 text-amber-700",
-						)}
-						title={
-							offlineQueueCount > 0
-								? `${offlineQueueCount} pending offline action${offlineQueueCount === 1 ? "" : "s"}`
-								: "No pending offline actions"
-						}
-					>
-						{isOnline ? "Online" : "Offline"}
-						{offlineQueueCount > 0
-							? ` - ${offlineQueueCount} pending`
-							: ""}
-					</div>
 					<GlobalCommandSearch />
-					{clerkEnabled ? (
-						<SignOutButton redirectUrl="/sign-in">
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								className="hidden md:inline-flex"
-							>
-								<LogOut className="mr-2 h-4 w-4" />
-								Logout
-							</Button>
-						</SignOutButton>
-					) : (
-						<div className="hidden rounded-md border px-3 py-1.5 text-xs text-muted-foreground md:inline-flex">
-							{offlineTrusted
-								? "Offline session"
-								: "Reconnect to sign in"}
-						</div>
-					)}
+					<SignOutButton redirectUrl="/sign-in">
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="hidden md:inline-flex"
+						>
+							<LogOut className="mr-2 h-4 w-4" />
+							Logout
+						</Button>
+					</SignOutButton>
 				</div>
 
-				{/* Mobile Navigation */}
 				<Sheet open={open} onOpenChange={setOpen}>
 					<SheetTrigger
 						asChild
@@ -413,19 +310,6 @@ export function Header() {
 							</SheetTitle>
 						</div>
 						<nav className="flex flex-col space-y-1">
-							<div
-								className={cn(
-									"mb-2 rounded-md border px-3 py-2 text-xs font-medium",
-									isOnline
-										? "border-emerald-200 bg-emerald-50 text-emerald-700"
-										: "border-amber-200 bg-amber-50 text-amber-700",
-								)}
-							>
-								{isOnline ? "Online" : "Offline"}
-								{offlineQueueCount > 0
-									? ` - ${offlineQueueCount} pending`
-									: " - no pending actions"}
-							</div>
 							{visibleNavItems.map((item) => {
 								const isActive =
 									pathname === item.href;
@@ -464,27 +348,19 @@ export function Header() {
 							})}
 						</nav>
 						<div className="mt-4 border-t pt-4">
-							{clerkEnabled ? (
-								<SignOutButton redirectUrl="/sign-in">
-									<Button
-										type="button"
-										variant="outline"
-										className="w-full justify-start"
-										onClick={() =>
-											setOpen(false)
-										}
-									>
-										<LogOut className="mr-2 h-4 w-4" />
-										Logout
-									</Button>
-								</SignOutButton>
-							) : (
-								<div className="rounded-md border px-3 py-2 text-xs text-muted-foreground">
-									{offlineTrusted
-										? "Offline session active"
-										: "Reconnect to sign in"}
-								</div>
-							)}
+							<SignOutButton redirectUrl="/sign-in">
+								<Button
+									type="button"
+									variant="outline"
+									className="w-full justify-start"
+									onClick={() =>
+										setOpen(false)
+									}
+								>
+									<LogOut className="mr-2 h-4 w-4" />
+									Logout
+								</Button>
+							</SignOutButton>
 						</div>
 					</SheetContent>
 				</Sheet>

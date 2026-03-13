@@ -61,7 +61,6 @@ export function AlertsClient() {
 		error: effectiveError,
 		isLoading: effectiveLoading,
 		mutate,
-		usingCachedData: usingCachedAlerts,
 		items: alerts,
 	} = useOfflineCachedArraySWR<InboxAlert>({
 		key: "/api/alerts?status=all&limit=500",
@@ -179,11 +178,6 @@ export function AlertsClient() {
 				</Button>
 			}
 		>
-			{usingCachedAlerts && alerts.length > 0 && (
-				<p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700">
-					Offline mode: showing cached alerts from this device.
-				</p>
-			)}
 			{effectiveError ? (
 				<Alert variant="destructive">
 					<AlertCircle className="h-4 w-4" />

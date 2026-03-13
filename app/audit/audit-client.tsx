@@ -169,7 +169,6 @@ export function AuditClient() {
 		items: logs,
 		error: effectiveError,
 		isLoading: effectiveLoading,
-		usingCachedData: usingCachedLogs,
 	} = useOfflineCachedArraySWR<AuditLogEntry>({
 		key: query,
 		cacheKey: `audit:query:${query}`,
@@ -230,11 +229,6 @@ export function AuditClient() {
 				</div>
 			</div>
 
-			{usingCachedLogs && logs.length > 0 && (
-				<p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700">
-					Offline mode: showing cached audit logs from this device.
-				</p>
-			)}
 			{effectiveError ? (
 				<Alert variant="destructive">
 					<AlertCircle className="h-4 w-4" />

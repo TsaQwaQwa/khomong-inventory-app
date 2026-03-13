@@ -120,7 +120,6 @@ export function ProductsClient({
 		error: effectiveError,
 		isLoading: effectiveLoading,
 		mutate,
-		usingCachedData: usingCachedProducts,
 	} = useOfflineCachedArraySWR<ProductWithStock>({
 		key: "/api/products?includeStock=1",
 		cacheKey: "products:includeStock=1",
@@ -290,11 +289,6 @@ export function ProductsClient({
 				</Dialog>
 			}
 		>
-			{usingCachedProducts && products.length > 0 && (
-				<p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700">
-					Offline mode: showing cached products from this device.
-				</p>
-			)}
 			{effectiveLoading ? (
 				<LoadingTable />
 			) : effectiveError ? (

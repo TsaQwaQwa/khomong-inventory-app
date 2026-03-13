@@ -1873,7 +1873,7 @@ function QuickCheckoutForm({
 			);
 			if (queueResult.queued) {
 				toast.success(
-					"Offline: checkout queued and will sync automatically.",
+					"Checkout saved.",
 				);
 				setItems([]);
 				setScanInput("");
@@ -1911,7 +1911,7 @@ function QuickCheckoutForm({
 							);
 						if (queueResult.queued) {
 							toast.success(
-								"Offline: checkout queued and will sync automatically.",
+								"Checkout saved.",
 							);
 							setItems([]);
 							setScanInput("");
@@ -3082,7 +3082,7 @@ function DirectSaleForm({
 			);
 			if (queueResult.queued) {
 				toast.success(
-					"Offline: direct sale queued and will sync automatically.",
+					"Direct sale saved.",
 				);
 				setCashReceivedCents(0);
 				setCashStep(false);
@@ -3114,7 +3114,7 @@ function DirectSaleForm({
 							);
 						if (queueResult.queued) {
 							toast.success(
-								"Offline: direct sale queued and will sync automatically.",
+								"Direct sale saved.",
 							);
 							setCashReceivedCents(0);
 							setCashStep(false);
@@ -3443,7 +3443,7 @@ function AccountSaleForm({
 			);
 			if (queueResult.queued) {
 				toast.success(
-					"Offline: account sale queued and will sync automatically.",
+					"Account sale saved.",
 				);
 				setManualAmountCents(0);
 				onSuccess();
@@ -3474,7 +3474,7 @@ function AccountSaleForm({
 							);
 						if (queueResult.queued) {
 							toast.success(
-								"Offline: account sale queued and will sync automatically.",
+								"Account sale saved.",
 							);
 							setManualAmountCents(0);
 							onSuccess();
@@ -3786,7 +3786,7 @@ function AccountPaymentForm({
 				);
 			if (queueResult.queued) {
 				toast.success(
-					"Offline: payment queued and will sync automatically.",
+					"Payment recorded successfully.",
 				);
 				setCashReceivedCents(0);
 				setCashStep(false);
@@ -4022,7 +4022,7 @@ function ExpenseForm({
 				);
 			if (queueResult.queued) {
 				toast.success(
-					"Offline: expense queued and will sync automatically.",
+					"Expense recorded successfully.",
 				);
 				onSuccess();
 				return;
@@ -4890,7 +4890,7 @@ function AddPurchaseForm({
 				);
 			if (queueResult.queued) {
 				toast.success(
-					"Offline: purchase queued and will sync automatically.",
+					"Purchase recorded successfully.",
 				);
 				onSuccess();
 				return;
@@ -5195,7 +5195,7 @@ function AddAdjustmentForm({
 				});
 			if (queueResult.queued) {
 				toast.success(
-					"Offline: adjustment queued and will sync automatically.",
+					"Adjustments submitted successfully.",
 				);
 				onSuccess();
 				return;

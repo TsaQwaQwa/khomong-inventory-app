@@ -111,7 +111,6 @@ export function PurchasesClient() {
 		error: effectiveError,
 		isLoading: effectiveLoading,
 		mutate,
-		usingCachedData: usingCachedPurchases,
 	} = useOfflineCachedArraySWR<Purchase>({
 		key: `/api/purchases?from=${from}&to=${date}`,
 		cacheKey: `purchases:${from}:${date}`,
@@ -250,11 +249,6 @@ export function PurchasesClient() {
 				</div>
 			}
 		>
-			{usingCachedPurchases && purchases.length > 0 && (
-				<p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-700">
-					Offline mode: showing cached purchases from this device.
-				</p>
-			)}
 			{effectiveLoading ? (
 				<LoadingTable />
 			) : effectiveError ? (
@@ -1008,7 +1002,7 @@ function RecordPurchaseDialog({
 				);
 			if (queueResult.queued) {
 				toast.success(
-					"Offline: purchase queued and will sync automatically.",
+					"Purchase recorded successfully.",
 				);
 				onSuccess();
 				return;
