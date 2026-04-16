@@ -71,6 +71,28 @@ export interface Purchase {
 	attachmentIds?: string[];
 }
 
+export type DailyStockCountStatus =
+	| "DRAFT"
+	| "COMPLETED";
+
+export interface DailyStockCountItem {
+	productId: string;
+	countedUnits: number;
+	note?: string;
+}
+
+export interface DailyStockCount {
+	id: string;
+	date: string;
+	sessionId: string;
+	status: DailyStockCountStatus;
+	items: DailyStockCountItem[];
+	countedByUserId: string;
+	countedAt: string;
+	finalizedByUserId?: string;
+	finalizedAt?: string;
+}
+
 // Adjustment types
 export type AdjustmentReason =
 	| "SPILLAGE"
