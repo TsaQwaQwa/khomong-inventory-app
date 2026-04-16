@@ -6,7 +6,6 @@ import { ok, fail } from "@/lib/http";
 import { TabTransaction } from "@/models/TabTransaction";
 import { BusinessDay } from "@/models/BusinessDay";
 import { Customer } from "@/models/Customer";
-import { SaleTransaction } from "@/models/SaleTransaction";
 import { serializeDoc } from "@/lib/serialize";
 
 export async function GET(req: Request) {
@@ -39,13 +38,11 @@ export async function GET(req: Request) {
 		| "CHARGE"
 		| "PAYMENT"
 		| "ADJUSTMENT"
-		| "EXPENSE"
-		| "DIRECT_SALE" =
+		| "EXPENSE" =
 		typeParam === "CHARGE" ||
 		typeParam === "PAYMENT" ||
 		typeParam === "ADJUSTMENT" ||
-		typeParam === "EXPENSE" ||
-		typeParam === "DIRECT_SALE"
+		typeParam === "EXPENSE"
 			? typeParam
 			: "ALL";
 	const limitParam = Number(
@@ -56,194 +53,122 @@ export async function GET(req: Request) {
 		: 100;
 
 	try {
-		const tabMatch: Record<string, unknown> = {};
-		if (customerId) tabMatch.customerId = customerId;
-		if (
-			requestedType !== "ALL" &&
-			requestedType !== "DIRECT_SALE"
-		) {
-			tabMatch.type = requestedType;
-		}
-		const shouldLoadTabTransactions =
-			requestedType === "ALL" ||
-			requestedType !== "DIRECT_SALE";
-		const shouldLoadDirectSales =
-			!customerId &&
-			(requestedType === "ALL" ||
-				requestedType === "DIRECT_SALE");
+		const match: Record<string, unknown> = {};
 
-		let businessDayIdForDate: string | null = null;
+		if (customerId) {
+			match.customerId = customerId;
+		}
+
+		if (requestedType !== "ALL") {
+			match.type = requestedType;
+		}
+
+		let businessDayIdForDate: string | null =
+			null;
 		let businessDayIdsForRange: string[] = [];
+
 		if (date) {
 			const day = await BusinessDay.findOne({
 				date,
 			}).lean();
 			if (!day) return ok([]);
+
 			businessDayIdForDate = String(day._id);
-			tabMatch.businessDayId = businessDayIdForDate;
+			match.businessDayId = businessDayIdForDate;
 		} else if (from && to) {
 			const days = await BusinessDay.find({
 				date: { $gte: from, $lte: to },
 			})
 				.select({ _id: 1 })
 				.lean();
+
 			businessDayIdsForRange = days.map((day) =>
 				String(day._id),
 			);
+
 			if (!businessDayIdsForRange.length) {
 				return ok([]);
 			}
-			tabMatch.businessDayId = {
+
+			match.businessDayId = {
 				$in: businessDayIdsForRange,
 			};
 		}
 
-		const [tabDocs, directSalesDocs] =
-			await Promise.all([
-				shouldLoadTabTransactions
-					? TabTransaction.find(tabMatch)
-							.sort({ createdAt: -1 })
-							.limit(limit)
-							.select(
-								fieldsQuick
-								? {
-										_id: 1,
-										customerId: 1,
-										businessDayId: 1,
-										type: 1,
-										manualAmountCents: 1,
-										amountCents: 1,
-										paymentMethod: 1,
-										cashReceivedCents: 1,
-										changeCents: 1,
-										reference: 1,
-										reason: 1,
-										expenseCategory: 1,
-										payee: 1,
-										note: 1,
-										createdAt: 1,
-										reversalOfId: 1,
-								  }
-									: {},
-							)
-							.lean()
-					: Promise.resolve([]),
-				!shouldLoadDirectSales
-					? Promise.resolve([])
-					: SaleTransaction.find(
-							businessDayIdForDate
-								? {
-										businessDayId:
-											businessDayIdForDate,
-								  }
-								: businessDayIdsForRange.length > 0
-									? {
-											businessDayId: {
-												$in: businessDayIdsForRange,
-											},
-									  }
-								: {},
-					  )
-							.sort({ createdAt: -1 })
-							.limit(limit)
-							.select(
-								fieldsQuick
-								? {
-										_id: 1,
-										businessDayId: 1,
-										paymentMethod: 1,
-										amountCents: 1,
-										cashReceivedCents: 1,
-										changeCents: 1,
-										items: 1,
-										createdAt: 1,
-										reversalOfId: 1,
-								  }
-									: {},
-							)
-							.lean(),
-			]);
+		const tabDocs = await TabTransaction.find(match)
+			.sort({ createdAt: -1 })
+			.limit(limit)
+			.select(
+				fieldsQuick
+					? {
+							_id: 1,
+							customerId: 1,
+							businessDayId: 1,
+							type: 1,
+							manualAmountCents: 1,
+							amountCents: 1,
+							paymentMethod: 1,
+							cashReceivedCents: 1,
+							changeCents: 1,
+							reference: 1,
+							reason: 1,
+							expenseCategory: 1,
+							payee: 1,
+							note: 1,
+							createdAt: 1,
+							reversalOfId: 1,
+							items: 1,
+					  }
+					: {},
+			)
+			.lean();
 
-		const businessDayIds =
-			date !== null
-				? []
-				: Array.from(
-						new Set([
-							...tabDocs.map(
-								(doc) => doc.businessDayId,
-							),
-							...directSalesDocs.map(
-								(doc) => doc.businessDayId,
-							),
-						]),
-				  );
 		const customerIds = Array.from(
 			new Set(
 				tabDocs
 					.map((doc) => doc.customerId)
 					.filter(
-						(customerId): customerId is string =>
-							typeof customerId === "string" &&
-							customerId.length > 0,
+						(
+							value,
+						): value is string =>
+							typeof value ===
+								"string" &&
+							value.length > 0,
 					),
 			),
 		);
 
-		const [days, customers] = await Promise.all([
-			businessDayIds.length > 0
-				? BusinessDay.find({
-						_id: { $in: businessDayIds },
-				  })
-						.select({ _id: 1, date: 1 })
-						.lean()
-				: [],
+		const customers =
 			customerIds.length > 0
-				? Customer.find({
+				? await Customer.find({
 						_id: { $in: customerIds },
 				  })
 						.select({ _id: 1, name: 1 })
 						.lean()
-				: [],
-		]);
+				: [];
 
-		const dayById = new Map(
-			days.map((d) => [String(d._id), d.date]),
-		);
 		const customerById = new Map(
-			customers.map((c) => [
-				String(c._id),
-				c.name,
+			customers.map((customer) => [
+				String(customer._id),
+				customer.name,
 			]),
 		);
 
-		const entries = [
-			...tabDocs.map((doc) => ({
+		const entries = tabDocs
+			.map((doc) => ({
 				...serializeDoc(doc),
-				date:
-					date ??
-					dayById.get(doc.businessDayId) ??
-					null,
-				customerName: doc.type === "EXPENSE"
-					? (doc.payee ?? "Business Expense")
-					:
-					(
-						doc.customerId
-							? customerById.get(doc.customerId)
-							: undefined
-					) ??
-					"(unknown customer)",
-			})),
-			...directSalesDocs.map((doc) => ({
-				...serializeDoc(doc),
-				type: "DIRECT_SALE" as const,
-				customerId: null,
-				customerName: "Walk-in Sale",
-				date:
-					date ??
-					dayById.get(doc.businessDayId) ??
-					null,
-			})),
-		]
+				date,
+				customerName:
+					doc.type === "EXPENSE"
+						? (doc.payee ??
+						  "Business Expense")
+						: (doc.customerId
+								? customerById.get(
+										doc.customerId,
+								  )
+								: undefined) ??
+						  "(unknown customer)",
+			}))
 			.sort((a, b) => {
 				const ta = new Date(
 					a.createdAt ?? 0,
@@ -258,53 +183,39 @@ export async function GET(req: Request) {
 		const originalIds = entries
 			.map((entry) => entry.id)
 			.filter(
-				(entryId): entryId is string =>
+				(
+					entryId,
+				): entryId is string =>
 					typeof entryId === "string" &&
 					entryId.length > 0,
 			);
 
-		const [tabReversals, saleReversals] =
+		const tabReversals =
 			originalIds.length > 0
-				? await Promise.all([
-						shouldLoadTabTransactions
-							? TabTransaction.find({
-									reversalOfId: {
-										$in: originalIds,
-									},
-							  })
-									.select({
-										reversalOfId: 1,
-									})
-									.lean()
-							: Promise.resolve([]),
-						shouldLoadDirectSales
-							? SaleTransaction.find({
-									reversalOfId: {
-										$in: originalIds,
-									},
-							  })
-									.select({
-										reversalOfId: 1,
-									})
-									.lean()
-							: Promise.resolve([]),
-				  ])
-				: [[], []];
+				? await TabTransaction.find({
+						reversalOfId: { $in: originalIds },
+				  })
+						.select({ reversalOfId: 1 })
+						.lean()
+				: [];
 
-		const reversedIdSet = new Set([
-			...tabReversals
+		const reversedIdSet = new Set(
+			tabReversals
 				.map((doc) => doc.reversalOfId)
 				.filter(Boolean),
-			...saleReversals
-				.map((doc) => doc.reversalOfId)
-				.filter(Boolean),
-		]);
+		);
 
-		const entriesWithFlags = entries.map((entry) => ({
-			...entry,
-			isReversal: Boolean(entry.reversalOfId),
-			isReversed: reversedIdSet.has(entry.id),
-		}));
+		const entriesWithFlags = entries.map(
+			(entry) => ({
+				...entry,
+				isReversal: Boolean(
+					entry.reversalOfId,
+				),
+				isReversed: reversedIdSet.has(
+					entry.id,
+				),
+			}),
+		);
 
 		return ok(entriesWithFlags);
 	} catch {
