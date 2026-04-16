@@ -40,7 +40,6 @@ import {
 	DollarSign,
 	PackageMinus,
 	Plus,
-	Receipt,
 	ShoppingCart,
 	Star,
 	Trash2,
@@ -53,7 +52,6 @@ import {
 } from "@/lib/date-utils";
 import { formatZAR } from "@/lib/money";
 import {
-	postSaleWithOfflineQueue,
 	postPurchaseWithOfflineQueue,
 	postAdjustmentWithOfflineQueue,
 	postTabExpenseWithOfflineQueue,
@@ -77,7 +75,8 @@ function pushQuickAddDebugLog(
 	event: string,
 	meta?: Record<string, unknown>,
 ) {
-	if (process.env.NODE_ENV !== "development") return;
+	if (process.env.NODE_ENV !== "development")
+		return;
 	if (typeof window === "undefined") return;
 	if (!Array.isArray(window.__quickAddLogs)) {
 		window.__quickAddLogs = [];
@@ -110,10 +109,6 @@ const MODAL_CONTENT_CLASS =
 	"h-[70vh] w-[90vw] max-w-[90vw] overflow-hidden p-0 md:max-w-3xl";
 
 type QuickAction =
-	| "quick-checkout"
-	| "quick-top-sellers"
-	| "quick-fast-repeat"
-	| "account-sale"
 	| "account-payment"
 	| "expense"
 	| "restock"
@@ -128,32 +123,24 @@ type QuickAction =
 const QUICK_ACTION_STORAGE_KEY =
 	"kgomong.quickActions.favorites";
 const QUICK_ACTION_ALL: QuickAction[] = [
-	"quick-checkout",
-	"quick-top-sellers",
-	"quick-fast-repeat",
-	"account-sale",
+	"opening-stock",
+	"purchase",
+	"adjustment",
+	"restock",
 	"account-payment",
 	"expense",
-	"restock",
-	"opening-stock",
 	"customer",
 	"supplier",
 	"supplier-price",
 	"product",
-	"purchase",
-	"adjustment",
 ];
-const QUICK_ACTION_DEFAULT_FAVORITES: QuickAction[] = [
-	"quick-checkout",
-	"quick-fast-repeat",
-	"account-sale",
-	"purchase",
-];
-
-interface ChargeItem {
-	productId: string;
-	units: string;
-}
+const QUICK_ACTION_DEFAULT_FAVORITES: QuickAction[] =
+	[
+		"opening-stock",
+		"purchase",
+		"adjustment",
+		"account-payment",
+	];
 
 interface PurchaseItemForm {
 	productId: string;
@@ -170,12 +157,6 @@ interface AdjustmentItemForm {
 }
 
 interface DailyReportLite {
-	trends?: {
-		topProducts?: {
-			productId: string;
-			productName: string;
-		}[];
-	};
 	stockRecommendations: {
 		productId: string;
 		recommendedOrderUnits: number;
@@ -227,23 +208,6 @@ const ADJUSTMENT_REASONS: {
 	},
 ];
 
-interface QuickProductLite {
-	id: string;
-	name: string;
-}
-
-interface DirectSaleHistoryLite {
-	id: string;
-	type: "DIRECT_SALE";
-	paymentMethod?: PaymentMethod;
-	items?: {
-		productId: string;
-		units: number;
-	}[];
-	isReversal?: boolean;
-	isReversed?: boolean;
-}
-
 const fetcher = async (url: string) => {
 	const res = await fetch(url);
 	const json = await res.json().catch(() => ({}));
@@ -287,44 +251,11 @@ const getApiErrorMessage = (
 	return fallback;
 };
 
-const getApiErrorCode = (
-	payload: unknown,
-): string | null => {
-	if (!payload || typeof payload !== "object")
-		return null;
-	const maybePayload = payload as Record<
-		string,
-		unknown
-	>;
-	const maybeError = maybePayload.error;
-	if (
-		maybeError &&
-		typeof maybeError === "object"
-	) {
-		const maybeErrorObj = maybeError as Record<
-			string,
-			unknown
-		>;
-		return typeof maybeErrorObj.code === "string"
-			? maybeErrorObj.code
-			: null;
-	}
-	return null;
-};
-
 const getQuickActionLabel = (
 	action: QuickAction,
 	restockCount: number,
 ) => {
 	switch (action) {
-		case "quick-checkout":
-			return "Quick Checkout";
-		case "quick-top-sellers":
-			return "Top Sellers Sale";
-		case "quick-fast-repeat":
-			return "Fast Repeat Sale";
-		case "account-sale":
-			return "Add Sale to Account";
 		case "account-payment":
 			return "Add Account Payment";
 		case "expense":
@@ -352,29 +283,31 @@ const getQuickActionIcon = (
 	action: QuickAction,
 ) => {
 	switch (action) {
-		case "quick-checkout":
-		case "quick-top-sellers":
-		case "quick-fast-repeat":
-		case "account-sale":
-			return <Receipt className="mr-2 h-4 w-4" />;
 		case "account-payment":
 		case "expense":
-			return <CreditCard className="mr-2 h-4 w-4" />;
+			return (
+				<CreditCard className="mr-2 h-4 w-4" />
+			);
 		case "restock":
 		case "purchase":
-			return <ShoppingCart className="mr-2 h-4 w-4" />;
+			return (
+				<ShoppingCart className="mr-2 h-4 w-4" />
+			);
 		case "opening-stock":
+		case "product":
 			return <Box className="mr-2 h-4 w-4" />;
 		case "customer":
 			return <Users className="mr-2 h-4 w-4" />;
 		case "supplier":
 			return <Truck className="mr-2 h-4 w-4" />;
 		case "supplier-price":
-			return <DollarSign className="mr-2 h-4 w-4" />;
-		case "product":
-			return <Box className="mr-2 h-4 w-4" />;
+			return (
+				<DollarSign className="mr-2 h-4 w-4" />
+			);
 		case "adjustment":
-			return <PackageMinus className="mr-2 h-4 w-4" />;
+			return (
+				<PackageMinus className="mr-2 h-4 w-4" />
+			);
 	}
 };
 
@@ -394,20 +327,26 @@ export function GlobalQuickActions() {
 		React.useState<QuickAction[]>(
 			QUICK_ACTION_DEFAULT_FAVORITES,
 		);
-	const date = React.useMemo(() => getTodayJHB(), []);
+	const date = React.useMemo(
+		() => getTodayJHB(),
+		[],
+	);
 	const { mutate } = useSWRConfig();
 	const enableQuickData =
 		show && (open || activeAction !== null);
 
 	React.useEffect(() => {
 		if (typeof window === "undefined") return;
-		pushQuickAddDebugLog("global_quick_actions_mounted", {
-			pathname,
-			innerWidth: window.innerWidth,
-			innerHeight: window.innerHeight,
-			devicePixelRatio: window.devicePixelRatio,
-			userAgent: navigator.userAgent,
-		});
+		pushQuickAddDebugLog(
+			"global_quick_actions_mounted",
+			{
+				pathname,
+				innerWidth: window.innerWidth,
+				innerHeight: window.innerHeight,
+				devicePixelRatio: window.devicePixelRatio,
+				userAgent: navigator.userAgent,
+			},
+		);
 	}, [pathname]);
 
 	const { data: products = [] } = useSWR<
@@ -428,12 +367,13 @@ export function GlobalQuickActions() {
 		enableQuickData ? "/api/suppliers" : null,
 		fetcher,
 	);
-	const { data: report } = useSWR<DailyReportLite>(
-		enableQuickData
-			? `/api/reports/daily?date=${date}`
-			: null,
-		fetcher,
-	);
+	const { data: report } =
+		useSWR<DailyReportLite>(
+			enableQuickData
+				? `/api/reports/daily?date=${date}`
+				: null,
+			fetcher,
+		);
 	const { data: purchaseHistory = [] } = useSWR<
 		PurchaseHistoryLite[]
 	>(
@@ -450,149 +390,148 @@ export function GlobalQuickActions() {
 			: null,
 		fetcher,
 	);
-	const restockSeed = React.useMemo(
-		() => {
-			const recommendations = (
-				report?.stockRecommendations ?? []
-			).filter(
-				(item) => item.recommendedOrderUnits > 0,
-			);
-			const productPackSizeById = new Map(
-				products.map((product) => [
-					product.id,
-					Math.max(product.packSize || 1, 1),
-				]),
-			);
 
-			const perProductRecentMeta = new Map<
-				string,
-				{ supplierId: string; unitCostCents: number }
-			>();
-			const bestContractByProduct = new Map<
-				string,
-				{ supplierId: string; unitCostCents: number }
-			>();
+	const restockSeed = React.useMemo(() => {
+		const recommendations = (
+			report?.stockRecommendations ?? []
+		).filter(
+			(item) => item.recommendedOrderUnits > 0,
+		);
+		const productPackSizeById = new Map(
+			products.map((product) => [
+				product.id,
+				Math.max(product.packSize || 1, 1),
+			]),
+		);
 
-			for (const supplierPrice of supplierPrices) {
+		const perProductRecentMeta = new Map<
+			string,
+			{
+				supplierId: string;
+				unitCostCents: number;
+			}
+		>();
+		const bestContractByProduct = new Map<
+			string,
+			{
+				supplierId: string;
+				unitCostCents: number;
+			}
+		>();
+
+		for (const supplierPrice of supplierPrices) {
+			if (
+				!supplierPrice.productId ||
+				!supplierPrice.supplierId ||
+				supplierPrice.unitCostCents <= 0
+			) {
+				continue;
+			}
+			const existing = bestContractByProduct.get(
+				supplierPrice.productId,
+			);
+			if (
+				!existing ||
+				supplierPrice.unitCostCents <
+					existing.unitCostCents
+			) {
+				bestContractByProduct.set(
+					supplierPrice.productId,
+					{
+						supplierId: supplierPrice.supplierId,
+						unitCostCents:
+							supplierPrice.unitCostCents,
+					},
+				);
+			}
+		}
+
+		for (const purchase of purchaseHistory) {
+			for (const item of purchase.items ?? []) {
 				if (
-					!supplierPrice.productId ||
-					!supplierPrice.supplierId ||
-					supplierPrice.unitCostCents <= 0
+					!item.productId ||
+					perProductRecentMeta.has(item.productId)
 				) {
 					continue;
 				}
-				const existing = bestContractByProduct.get(
-					supplierPrice.productId,
+				perProductRecentMeta.set(item.productId, {
+					supplierId: purchase.supplierId ?? "",
+					unitCostCents: item.unitCostCents ?? 0,
+				});
+			}
+		}
+
+		const restockItems = recommendations.map(
+			(item) => {
+				const contractBest =
+					bestContractByProduct.get(
+						item.productId,
+					);
+				const recent = perProductRecentMeta.get(
+					item.productId,
 				);
-				if (
-					!existing ||
-					supplierPrice.unitCostCents <
-						existing.unitCostCents
-				) {
-					bestContractByProduct.set(
-						supplierPrice.productId,
-						{
-							supplierId:
-								supplierPrice.supplierId,
-							unitCostCents:
-								supplierPrice.unitCostCents,
-						},
-					);
-				}
-			}
+				const selectedMeta =
+					contractBest ?? recent;
+				const packSize =
+					productPackSizeById.get(
+						item.productId,
+					) ?? 1;
+				const recommendedUnits =
+					item.recommendedOrderUnits;
+				const cases = Math.floor(
+					recommendedUnits / packSize,
+				);
+				const singles =
+					recommendedUnits % packSize;
 
-			for (const purchase of purchaseHistory) {
-				for (const item of purchase.items ?? []) {
-					if (
-						!item.productId ||
-						perProductRecentMeta.has(
-							item.productId,
-						)
-					) {
-						continue;
-					}
-					perProductRecentMeta.set(item.productId, {
-						supplierId:
-							purchase.supplierId ?? "",
-						unitCostCents:
-							item.unitCostCents ?? 0,
-					});
-				}
-			}
+				return {
+					productId: item.productId,
+					cases: cases > 0 ? String(cases) : "",
+					singles:
+						singles > 0 ? String(singles) : "",
+					lineSubtotalCents: Math.max(
+						0,
+						recommendedUnits *
+							(selectedMeta?.unitCostCents ?? 0),
+					),
+					suggestedSupplierId:
+						selectedMeta?.supplierId ?? "",
+				};
+			},
+		);
 
-			const restockItems = recommendations.map(
-				(item) => {
-					const contractBest =
-						bestContractByProduct.get(
-							item.productId,
-						);
-					const recent =
-						perProductRecentMeta.get(
-							item.productId,
-						);
-					const selectedMeta =
-						contractBest ?? recent;
-					const packSize =
-						productPackSizeById.get(
-							item.productId,
-						) ?? 1;
-					const recommendedUnits =
-						item.recommendedOrderUnits;
-					const cases = Math.floor(
-						recommendedUnits / packSize,
-					);
-					const singles =
-						recommendedUnits % packSize;
-					return {
-						productId: item.productId,
-						cases:
-							cases > 0 ? String(cases) : "",
-						singles:
-							singles > 0
-								? String(singles)
-								: "",
-						lineSubtotalCents:
-							Math.max(
-								0,
-								recommendedUnits *
-									(selectedMeta?.unitCostCents ??
-										0),
-							),
-						suggestedSupplierId:
-							selectedMeta?.supplierId ?? "",
-					};
-				},
-			);
-
-			const supplierFrequency = new Map<
-				string,
-				number
-			>();
-			for (const item of restockItems) {
-				if (!item.suggestedSupplierId) continue;
-				supplierFrequency.set(
+		const supplierFrequency = new Map<
+			string,
+			number
+		>();
+		for (const item of restockItems) {
+			if (!item.suggestedSupplierId) continue;
+			supplierFrequency.set(
+				item.suggestedSupplierId,
+				(supplierFrequency.get(
 					item.suggestedSupplierId,
-					(supplierFrequency.get(
-						item.suggestedSupplierId,
-					) ?? 0) + 1,
-				);
-			}
-			const sortedSuppliers = Array.from(
-				supplierFrequency.entries(),
-			).sort((a, b) => b[1] - a[1]);
-			const initialSupplierId =
-				sortedSuppliers[0]?.[0] ?? "";
+				) ?? 0) + 1,
+			);
+		}
+		const sortedSuppliers = Array.from(
+			supplierFrequency.entries(),
+		).sort((a, b) => b[1] - a[1]);
+		const initialSupplierId =
+			sortedSuppliers[0]?.[0] ?? "";
 
-			return {
-				items: restockItems.map(
-					({ suggestedSupplierId, ...rest }) =>
-						rest,
-				),
-				initialSupplierId,
-			};
-		},
-		[report, purchaseHistory, products, supplierPrices],
-	);
+		return {
+			items: restockItems.map(
+				({ suggestedSupplierId, ...rest }) =>
+					rest,
+			),
+			initialSupplierId,
+		};
+	}, [
+		report,
+		purchaseHistory,
+		products,
+		supplierPrices,
+	]);
 
 	React.useEffect(() => {
 		try {
@@ -680,10 +619,13 @@ export function GlobalQuickActions() {
 
 	const openAction = React.useCallback(
 		(action: QuickAction) => {
-			pushQuickAddDebugLog("open_action_clicked", {
-				action,
-				pathname,
-			});
+			pushQuickAddDebugLog(
+				"open_action_clicked",
+				{
+					action,
+					pathname,
+				},
+			);
 			setActiveAction(action);
 			setOpen(false);
 		},
@@ -707,32 +649,14 @@ export function GlobalQuickActions() {
 				);
 				return;
 			}
-			persistFavorites([...favoriteActions, action]);
+			persistFavorites([
+				...favoriteActions,
+				action,
+			]);
 		},
 		[favoriteActions, persistFavorites],
 	);
 
-	const renderQuickActionButton = (
-		action: QuickAction,
-		variant?: "outline" | "secondary",
-	) => (
-		<ActionBtn
-			label={getQuickActionLabel(
-				action,
-				restockSeed.items.length,
-			)}
-			icon={getQuickActionIcon(action)}
-			variant={variant}
-			onClick={() => openAction(action)}
-			disabled={
-				action === "restock" &&
-				restockSeed.items.length === 0
-			}
-		/>
-	);
-	const showInMoreActions = (action: QuickAction) =>
-		!favoriteActions.includes(action) &&
-		!pagePrimaryActions.includes(action);
 	const pagePrimaryActions = React.useMemo<
 		QuickAction[]
 	>(() => {
@@ -754,20 +678,47 @@ export function GlobalQuickActions() {
 			return ["adjustment"];
 		}
 		if (pathname.startsWith("/tabs")) {
-			return ["customer"];
+			return ["account-payment"];
 		}
 		if (pathname.startsWith("/transactions")) {
-			return ["quick-checkout"];
+			return ["expense"];
 		}
 		if (pathname.startsWith("/reports")) {
-			return ["quick-top-sellers"];
+			return ["restock"];
 		}
 		if (pathname.startsWith("/dashboard")) {
-			return ["quick-checkout"];
+			return ["opening-stock"];
 		}
 		return [];
 	}, [pathname]);
-	const visiblePagePrimaryActions = pagePrimaryActions;
+
+	const showInMoreActions = (
+		action: QuickAction,
+	) =>
+		!favoriteActions.includes(action) &&
+		!pagePrimaryActions.includes(action);
+
+	const renderQuickActionButton = (
+		action: QuickAction,
+		variant?: "outline" | "secondary",
+	) => (
+		<ActionBtn
+			label={getQuickActionLabel(
+				action,
+				restockSeed.items.length,
+			)}
+			icon={getQuickActionIcon(action)}
+			variant={variant}
+			onClick={() => openAction(action)}
+			disabled={
+				action === "restock" &&
+				restockSeed.items.length === 0
+			}
+		/>
+	);
+
+	const visiblePagePrimaryActions =
+		pagePrimaryActions;
 	const visiblePinnedActions = React.useMemo(
 		() =>
 			favoriteActions.filter(
@@ -809,7 +760,8 @@ export function GlobalQuickActions() {
 						className="w-[calc(100vw-2rem)] max-w-sm p-2 md:w-80"
 					>
 						<div className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
-							{visiblePagePrimaryActions.length > 0 && (
+							{visiblePagePrimaryActions.length >
+								0 && (
 								<>
 									<p className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
 										This Page
@@ -828,32 +780,38 @@ export function GlobalQuickActions() {
 									)}
 								</>
 							)}
+
 							<p className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
 								Pinned
 							</p>
-							{visiblePinnedActions.length === 0 ? (
+							{visiblePinnedActions.length ===
+							0 ? (
 								<p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
-									No pinned actions. Use Pin Shortcuts to manage pins.
+									No pinned actions. Use Pin
+									Shortcuts to manage pins.
 								</p>
 							) : (
-								visiblePinnedActions.map((action) => (
-									<React.Fragment key={action}>
-										{renderQuickActionButton(
-											action,
-											action === "quick-checkout"
-												? "secondary"
-												: "outline",
-										)}
-									</React.Fragment>
-								))
+								visiblePinnedActions.map(
+									(action) => (
+										<React.Fragment key={action}>
+											{renderQuickActionButton(
+												action,
+												"outline",
+											)}
+										</React.Fragment>
+									),
+								)
 							)}
+
 							<Button
 								type="button"
 								variant="ghost"
 								size="sm"
 								className="justify-between px-2"
 								onClick={() =>
-									setShowPinShortcuts((prev) => !prev)
+									setShowPinShortcuts(
+										(prev) => !prev,
+									)
 								}
 							>
 								<span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -865,53 +823,60 @@ export function GlobalQuickActions() {
 									<ChevronDown className="h-4 w-4 text-muted-foreground" />
 								)}
 							</Button>
+
 							{showPinShortcuts && (
 								<div className="rounded-md border p-2">
 									<div className="grid grid-cols-1 gap-1">
-										{QUICK_ACTION_ALL.map((action) => {
-											const pinned =
-												favoriteActions.includes(
-													action,
+										{QUICK_ACTION_ALL.map(
+											(action) => {
+												const pinned =
+													favoriteActions.includes(
+														action,
+													);
+												return (
+													<Button
+														key={action}
+														type="button"
+														variant="ghost"
+														size="sm"
+														className="justify-between"
+														onClick={() =>
+															toggleFavoriteAction(
+																action,
+															)
+														}
+													>
+														<span className="truncate text-sm">
+															{getQuickActionLabel(
+																action,
+																restockSeed.items
+																	.length,
+															)}
+														</span>
+														<Star
+															className={`h-4 w-4 ${
+																pinned
+																	? "fill-current text-amber-500"
+																	: "text-muted-foreground"
+															}`}
+														/>
+													</Button>
 												);
-											return (
-												<Button
-													key={action}
-													type="button"
-													variant="ghost"
-													size="sm"
-													className="justify-between"
-													onClick={() =>
-														toggleFavoriteAction(
-															action,
-														)
-													}
-												>
-													<span className="truncate text-sm">
-														{getQuickActionLabel(
-															action,
-															restockSeed.items.length,
-														)}
-													</span>
-													<Star
-														className={`h-4 w-4 ${
-															pinned
-																? "fill-current text-amber-500"
-																: "text-muted-foreground"
-														}`}
-													/>
-												</Button>
-											);
-										})}
+											},
+										)}
 									</div>
 								</div>
 							)}
+
 							<Button
 								type="button"
 								variant="ghost"
 								size="sm"
 								className="justify-between px-2"
 								onClick={() =>
-									setShowMoreActions((prev) => !prev)
+									setShowMoreActions(
+										(prev) => !prev,
+									)
 								}
 							>
 								<span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -923,39 +888,9 @@ export function GlobalQuickActions() {
 									<ChevronDown className="h-4 w-4 text-muted-foreground" />
 								)}
 							</Button>
+
 							{showMoreActions && (
 								<div className="space-y-2 rounded-md border p-2">
-									<div className="space-y-2 pt-1">
-										<p className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-											Sales
-										</p>
-										<div className="space-y-2">
-											{showInMoreActions(
-												"quick-checkout",
-											) &&
-												renderQuickActionButton(
-													"quick-checkout",
-												)}
-											{showInMoreActions(
-												"quick-top-sellers",
-											) &&
-												renderQuickActionButton(
-													"quick-top-sellers",
-												)}
-											{showInMoreActions(
-												"quick-fast-repeat",
-											) &&
-												renderQuickActionButton(
-													"quick-fast-repeat",
-												)}
-											{showInMoreActions(
-												"account-sale",
-											) &&
-												renderQuickActionButton(
-													"account-sale",
-												)}
-										</div>
-									</div>
 									<div className="space-y-2">
 										<p className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
 											Customers
@@ -981,6 +916,7 @@ export function GlobalQuickActions() {
 												)}
 										</div>
 									</div>
+
 									<div className="space-y-2 pt-1">
 										<p className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
 											Suppliers
@@ -998,8 +934,21 @@ export function GlobalQuickActions() {
 												renderQuickActionButton(
 													"supplier-price",
 												)}
+											{showInMoreActions(
+												"purchase",
+											) &&
+												renderQuickActionButton(
+													"purchase",
+												)}
+											{showInMoreActions(
+												"restock",
+											) &&
+												renderQuickActionButton(
+													"restock",
+												)}
 										</div>
 									</div>
+
 									<div className="space-y-2 pt-1">
 										<p className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
 											Inventory
@@ -1038,130 +987,6 @@ export function GlobalQuickActions() {
 					if (!isOpen) setActiveAction(null);
 				}}
 			>
-				{activeAction === "quick-checkout" && (
-					<ActionDialog
-						title="Quick Checkout"
-						description={`Search, select, or scan and save paid sale for ${formatDateDisplay(date)}.`}
-					>
-						<QuickCheckoutForm
-							products={products}
-							quickProducts={
-								(report?.trends
-									?.topProducts ?? []
-								)
-									.map((item) =>
-										products.find(
-											(product) =>
-												product.id ===
-												item.productId,
-										),
-									)
-									.filter(
-										(
-											product,
-										): product is Product =>
-											Boolean(
-												product,
-											),
-									)
-									.map((product) => ({
-										id: product.id,
-										name: product.name,
-									}))
-							}
-							date={date}
-							mode="default"
-							onSuccess={onSaved}
-						/>
-					</ActionDialog>
-				)}
-				{activeAction === "quick-top-sellers" && (
-					<ActionDialog
-						title="Top Sellers Sale"
-						description={`Quick add from top sellers for ${formatDateDisplay(date)}.`}
-					>
-						<QuickCheckoutForm
-							products={products}
-							quickProducts={
-								(report?.trends
-									?.topProducts ?? []
-								)
-									.map((item) =>
-										products.find(
-											(product) =>
-												product.id ===
-												item.productId,
-										),
-									)
-									.filter(
-										(
-											product,
-										): product is Product =>
-											Boolean(
-												product,
-											),
-									)
-									.map((product) => ({
-										id: product.id,
-										name: product.name,
-									}))
-							}
-							date={date}
-							mode="top-sellers"
-							onSuccess={onSaved}
-						/>
-					</ActionDialog>
-				)}
-				{activeAction === "quick-fast-repeat" && (
-					<ActionDialog
-						title="Fast Repeat Sale"
-						description={`Repeat recent sales quickly for ${formatDateDisplay(date)}.`}
-					>
-						<QuickCheckoutForm
-							products={products}
-							quickProducts={
-								(report?.trends
-									?.topProducts ?? []
-								)
-									.map((item) =>
-										products.find(
-											(product) =>
-												product.id ===
-												item.productId,
-										),
-									)
-									.filter(
-										(
-											product,
-										): product is Product =>
-											Boolean(
-												product,
-											),
-									)
-									.map((product) => ({
-										id: product.id,
-										name: product.name,
-									}))
-							}
-							date={date}
-							mode="fast-repeat"
-							onSuccess={onSaved}
-						/>
-					</ActionDialog>
-				)}
-				{activeAction === "account-sale" && (
-					<ActionDialog
-						title="Add Sale to Account"
-						description={`Record a customer account sale for ${formatDateDisplay(date)}.`}
-					>
-						<AccountSaleForm
-							products={products}
-							customers={customers}
-							date={date}
-							onSuccess={onSaved}
-						/>
-					</ActionDialog>
-				)}
 				{activeAction === "account-payment" && (
 					<ActionDialog
 						title="Record Account Payment"
@@ -1174,6 +999,7 @@ export function GlobalQuickActions() {
 						/>
 					</ActionDialog>
 				)}
+
 				{activeAction === "expense" && (
 					<ActionDialog
 						title="Record Expense"
@@ -1185,16 +1011,18 @@ export function GlobalQuickActions() {
 						/>
 					</ActionDialog>
 				)}
+
 				{activeAction === "customer" && (
 					<ActionDialog
 						title="Add Customer"
-						description="Create a customer account for credit purchases and payments."
+						description="Create a customer account for credit tracking and payments."
 					>
 						<AddCustomerForm
 							onSuccess={onSaved}
 						/>
 					</ActionDialog>
 				)}
+
 				{activeAction === "product" && (
 					<ActionDialog
 						title="Add Product"
@@ -1203,14 +1031,18 @@ export function GlobalQuickActions() {
 						<AddProductForm onSuccess={onSaved} />
 					</ActionDialog>
 				)}
+
 				{activeAction === "supplier" && (
 					<ActionDialog
 						title="Add Supplier"
 						description="Create a supplier with contact details for purchase planning."
 					>
-						<AddSupplierForm onSuccess={onSaved} />
+						<AddSupplierForm
+							onSuccess={onSaved}
+						/>
 					</ActionDialog>
 				)}
+
 				{activeAction === "supplier-price" && (
 					<ActionDialog
 						title="Set Supplier Cost"
@@ -1223,6 +1055,7 @@ export function GlobalQuickActions() {
 						/>
 					</ActionDialog>
 				)}
+
 				{activeAction === "purchase" && (
 					<ActionDialog
 						title="Add Purchase"
@@ -1236,6 +1069,7 @@ export function GlobalQuickActions() {
 						/>
 					</ActionDialog>
 				)}
+
 				{activeAction === "restock" && (
 					<ActionDialog
 						title="Restock Low Stock"
@@ -1253,6 +1087,7 @@ export function GlobalQuickActions() {
 						/>
 					</ActionDialog>
 				)}
+
 				{activeAction === "adjustment" && (
 					<ActionDialog
 						title="Stock Adjustment"
@@ -1265,6 +1100,7 @@ export function GlobalQuickActions() {
 						/>
 					</ActionDialog>
 				)}
+
 				{activeAction === "opening-stock" && (
 					<ActionDialog
 						title="Add Existing Stock"
@@ -1358,2359 +1194,6 @@ function SaveFooter({
 	);
 }
 
-function QuickCheckoutForm({
-	products,
-	quickProducts,
-	mode = "default",
-	date,
-	onSuccess,
-}: {
-	products: Product[];
-	quickProducts: QuickProductLite[];
-	mode?: "default" | "top-sellers" | "fast-repeat";
-	date: string;
-	onSuccess: () => void;
-}) {
-	const [loading, setLoading] =
-		React.useState(false);
-	const [scanInput, setScanInput] =
-		React.useState("");
-	const [isMobilePicker, setIsMobilePicker] =
-		React.useState(false);
-	const [items, setItems] = React.useState<
-		ChargeItem[]
-	>([]);
-	const [paymentMethod, setPaymentMethod] =
-		React.useState<PaymentMethod>("CASH");
-	const [cashReceivedCents, setCashReceivedCents] =
-		React.useState(0);
-	const scanInputRef =
-		React.useRef<HTMLInputElement | null>(null);
-	const lastScanKeyTsRef = React.useRef(0);
-	const fastKeyStreakRef = React.useRef(0);
-	const autoAddTimerRef = React.useRef<
-		ReturnType<typeof setTimeout> | null
-	>(null);
-	const { data: txnHistory = [] } = useSWR<
-		DirectSaleHistoryLite[]
-	>(
-		`/api/transactions?date=${date}&limit=60&type=DIRECT_SALE&fields=quick`,
-		fetcher,
-	);
-	React.useEffect(() => {
-		pushQuickAddDebugLog("quick_checkout_form_mounted", {
-			mode,
-			date,
-			productsCount: products.length,
-		});
-	}, [mode, date, products.length]);
-
-	const productMap = React.useMemo(
-		() => new Map(products.map((p) => [p.id, p])),
-		[products],
-	);
-	const productByBarcode = React.useMemo(
-		() =>
-			new Map(
-				products
-					.filter((p) => Boolean(p.barcode))
-					.map((p) => [
-						String(p.barcode)
-							.trim()
-							.toLowerCase(),
-						p.id,
-					]),
-			),
-		[products],
-	);
-	const repeatTemplates = React.useMemo(() => {
-		const unique = new Map<
-			string,
-			DirectSaleHistoryLite
-		>();
-		for (const txn of txnHistory) {
-			if (
-				txn.type !== "DIRECT_SALE" ||
-				txn.isReversal ||
-				txn.isReversed
-			) {
-				continue;
-			}
-			const validItems = (txn.items ?? []).filter(
-				(item) =>
-					item.productId &&
-					(item.units ?? 0) > 0,
-			);
-			if (!validItems.length) continue;
-			const signature = [
-				txn.paymentMethod ?? "CASH",
-				...validItems
-					.map((item) =>
-						[item.productId, item.units].join(":"),
-					)
-					.sort(),
-			].join("|");
-			if (!unique.has(signature)) {
-				unique.set(signature, txn);
-			}
-			if (unique.size >= 8) break;
-		}
-		return Array.from(unique.values());
-	}, [txnHistory]);
-	const isJourneyMode = mode !== "default";
-	const [journeyStep, setJourneyStep] =
-		React.useState<1 | 2 | 3>(
-			isJourneyMode ? 1 : 2,
-		);
-	const [
-		selectedTopSellerIds,
-		setSelectedTopSellerIds,
-	] = React.useState<string[]>([]);
-	const [selectedTemplateId, setSelectedTemplateId] =
-		React.useState<string | null>(null);
-
-	const applyFastRepeat = React.useCallback(
-		(template: DirectSaleHistoryLite) => {
-			const nextItems = (template.items ?? [])
-				.filter(
-					(item) =>
-						item.productId &&
-						(item.units ?? 0) > 0,
-				)
-				.map((item) => ({
-					productId: item.productId,
-					units: String(item.units),
-				}));
-			if (!nextItems.length) {
-				toast.error(
-					"That sale has no valid items to repeat",
-				);
-				return;
-			}
-			setItems(nextItems);
-			setPaymentMethod(
-				template.paymentMethod ?? "CASH",
-			);
-			requestAnimationFrame(() =>
-				scanInputRef.current?.focus(),
-			);
-		},
-		[],
-	);
-
-	React.useEffect(() => {
-		if (mode === "default") {
-			setJourneyStep(2);
-			return;
-		}
-		setJourneyStep(1);
-		setSelectedTopSellerIds([]);
-		setSelectedTemplateId(null);
-	}, [mode]);
-
-	React.useEffect(() => {
-		if (!scanInputRef.current) return;
-		scanInputRef.current.focus();
-	}, []);
-
-	React.useEffect(() => {
-		return () => {
-			if (autoAddTimerRef.current) {
-				clearTimeout(autoAddTimerRef.current);
-			}
-		};
-	}, []);
-
-	const resolveProductIdFromInput = React.useCallback(
-		(rawInput: string) => {
-			const query = rawInput.trim().toLowerCase();
-			if (!query) return null;
-			const barcodeMatch = productByBarcode.get(query);
-			if (barcodeMatch) return barcodeMatch;
-			const exactNameMatch = products.find(
-				(product) =>
-					product.name.trim().toLowerCase() ===
-						query ||
-					product.id.toLowerCase() === query,
-			);
-			if (exactNameMatch) return exactNameMatch.id;
-			const startsWithMatch = products.find((product) =>
-				product.name.toLowerCase().startsWith(query),
-			);
-			if (startsWithMatch) return startsWithMatch.id;
-			const includesMatch = products.find((product) =>
-				product.name.toLowerCase().includes(query),
-			);
-			return includesMatch?.id ?? null;
-		},
-		[products, productByBarcode],
-	);
-	const resolveExactProductId = React.useCallback(
-		(rawInput: string) => {
-			const query = rawInput.trim().toLowerCase();
-			if (!query) return null;
-			const barcodeMatch = productByBarcode.get(query);
-			if (barcodeMatch) return barcodeMatch;
-			const exactNameMatch = products.find(
-				(product) =>
-					product.name.trim().toLowerCase() ===
-						query ||
-					product.id.toLowerCase() === query,
-			);
-			return exactNameMatch?.id ?? null;
-		},
-		[products, productByBarcode],
-	);
-	const matchedProductId = React.useMemo(
-		() => resolveProductIdFromInput(scanInput),
-		[resolveProductIdFromInput, scanInput],
-	);
-	const matchedProductName = matchedProductId
-		? productMap.get(matchedProductId)?.name ??
-			matchedProductId
-		: "";
-
-	const addByInput = React.useCallback(
-		(rawInput: string, unitsToAdd?: number) => {
-			const productId =
-				resolveProductIdFromInput(rawInput);
-			pushQuickAddDebugLog("quick_checkout_add_by_input", {
-				rawInput,
-				resolvedProductId: productId,
-				unitsToAdd: unitsToAdd ?? 1,
-			});
-			if (!productId) {
-				toast.error(
-					`No product match for "${rawInput.trim()}"`,
-				);
-				pushQuickAddDebugLog("quick_checkout_no_match", {
-					rawInput,
-				});
-				return;
-			}
-			const qty =
-				Math.max(
-					1,
-					unitsToAdd ?? 1,
-				) || 1;
-			setItems((prev) => {
-				const existingIndex = prev.findIndex(
-					(item) => item.productId === productId,
-				);
-				if (existingIndex >= 0) {
-					return prev.map((item, index) =>
-						index === existingIndex
-							? {
-									...item,
-									units: String(
-										(parseInt(
-											item.units,
-											10,
-										) || 0) + qty,
-									),
-							  }
-							: item,
-					);
-				}
-				return [
-					...prev,
-					{
-						productId,
-						units: String(qty),
-					},
-				];
-			});
-			setScanInput("");
-			requestAnimationFrame(() =>
-				scanInputRef.current?.focus(),
-			);
-		},
-		[resolveProductIdFromInput],
-	);
-	React.useEffect(() => {
-		if (typeof window === "undefined") return;
-		const mq = window.matchMedia(
-			"(max-width: 768px), (pointer: coarse)",
-		);
-		const apply = () => {
-			setIsMobilePicker(mq.matches);
-			pushQuickAddDebugLog("quick_checkout_mobile_state", {
-				matches: mq.matches,
-				innerWidth: window.innerWidth,
-				innerHeight: window.innerHeight,
-				devicePixelRatio: window.devicePixelRatio,
-				userAgent: navigator.userAgent,
-			});
-		};
-		apply();
-		mq.addEventListener("change", apply);
-		return () =>
-			mq.removeEventListener("change", apply);
-	}, []);
-	React.useEffect(() => {
-		if (!isMobilePicker) return;
-		if (!scanInput.trim()) return;
-		const exactProductId =
-			resolveExactProductId(scanInput);
-		pushQuickAddDebugLog("quick_checkout_mobile_debounce_check", {
-			scanInput,
-			exactProductId,
-			isMobilePicker,
-		});
-		if (!exactProductId) return;
-		const timer = setTimeout(() => {
-			pushQuickAddDebugLog(
-				"quick_checkout_mobile_debounce_auto_add",
-				{
-					scanInput,
-					exactProductId,
-				},
-			);
-			addByInput(scanInput);
-		}, 120);
-		return () => clearTimeout(timer);
-	}, [
-		isMobilePicker,
-		scanInput,
-		resolveExactProductId,
-		addByInput,
-	]);
-
-	const adjustUnits = (
-		productId: string,
-		delta: number,
-	) => {
-		setItems((prev) =>
-			prev
-				.map((item) => {
-					if (item.productId !== productId)
-						return item;
-					const nextUnits =
-						(parseInt(item.units, 10) || 0) + delta;
-					return {
-						...item,
-						units: String(nextUnits),
-					};
-				})
-				.filter(
-					(item) =>
-						(parseInt(item.units, 10) || 0) > 0,
-				),
-		);
-	};
-
-	const setUnits = (
-		productId: string,
-		nextUnits: number,
-	) => {
-		setItems((prev) =>
-			prev
-				.map((item) =>
-					item.productId === productId
-						? {
-								...item,
-								units: String(nextUnits),
-						  }
-						: item,
-				)
-				.filter(
-					(item) =>
-						(parseInt(item.units, 10) || 0) > 0,
-				),
-		);
-	};
-
-	const removeItem = (productId: string) => {
-		setItems((prev) =>
-			prev.filter(
-				(item) => item.productId !== productId,
-			),
-		);
-	};
-
-	const addProductUnits = React.useCallback(
-		(productId: string, unitsToAdd: number) => {
-			if (!productId || unitsToAdd <= 0) return;
-			setItems((prev) => {
-				const existingIndex = prev.findIndex(
-					(item) => item.productId === productId,
-				);
-				if (existingIndex >= 0) {
-					return prev.map((item, index) =>
-						index === existingIndex
-							? {
-									...item,
-									units: String(
-										(parseInt(
-											item.units,
-											10,
-										) || 0) + unitsToAdd,
-									),
-							  }
-							: item,
-					);
-				}
-				return [
-					...prev,
-					{
-						productId,
-						units: String(unitsToAdd),
-					},
-				];
-			});
-			requestAnimationFrame(() =>
-				scanInputRef.current?.focus(),
-			);
-		},
-		[],
-	);
-	const toggleTopSellerSelection = React.useCallback(
-		(productId: string) => {
-			setSelectedTopSellerIds((prev) =>
-				prev.includes(productId)
-					? prev.filter((id) => id !== productId)
-					: [...prev, productId],
-			);
-		},
-		[],
-	);
-	const continueTopSellersJourney = () => {
-		if (selectedTopSellerIds.length === 0) {
-			toast.error("Select at least one top seller");
-			return;
-		}
-		setItems(
-			selectedTopSellerIds.map((productId) => ({
-				productId,
-				units: "1",
-			})),
-		);
-		setJourneyStep(2);
-		requestAnimationFrame(() =>
-			scanInputRef.current?.focus(),
-		);
-	};
-	const startFastRepeatJourney = (
-		template: DirectSaleHistoryLite,
-	) => {
-		applyFastRepeat(template);
-		setSelectedTemplateId(template.id);
-		setJourneyStep(2);
-	};
-
-	const scheduleAutoAdd = React.useCallback(
-		(rawCode: string) => {
-			if (autoAddTimerRef.current) {
-				clearTimeout(autoAddTimerRef.current);
-			}
-			autoAddTimerRef.current = setTimeout(() => {
-				addByInput(rawCode);
-			}, 80);
-		},
-		[addByInput],
-	);
-
-	const totalCents = React.useMemo(
-		() =>
-			items.reduce((sum, item) => {
-				const units = parseInt(item.units, 10) || 0;
-				const unitPrice =
-					productMap.get(item.productId)
-						?.currentPriceCents ?? 0;
-				return sum + units * unitPrice;
-			}, 0),
-		[items, productMap],
-	);
-
-	const handleSubmit = async (
-		e: React.FormEvent,
-	) => {
-		e.preventDefault();
-		if (
-			paymentMethod === "CASH" &&
-			journeyStep !== 3
-		) {
-			setJourneyStep(3);
-			return;
-		}
-		if (
-			paymentMethod === "CASH" &&
-			cashReceivedCents < totalCents
-		) {
-			toast.error(
-				"Cash received is less than the sale total.",
-			);
-			return;
-		}
-		setLoading(true);
-
-		const validItems = items
-			.map((item) => ({
-				productId: item.productId,
-				units: parseInt(item.units, 10) || 0,
-			}))
-			.filter((item) => item.units > 0);
-
-		if (!validItems.length) {
-			toast.error("Scan at least one item");
-			setLoading(false);
-			return;
-		}
-
-		try {
-			const payload: Record<string, unknown> = {
-				date,
-				paymentMethod,
-				cashReceivedCents:
-					paymentMethod === "CASH"
-						? cashReceivedCents
-						: undefined,
-				items: validItems,
-			};
-			let queueResult = await postSaleWithOfflineQueue(
-				"/api/sales",
-				payload,
-			);
-			if (queueResult.queued) {
-				toast.success(
-					"Checkout saved.",
-				);
-				setItems([]);
-				setScanInput("");
-				setCashReceivedCents(0);
-				fastKeyStreakRef.current = 0;
-				setJourneyStep(isJourneyMode ? 1 : 2);
-				requestAnimationFrame(() =>
-					scanInputRef.current?.focus(),
-				);
-				onSuccess();
-				return;
-			}
-			let res = queueResult.response;
-			if (!res.ok) {
-				let errorBody = await res
-					.json()
-					.catch(() => ({}));
-				const errorCode =
-					getApiErrorCode(errorBody);
-				if (errorCode === "BELOW_COST") {
-					const proceed = window.confirm(
-						`${getApiErrorMessage(
-							errorBody,
-							"Below-cost sale detected.",
-						)}\n\nProceed with override?`,
-					);
-					if (proceed) {
-						payload.belowCostApproved = true;
-						payload.belowCostReason =
-							"User override from quick checkout";
-						queueResult =
-							await postSaleWithOfflineQueue(
-								"/api/sales",
-								payload,
-							);
-						if (queueResult.queued) {
-							toast.success(
-								"Checkout saved.",
-							);
-							setItems([]);
-							setScanInput("");
-							setCashReceivedCents(0);
-							fastKeyStreakRef.current = 0;
-							setJourneyStep(
-								isJourneyMode
-									? 1
-									: 2,
-							);
-							requestAnimationFrame(() =>
-								scanInputRef.current?.focus(),
-							);
-							onSuccess();
-							return;
-						}
-						res = queueResult.response;
-						if (!res.ok) {
-							errorBody =
-								await res
-									.json()
-									.catch(
-										() => ({}),
-									);
-						}
-					}
-				}
-				if (!res.ok) {
-				throw new Error(
-					getApiErrorMessage(
-						errorBody,
-						"Failed to complete checkout",
-					),
-				);
-				}
-			}
-			toast.success("Checkout saved");
-			setItems([]);
-			setScanInput("");
-			setCashReceivedCents(0);
-			fastKeyStreakRef.current = 0;
-			setJourneyStep(isJourneyMode ? 1 : 2);
-			requestAnimationFrame(() =>
-				scanInputRef.current?.focus(),
-			);
-			onSuccess();
-		} catch (err) {
-			toast.error(
-				err instanceof Error
-					? err.message
-					: "Failed to complete checkout",
-			);
-		} finally {
-			setLoading(false);
-		}
-	};
-
-	return (
-		<form
-			onSubmit={handleSubmit}
-			className="flex flex-col h-[60vh]"
-		>
-			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
-				{isJourneyMode && journeyStep === 1 ? (
-					<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-						<div className="rounded-md border p-3">
-							<p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-								Step 1 of 2
-							</p>
-							<p className="text-sm font-medium">
-								{mode === "fast-repeat"
-									? "Choose a recent sale"
-									: "Choose top-seller items"}
-							</p>
-							<p className="text-xs text-muted-foreground">
-								{mode === "fast-repeat"
-									? "Select one sale template, then review and adjust items."
-									: "Pick items to start from, then review and adjust quantities."}
-							</p>
-						</div>
-
-						{mode === "fast-repeat" ? (
-							repeatTemplates.length === 0 ? (
-								<p className="rounded-md border p-3 text-sm text-muted-foreground">
-									No repeatable sales yet.
-								</p>
-							) : (
-								repeatTemplates.map((template) => {
-									const itemCount =
-										(template.items ?? []).length;
-									const firstItemName =
-										productMap.get(
-											template.items?.[0]
-												?.productId ?? "",
-										)?.name ?? "Sale";
-									const selected =
-										selectedTemplateId === template.id;
-									return (
-										<button
-											key={template.id}
-											type="button"
-											className={`w-full rounded-md border p-3 text-left ${
-												selected
-													? "border-amber-500 bg-amber-50/40"
-													: "hover:bg-accent/40"
-											}`}
-											onClick={() =>
-												startFastRepeatJourney(
-													template,
-												)
-											}
-										>
-											<p className="font-medium">
-												{firstItemName}
-												{itemCount > 1
-													? ` +${itemCount - 1}`
-													: ""}
-											</p>
-											<p className="text-xs text-muted-foreground">
-												{template.paymentMethod ?? "CASH"} |{" "}
-												{itemCount} item
-												{itemCount === 1 ? "" : "s"}
-											</p>
-										</button>
-									);
-								})
-							)
-						) : quickProducts.length === 0 ? (
-							<p className="rounded-md border p-3 text-sm text-muted-foreground">
-								No top sellers found for this date.
-							</p>
-						) : (
-							<div className="space-y-2">
-								{quickProducts.map((product) => {
-									const selected =
-										selectedTopSellerIds.includes(
-											product.id,
-										);
-									return (
-										<button
-											key={product.id}
-											type="button"
-											className={`w-full rounded-md border px-3 py-2 text-left ${
-												selected
-													? "border-amber-500 bg-amber-50/40"
-													: "hover:bg-accent/40"
-											}`}
-											onClick={() =>
-												toggleTopSellerSelection(
-													product.id,
-												)
-											}
-										>
-											{product.name}
-										</button>
-									);
-								})}
-							</div>
-						)}
-						{mode === "top-sellers" && (
-							<div className="shrink-0 border-t pt-3">
-								<Button
-									type="button"
-									className="w-full"
-									onClick={continueTopSellersJourney}
-								>
-									Continue to Edit
-								</Button>
-							</div>
-						)}
-					</div>
-				) : journeyStep === 3 ? (
-					<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-						<div className="rounded-md border p-3">
-							<p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-								Cash Settlement
-							</p>
-							<p className="text-sm font-medium">
-								Enter cash received
-							</p>
-							<p className="text-xs text-muted-foreground">
-								Total due: {formatZAR(totalCents)}
-							</p>
-						</div>
-						<CashChangeCalculator
-							totalCents={totalCents}
-							cashReceivedCents={cashReceivedCents}
-							onCashReceivedChange={setCashReceivedCents}
-						/>
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							onClick={() => setJourneyStep(2)}
-						>
-							Back to Items
-						</Button>
-					</div>
-				) : (
-					<>
-				<div className="space-y-2">
-					<Label>Search / Select / Scan Product</Label>
-					<div className="flex gap-2">
-						<Input
-							ref={scanInputRef}
-							value={scanInput}
-							list="quick-checkout-product-options"
-							onChange={(e) => {
-								const nextValue =
-									e.target.value;
-								const nativeEvent =
-									e.nativeEvent as Event & {
-										inputType?: string;
-									};
-								const inputType =
-									nativeEvent.inputType ?? "";
-								const now = Date.now();
-								const addedChars =
-									nextValue.length -
-									scanInput.length;
-								const exactProductId =
-									resolveExactProductId(
-										nextValue,
-									);
-								const cameFromPickerLikeAction =
-									inputType ===
-										"insertReplacementText" ||
-									inputType ===
-										"insertFromPaste" ||
-									addedChars > 1 ||
-									(scanInput.length > 0 &&
-										nextValue.length > 0 &&
-										!nextValue.startsWith(
-											scanInput,
-										));
-								pushQuickAddDebugLog(
-									"quick_checkout_input_change",
-									{
-										prevValue: scanInput,
-										nextValue,
-										inputType,
-										addedChars,
-										exactProductId,
-										isMobilePicker,
-										cameFromPickerLikeAction,
-										fastKeyStreak:
-											fastKeyStreakRef.current,
-									},
-								);
-
-								if (addedChars === 1) {
-									const delta =
-										now -
-										lastScanKeyTsRef.current;
-									if (delta > 0 && delta < 35) {
-										fastKeyStreakRef.current += 1;
-									} else {
-										fastKeyStreakRef.current = 0;
-									}
-									if (
-										fastKeyStreakRef.current >=
-											5 &&
-										nextValue.trim().length >=
-											6
-									) {
-										pushQuickAddDebugLog(
-											"quick_checkout_scan_burst_detected",
-											{
-												nextValue,
-												fastKeyStreak:
-													fastKeyStreakRef.current,
-											},
-										);
-										scheduleAutoAdd(
-											nextValue,
-										);
-									}
-								} else if (
-									nextValue.length === 0
-								) {
-									fastKeyStreakRef.current = 0;
-								}
-
-								lastScanKeyTsRef.current = now;
-								setScanInput(nextValue);
-								if (
-									(isMobilePicker ||
-										cameFromPickerLikeAction) &&
-									exactProductId &&
-									nextValue.trim().length > 0
-								) {
-									pushQuickAddDebugLog(
-										"quick_checkout_immediate_auto_add",
-										{
-											nextValue,
-											exactProductId,
-											isMobilePicker,
-											cameFromPickerLikeAction,
-										},
-									);
-									addByInput(nextValue);
-								}
-							}}
-							onKeyDown={(e) => {
-								if (e.key !== "Enter") return;
-								e.preventDefault();
-								pushQuickAddDebugLog(
-									"quick_checkout_enter_pressed",
-									{ scanInput },
-								);
-								addByInput(scanInput);
-							}}
-							placeholder="Type name or scan barcode, then Enter"
-						/>
-						<datalist id="quick-checkout-product-options">
-							{products.flatMap((product) => [
-								<option
-									key={`${product.id}-name`}
-									value={product.name}
-								/>,
-								...(product.barcode
-									? [
-											<option
-												key={`${product.id}-barcode`}
-												value={String(
-													product.barcode,
-												)}
-											/>,
-									  ]
-									: []),
-							])}
-						</datalist>
-					</div>
-					{scanInput.trim().length > 0 &&
-						(matchedProductId ? (
-							<p className="text-xs text-emerald-700">
-								Selected:{" "}
-								<span className="font-medium">
-									{matchedProductName}
-								</span>
-								{" - "}Press Enter to add.
-							</p>
-						) : (
-							<p className="text-xs text-muted-foreground">
-								No product match yet.
-							</p>
-						))}
-					{items.length > 0 && (
-						<p className="text-xs text-muted-foreground">
-							Type, select, or scan to add.
-						</p>
-					)}
-				</div>
-
-				<div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-					<Label>Items</Label>
-					{items.length === 0 ? (
-						<p className="rounded-md border p-3 text-sm text-muted-foreground">
-							No items yet. Scan a barcode to add.
-						</p>
-					) : (
-						items.map((item) => {
-							const product =
-								productMap.get(item.productId);
-							const units =
-								parseInt(item.units, 10) || 0;
-							const subtotalCents =
-								(product?.currentPriceCents ??
-									0) * units;
-							return (
-								<div
-									key={item.productId}
-									className="rounded-md border p-2"
-								>
-									<div className="mb-2 flex items-start justify-between gap-2">
-										<p className="font-medium">
-											{product?.name ??
-												item.productId}
-										</p>
-										<p className="text-sm font-semibold">
-											{formatZAR(subtotalCents)}
-										</p>
-									</div>
-									<div className="grid grid-cols-4 gap-2">
-										<Button
-											type="button"
-											variant="outline"
-											size="sm"
-											onClick={() =>
-												adjustUnits(
-													item.productId,
-													-1,
-												)
-											}
-										>
-											-
-										</Button>
-										<Input
-											value={units}
-											onChange={(e) => {
-												const next =
-													parseInt(
-														e.target.value,
-														10,
-													) || 0;
-												setUnits(
-													item.productId,
-													next,
-												);
-											}}
-											className="text-center"
-										/>
-										<Button
-											type="button"
-											variant="outline"
-											size="sm"
-											onClick={() =>
-												adjustUnits(
-													item.productId,
-													1,
-												)
-											}
-										>
-											+
-										</Button>
-										<Button
-											type="button"
-											variant="destructive"
-											size="sm"
-											onClick={() =>
-												removeItem(
-													item.productId,
-												)
-											}
-										>
-											<Trash2 className="h-4 w-4" />
-										</Button>
-									</div>
-									<p className="mt-2 text-[11px] text-muted-foreground">
-										Subtotal {formatZAR(subtotalCents)}
-									</p>
-								</div>
-							);
-						})
-					)}
-				</div>
-				{isJourneyMode && (
-					<div className="flex justify-start">
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							onClick={() => setJourneyStep(1)}
-						>
-							Back to Selection
-						</Button>
-					</div>
-				)}
-				<div className="grid grid-cols-2 gap-3">
-					<div className="space-y-2">
-						<Label>Payment Method</Label>
-						<Select
-							value={paymentMethod}
-							onValueChange={(v) =>
-								setPaymentMethod(
-									v as PaymentMethod,
-								)
-							}
-						>
-							<SelectTrigger>
-								<SelectValue placeholder="Method" />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="CASH">
-									Cash
-								</SelectItem>
-								<SelectItem value="CARD">
-									Card
-								</SelectItem>
-								<SelectItem value="EFT">
-									EFT
-								</SelectItem>
-							</SelectContent>
-						</Select>
-					</div>
-					<div className="rounded-md border p-3">
-						<p className="text-xs text-muted-foreground">
-							Total
-						</p>
-						<p className="text-lg font-semibold">
-							{formatZAR(totalCents)}
-						</p>
-					</div>
-				</div>
-					</>
-				)}
-			</div>
-			<SaveFooter
-				disabled={
-					loading || items.length === 0
-				}
-				loading={loading}
-				label={
-					journeyStep === 3 &&
-					paymentMethod === "CASH"
-						? "Confirm Cash Checkout"
-						: "Checkout"
-				}
-			/>
-		</form>
-	);
-}
-
-function QuickAddSaleItems({
-	items,
-	setItems,
-	products,
-}: {
-	items: ChargeItem[];
-	setItems: React.Dispatch<
-		React.SetStateAction<ChargeItem[]>
-	>;
-	products: Product[];
-}) {
-	const [scanInput, setScanInput] =
-		React.useState("");
-	const [isMobilePicker, setIsMobilePicker] =
-		React.useState(false);
-	const lastScanKeyTsRef =
-		React.useRef<number>(0);
-	const fastKeyStreakRef =
-		React.useRef(0);
-	const autoAddTimerRef = React.useRef<
-		ReturnType<typeof setTimeout> | undefined
-	>(undefined);
-	const scanInputRef =
-		React.useRef<HTMLInputElement | null>(null);
-	const logQuickAdd = React.useCallback(
-		(
-			event: string,
-			meta?: Record<string, unknown>,
-		) => {
-			pushQuickAddDebugLog(event, meta);
-		},
-		[],
-	);
-	React.useEffect(() => {
-		logQuickAdd("quick_add_sale_items_mounted", {
-			productsCount: products.length,
-			itemsCount: items.length,
-		});
-	}, [logQuickAdd, products.length, items.length]);
-
-	const productMap = React.useMemo(
-		() => new Map(products.map((p) => [p.id, p])),
-		[products],
-	);
-	const productByBarcode = React.useMemo(
-		() =>
-			new Map(
-				products
-					.filter((p) => Boolean(p.barcode))
-					.map((p) => [
-						String(p.barcode)
-							.trim()
-							.toLowerCase(),
-						p.id,
-					]),
-			),
-		[products],
-	);
-
-	const addUnits = React.useCallback(
-		(productId: string, unitsToAdd: number) => {
-			if (!productId || unitsToAdd <= 0) return;
-			logQuickAdd("add_units_called", {
-				productId,
-				unitsToAdd,
-			});
-			setItems((prev) => {
-				const existingIndex = prev.findIndex(
-					(item) => item.productId === productId,
-				);
-				if (existingIndex >= 0) {
-					return prev.map((item, index) =>
-						index === existingIndex
-							? {
-									...item,
-									units: String(
-										(parseInt(
-											item.units,
-											10,
-										) || 0) + unitsToAdd,
-									),
-							  }
-							: item,
-					);
-				}
-				return [
-					...prev,
-					{
-						productId,
-						units: String(unitsToAdd),
-					},
-				];
-			});
-		},
-		[setItems, logQuickAdd],
-	);
-
-	const resolveProductIdFromInput = React.useCallback(
-		(rawInput: string) => {
-			const query = rawInput.trim().toLowerCase();
-			if (!query) return null;
-			const barcodeMatch = productByBarcode.get(query);
-			if (barcodeMatch) return barcodeMatch;
-			const exactNameMatch = products.find(
-				(product) =>
-					product.name.trim().toLowerCase() ===
-						query ||
-					product.id.toLowerCase() === query,
-			);
-			if (exactNameMatch) return exactNameMatch.id;
-			const startsWithMatch = products.find((product) =>
-				product.name.toLowerCase().startsWith(query),
-			);
-			if (startsWithMatch) return startsWithMatch.id;
-			const includesMatch = products.find((product) =>
-				product.name.toLowerCase().includes(query),
-			);
-			return includesMatch?.id ?? null;
-		},
-		[products, productByBarcode],
-	);
-	const resolveExactProductId = React.useCallback(
-		(rawInput: string) => {
-			const query = rawInput.trim().toLowerCase();
-			if (!query) return null;
-			const barcodeMatch = productByBarcode.get(query);
-			if (barcodeMatch) return barcodeMatch;
-			const exactNameMatch = products.find(
-				(product) =>
-					product.name.trim().toLowerCase() ===
-						query ||
-					product.id.toLowerCase() === query,
-			);
-			return exactNameMatch?.id ?? null;
-		},
-		[products, productByBarcode],
-	);
-	const matchedProductId = React.useMemo(
-		() => resolveProductIdFromInput(scanInput),
-		[resolveProductIdFromInput, scanInput],
-	);
-	const matchedProductName = matchedProductId
-		? productMap.get(matchedProductId)?.name ??
-			matchedProductId
-		: "";
-
-	const addByInput = React.useCallback(
-		(rawInput: string) => {
-			const productId =
-				resolveProductIdFromInput(rawInput);
-			logQuickAdd("add_by_input_attempt", {
-				rawInput,
-				resolvedProductId: productId,
-			});
-			if (!productId) {
-				toast.error(
-					`No product match for "${rawInput.trim()}"`,
-				);
-				logQuickAdd("add_by_input_no_match", {
-					rawInput,
-				});
-				return;
-			}
-			const qty =
-				1;
-			addUnits(productId, qty);
-			setScanInput("");
-			fastKeyStreakRef.current = 0;
-			requestAnimationFrame(() =>
-				scanInputRef.current?.focus(),
-			);
-		},
-		[
-			addUnits,
-			resolveProductIdFromInput,
-			logQuickAdd,
-		],
-	);
-
-	React.useEffect(() => {
-		return () => {
-			if (autoAddTimerRef.current) {
-				clearTimeout(autoAddTimerRef.current);
-			}
-		};
-	}, []);
-	React.useEffect(() => {
-		if (typeof window === "undefined") return;
-		const mq = window.matchMedia(
-			"(max-width: 768px), (pointer: coarse)",
-		);
-		const apply = () => {
-			setIsMobilePicker(mq.matches);
-			logQuickAdd("mobile_picker_state", {
-				matches: mq.matches,
-				innerWidth: window.innerWidth,
-				innerHeight: window.innerHeight,
-				screenWidth: window.screen.width,
-				screenHeight: window.screen.height,
-				devicePixelRatio:
-					window.devicePixelRatio,
-				maxTouchPoints:
-					navigator.maxTouchPoints,
-				userAgent: navigator.userAgent,
-			});
-		};
-		logQuickAdd("mobile_picker_init", {
-			query:
-				"(max-width: 768px), (pointer: coarse)",
-		});
-		apply();
-		mq.addEventListener("change", apply);
-		return () =>
-			mq.removeEventListener("change", apply);
-	}, [logQuickAdd]);
-	React.useEffect(() => {
-		if (!isMobilePicker) return;
-		if (!scanInput.trim()) return;
-		const exactProductId =
-			resolveExactProductId(scanInput);
-		logQuickAdd("mobile_debounce_check", {
-			isMobilePicker,
-			scanInput,
-			exactProductId,
-		});
-		if (!exactProductId) return;
-
-		const timer = setTimeout(() => {
-			logQuickAdd("mobile_debounce_auto_add", {
-				scanInput,
-				exactProductId,
-			});
-			addUnits(exactProductId, 1);
-			setScanInput("");
-			fastKeyStreakRef.current = 0;
-		}, 120);
-
-		return () => clearTimeout(timer);
-	}, [
-		isMobilePicker,
-		scanInput,
-		resolveExactProductId,
-		addUnits,
-		logQuickAdd,
-	]);
-
-	const scheduleAutoAdd = React.useCallback(
-		(rawCode: string) => {
-			if (autoAddTimerRef.current) {
-				clearTimeout(autoAddTimerRef.current);
-			}
-			autoAddTimerRef.current = setTimeout(() => {
-				addByInput(rawCode);
-			}, 80);
-		},
-		[addByInput],
-	);
-
-	const adjustUnits = (productId: string, delta: number) => {
-		setItems((prev) =>
-			prev
-				.map((item) => {
-					if (item.productId !== productId) return item;
-					const next =
-						(parseInt(item.units, 10) || 0) + delta;
-					return { ...item, units: String(next) };
-				})
-				.filter(
-					(item) =>
-						(parseInt(item.units, 10) || 0) > 0,
-				),
-		);
-	};
-
-	const setUnits = (productId: string, nextUnits: number) => {
-		setItems((prev) =>
-			prev
-				.map((item) =>
-					item.productId === productId
-						? {
-								...item,
-								units: String(nextUnits),
-						  }
-						: item,
-				)
-				.filter(
-					(item) =>
-						(parseInt(item.units, 10) || 0) > 0,
-				),
-		);
-	};
-
-	const removeItem = (productId: string) => {
-		setItems((prev) =>
-			prev.filter(
-				(item) => item.productId !== productId,
-			),
-		);
-	};
-
-	return (
-		<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-			<div className="space-y-2">
-				<Label>Search / Select / Scan Product</Label>
-				<div className="flex gap-2">
-					<Input
-						ref={scanInputRef}
-						value={scanInput}
-						list="quick-sale-product-options"
-						onChange={(e) => {
-							const nextValue =
-								e.target.value;
-							const nativeEvent =
-								e.nativeEvent as Event & {
-									inputType?: string;
-								};
-							const inputType =
-								nativeEvent.inputType ?? "";
-							const now = Date.now();
-							const addedChars =
-								nextValue.length -
-								scanInput.length;
-							const exactProductId =
-								resolveExactProductId(
-									nextValue,
-								);
-							const cameFromPickerLikeAction =
-								inputType ===
-									"insertReplacementText" ||
-								inputType ===
-									"insertFromPaste" ||
-								addedChars > 1 ||
-								(scanInput.length > 0 &&
-									nextValue.length > 0 &&
-									!nextValue.startsWith(
-										scanInput,
-									));
-							logQuickAdd("input_change", {
-								prevValue: scanInput,
-								nextValue,
-								inputType,
-								addedChars,
-								exactProductId,
-								isMobilePicker,
-								cameFromPickerLikeAction,
-								fastKeyStreak:
-									fastKeyStreakRef.current,
-								lastScanDeltaMs:
-									lastScanKeyTsRef.current > 0
-										? now -
-											lastScanKeyTsRef.current
-										: null,
-							});
-
-							if (addedChars === 1) {
-								const delta =
-									now -
-									lastScanKeyTsRef.current;
-								if (delta > 0 && delta < 35) {
-									fastKeyStreakRef.current += 1;
-								} else {
-									fastKeyStreakRef.current = 0;
-								}
-								if (
-									fastKeyStreakRef.current >=
-										5 &&
-									nextValue.trim().length >= 6
-								) {
-									logQuickAdd(
-										"scan_burst_detected",
-										{
-											nextValue,
-											fastKeyStreak:
-												fastKeyStreakRef.current,
-										},
-									);
-									scheduleAutoAdd(
-										nextValue,
-									);
-								}
-							} else if (
-								nextValue.length === 0
-							) {
-								fastKeyStreakRef.current = 0;
-							}
-
-							lastScanKeyTsRef.current = now;
-							setScanInput(nextValue);
-							if (
-								(isMobilePicker ||
-									cameFromPickerLikeAction) &&
-								exactProductId &&
-								nextValue.trim().length > 0
-							) {
-								logQuickAdd(
-									"immediate_auto_add_from_picker",
-									{
-										nextValue,
-										exactProductId,
-										isMobilePicker,
-										cameFromPickerLikeAction,
-									},
-								);
-								addUnits(exactProductId, 1);
-								setScanInput("");
-								fastKeyStreakRef.current = 0;
-							}
-						}}
-						onKeyDown={(e) => {
-							if (e.key !== "Enter") return;
-							e.preventDefault();
-							logQuickAdd("enter_pressed", {
-								scanInput,
-							});
-							addByInput(scanInput);
-						}}
-						placeholder="Type name or scan barcode, then Enter"
-					/>
-					<datalist id="quick-sale-product-options">
-						{products.flatMap((product) => [
-							<option
-								key={`${product.id}-name`}
-								value={product.name}
-							/>,
-							...(product.barcode
-								? [
-										<option
-											key={`${product.id}-barcode`}
-											value={String(
-												product.barcode,
-											)}
-										/>,
-								  ]
-								: []),
-						])}
-					</datalist>
-				</div>
-				{scanInput.trim().length > 0 &&
-					(matchedProductId ? (
-						<p className="text-xs text-emerald-700">
-							Selected:{" "}
-							<span className="font-medium">
-								{matchedProductName}
-							</span>
-							{" - "}Press Enter to add.
-						</p>
-					) : (
-						<p className="text-xs text-muted-foreground">
-							No product match yet.
-						</p>
-					))}
-				{items.length > 0 && (
-					<p className="text-xs text-muted-foreground">
-						Type, select, or scan to add.
-					</p>
-				)}
-			</div>
-
-			<div className="space-y-2">
-				<Label>Items</Label>
-				{items.length === 0 ? (
-					<p className="rounded-md border p-3 text-sm text-muted-foreground">
-						No items yet. Scan barcode or add by product.
-					</p>
-				) : (
-					items.map((item) => {
-						const product =
-							productMap.get(item.productId);
-						const units =
-							parseInt(item.units, 10) || 0;
-						const subtotalCents =
-							(product?.currentPriceCents ?? 0) *
-							units;
-						return (
-							<div
-								key={item.productId}
-								className="rounded-md border p-2"
-							>
-								<div className="mb-2 flex items-start justify-between gap-2">
-									<p className="font-medium">
-										{product?.name ??
-											item.productId}
-									</p>
-									<p className="text-sm font-semibold">
-										{formatZAR(subtotalCents)}
-									</p>
-								</div>
-								<div className="grid grid-cols-4 gap-2">
-									<Button
-										type="button"
-										variant="outline"
-										size="sm"
-										onClick={() =>
-											adjustUnits(
-												item.productId,
-												-1,
-											)
-										}
-									>
-										-
-									</Button>
-									<Input
-										value={units}
-										onChange={(e) => {
-											const next =
-												parseInt(
-													e.target.value,
-													10,
-												) || 0;
-											setUnits(
-												item.productId,
-												next,
-											);
-										}}
-										className="text-center"
-									/>
-									<Button
-										type="button"
-										variant="outline"
-										size="sm"
-										onClick={() =>
-											adjustUnits(
-												item.productId,
-												1,
-											)
-										}
-									>
-										+
-									</Button>
-									<Button
-										type="button"
-										variant="destructive"
-										size="sm"
-										onClick={() =>
-											removeItem(
-												item.productId,
-											)
-										}
-									>
-										<Trash2 className="h-4 w-4" />
-									</Button>
-								</div>
-								<p className="mt-2 text-xs text-muted-foreground">
-									Subtotal {formatZAR(subtotalCents)}
-								</p>
-							</div>
-						);
-					})
-				)}
-			</div>
-		</div>
-	);
-}
-
-function DirectSaleForm({
-	products,
-	date,
-	onSuccess,
-}: {
-	products: Product[];
-	date: string;
-	onSuccess: () => void;
-}) {
-	const [loading, setLoading] =
-		React.useState(false);
-	const [items, setItems] = React.useState<
-		ChargeItem[]
-	>([]);
-	const [paymentMethod, setPaymentMethod] =
-		React.useState<PaymentMethod | "">("");
-	const [cashReceivedCents, setCashReceivedCents] =
-		React.useState(0);
-	const [cashStep, setCashStep] =
-		React.useState(false);
-	const [note, setNote] = React.useState("");
-	const [showNote, setShowNote] =
-		React.useState(false);
-	const productPriceById = React.useMemo(
-		() =>
-			new Map(
-				products.map((product) => [
-					product.id,
-					product.currentPriceCents ?? 0,
-				]),
-			),
-		[products],
-	);
-	const totalDueCents = React.useMemo(
-		() =>
-			items.reduce((sum, item) => {
-				const units =
-					parseInt(item.units, 10) || 0;
-				const unitPrice =
-					productPriceById.get(item.productId) ??
-					0;
-				return sum + units * unitPrice;
-			}, 0),
-		[items, productPriceById],
-	);
-	React.useEffect(() => {
-		if (paymentMethod !== "CASH") {
-			setCashStep(false);
-		}
-	}, [paymentMethod]);
-
-	const handleSubmit = async (
-		e: React.FormEvent,
-	) => {
-		e.preventDefault();
-		if (paymentMethod === "CASH" && !cashStep) {
-			setCashStep(true);
-			return;
-		}
-		if (
-			paymentMethod === "CASH" &&
-			cashReceivedCents < totalDueCents
-		) {
-			toast.error(
-				"Cash received is less than the sale total.",
-			);
-			return;
-		}
-		setLoading(true);
-		const validItems = items
-			.filter(
-				(item) => item.productId && item.units,
-			)
-			.map((item) => ({
-				productId: item.productId,
-				units: parseInt(item.units, 10) || 0,
-			}))
-			.filter((item) => item.units > 0);
-		if (!validItems.length) {
-			toast.error(
-				"Please add at least one item with quantities and line total price",
-			);
-			setLoading(false);
-			return;
-		}
-		try {
-			const payload: Record<string, unknown> = {
-				date,
-				paymentMethod,
-				cashReceivedCents:
-					paymentMethod === "CASH"
-						? cashReceivedCents
-						: undefined,
-				items: validItems,
-				note:
-					showNote && note ? note : undefined,
-			};
-			let queueResult = await postSaleWithOfflineQueue(
-				"/api/sales",
-				payload,
-			);
-			if (queueResult.queued) {
-				toast.success(
-					"Direct sale saved.",
-				);
-				setCashReceivedCents(0);
-				setCashStep(false);
-				onSuccess();
-				return;
-			}
-			let res = queueResult.response;
-			if (!res.ok) {
-				let errorBody = await res
-					.json()
-					.catch(() => ({}));
-				const errorCode =
-					getApiErrorCode(errorBody);
-				if (errorCode === "BELOW_COST") {
-					const proceed = window.confirm(
-						`${getApiErrorMessage(
-							errorBody,
-							"Below-cost sale detected.",
-						)}\n\nProceed with override?`,
-					);
-					if (proceed) {
-						payload.belowCostApproved = true;
-						payload.belowCostReason =
-							"User override from quick direct sale";
-						queueResult =
-							await postSaleWithOfflineQueue(
-								"/api/sales",
-								payload,
-							);
-						if (queueResult.queued) {
-							toast.success(
-								"Direct sale saved.",
-							);
-							setCashReceivedCents(0);
-							setCashStep(false);
-							onSuccess();
-							return;
-						}
-						res = queueResult.response;
-						if (!res.ok) {
-							errorBody =
-								await res
-									.json()
-									.catch(
-										() => ({}),
-									);
-						}
-					}
-				}
-				if (!res.ok) {
-				throw new Error(
-					getApiErrorMessage(
-						errorBody,
-						"Failed to save direct sale",
-					),
-				);
-				}
-			}
-			toast.success("Direct sale saved");
-			setCashReceivedCents(0);
-			setCashStep(false);
-			onSuccess();
-		} catch (err) {
-			toast.error(
-				err instanceof Error
-					? err.message
-					: "Failed to save direct sale",
-			);
-		} finally {
-			setLoading(false);
-		}
-	};
-
-	return (
-		<form
-			onSubmit={handleSubmit}
-			className="flex flex-col h-[60vh]"
-		>
-			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
-				{cashStep && paymentMethod === "CASH" ? (
-					<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-						<div className="rounded-md border p-3">
-							<p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-								Cash Settlement
-							</p>
-							<p className="text-sm font-medium">
-								Enter cash received
-							</p>
-							<p className="text-xs text-muted-foreground">
-								Total due: {formatZAR(totalDueCents)}
-							</p>
-						</div>
-						<CashChangeCalculator
-							totalCents={totalDueCents}
-							cashReceivedCents={cashReceivedCents}
-							onCashReceivedChange={setCashReceivedCents}
-						/>
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							onClick={() => setCashStep(false)}
-						>
-							Back to Items
-						</Button>
-					</div>
-				) : (
-					<>
-						<QuickAddSaleItems
-							items={items}
-							setItems={setItems}
-							products={products}
-						/>
-						<div className="space-y-3">
-							<Label>Payment Method</Label>
-							<Select
-								value={paymentMethod}
-								onValueChange={(v) =>
-									setPaymentMethod(v as PaymentMethod)
-								}
-							>
-								<SelectTrigger>
-									<SelectValue placeholder="Select method" />
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="CASH">
-										Cash
-									</SelectItem>
-									<SelectItem value="CARD">
-										Card
-									</SelectItem>
-									<SelectItem value="EFT">
-										EFT
-									</SelectItem>
-								</SelectContent>
-							</Select>
-						</div>
-						<div className="space-y-2">
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								className="w-full"
-								onClick={() =>
-									setShowNote((prev) => !prev)
-								}
-							>
-								{showNote ? "Hide Note" : "Add Note"}
-							</Button>
-							{showNote && (
-								<Textarea
-									value={note}
-									onChange={(e) =>
-										setNote(e.target.value)
-									}
-									placeholder="Any notes..."
-									rows={2}
-								/>
-							)}
-						</div>
-					</>
-				)}
-			</div>
-			<SaveFooter
-				disabled={
-					loading ||
-					!paymentMethod ||
-					items.length === 0
-				}
-				loading={loading}
-				label={
-					cashStep && paymentMethod === "CASH"
-						? "Confirm Cash Sale"
-						: "Save"
-				}
-			/>
-		</form>
-	);
-}
-
-function AccountSaleForm({
-	products,
-	customers,
-	date,
-	onSuccess,
-}: {
-	products: Product[];
-	customers: Customer[];
-	date: string;
-	onSuccess: () => void;
-}) {
-	const [loading, setLoading] =
-		React.useState(false);
-	const [customerId, setCustomerId] =
-		React.useState("");
-	const [items, setItems] = React.useState<
-		ChargeItem[]
-	>([]);
-	const [manualAmountCents, setManualAmountCents] =
-		React.useState(0);
-	const [note, setNote] = React.useState("");
-	const [showNote, setShowNote] =
-		React.useState(false);
-	const [tempTabOpen, setTempTabOpen] =
-		React.useState(false);
-	const [tempTabLoading, setTempTabLoading] =
-		React.useState(false);
-	const [tempTabName, setTempTabName] =
-		React.useState("");
-	const [tempTabPhone, setTempTabPhone] =
-		React.useState("");
-	const [tempTabNote, setTempTabNote] =
-		React.useState("");
-	const [tempTabOpeningBalanceCents, setTempTabOpeningBalanceCents] =
-		React.useState(0);
-	const [createAnotherTempTab, setCreateAnotherTempTab] =
-		React.useState(false);
-	const { mutate } = useSWRConfig();
-	const productPriceById = React.useMemo(
-		() =>
-			new Map(
-				products.map((product) => [
-					product.id,
-					product.currentPriceCents ?? 0,
-				]),
-			),
-		[products],
-	);
-	const itemsSubtotalCents = React.useMemo(
-		() =>
-			items.reduce((total, item) => {
-				const units =
-					parseInt(item.units, 10) || 0;
-				const unitPrice =
-					productPriceById.get(item.productId) ?? 0;
-				return total + units * unitPrice;
-			}, 0),
-		[items, productPriceById],
-	);
-	const totalChargeCents =
-		itemsSubtotalCents + manualAmountCents;
-	React.useEffect(() => {
-		pushQuickAddDebugLog("account_sale_form_mounted", {
-			date,
-			customersCount: customers.length,
-			productsCount: products.length,
-		});
-	}, [date, customers.length, products.length]);
-
-	const handleCreateTemporaryTab = async (
-		e: React.FormEvent,
-	) => {
-		e.preventDefault();
-		if (!tempTabName.trim()) {
-			toast.error(
-				"Temporary tab name is required",
-			);
-			return;
-		}
-
-		setTempTabLoading(true);
-		try {
-			const res = await fetch("/api/customers", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					name: tempTabName.trim(),
-					phone: tempTabPhone.trim() || undefined,
-					note: tempTabNote.trim() || undefined,
-					customerMode: "DEBT_ONLY",
-					isTemporaryTab: true,
-					openingBalanceCents:
-						tempTabOpeningBalanceCents,
-					creditLimitCents: 0,
-				}),
-			});
-			const body = await res
-				.json()
-				.catch(() => ({}));
-			if (!res.ok) {
-				throw new Error(
-					getApiErrorMessage(
-						body,
-						"Failed to open temporary tab",
-					),
-				);
-			}
-
-			const createdId = body?.data?.id ?? body?.id;
-			if (
-				typeof createdId === "string" &&
-				createdId &&
-				!createAnotherTempTab
-			) {
-				setCustomerId(createdId);
-			}
-			await mutate("/api/customers");
-			toast.success("Temporary tab opened");
-			setTempTabName("");
-			setTempTabPhone("");
-			setTempTabNote("");
-			setTempTabOpeningBalanceCents(0);
-			if (!createAnotherTempTab) {
-				setTempTabOpen(false);
-			}
-		} catch (err) {
-			toast.error(
-				err instanceof Error
-					? err.message
-					: "Failed to open temporary tab",
-			);
-		} finally {
-			setTempTabLoading(false);
-		}
-	};
-
-	const handleSubmit = async (
-		e: React.FormEvent,
-	) => {
-		e.preventDefault();
-		setLoading(true);
-		const validItems = items
-			.filter(
-				(item) => item.productId && item.units,
-			)
-			.map((item) => ({
-				productId: item.productId,
-				units: parseInt(item.units, 10) || 0,
-			}))
-			.filter((item) => item.units > 0);
-		if (
-			!validItems.length &&
-			manualAmountCents <= 0
-		) {
-			toast.error(
-				"Add at least one item or an owed amount",
-			);
-			setLoading(false);
-			return;
-		}
-		try {
-			const payload: Record<string, unknown> = {
-				date,
-				customerId,
-				items: validItems,
-				manualAmountCents:
-					manualAmountCents > 0
-						? manualAmountCents
-						: undefined,
-				note:
-					showNote && note ? note : undefined,
-			};
-			let queueResult = await postSaleWithOfflineQueue(
-				"/api/tabs/charge",
-				payload,
-			);
-			if (queueResult.queued) {
-				toast.success(
-					"Account sale saved.",
-				);
-				setManualAmountCents(0);
-				onSuccess();
-				return;
-			}
-			let res = queueResult.response;
-			if (!res.ok) {
-				let errorBody = await res
-					.json()
-					.catch(() => ({}));
-				const errorCode =
-					getApiErrorCode(errorBody);
-				if (errorCode === "BELOW_COST") {
-					const proceed = window.confirm(
-						`${getApiErrorMessage(
-							errorBody,
-							"Below-cost sale detected.",
-						)}\n\nProceed with override?`,
-					);
-					if (proceed) {
-						payload.belowCostApproved = true;
-						payload.belowCostReason =
-							"User override from quick account sale";
-						queueResult =
-							await postSaleWithOfflineQueue(
-								"/api/tabs/charge",
-								payload,
-							);
-						if (queueResult.queued) {
-							toast.success(
-								"Account sale saved.",
-							);
-							setManualAmountCents(0);
-							onSuccess();
-							return;
-						}
-						res = queueResult.response;
-						if (!res.ok) {
-							errorBody =
-								await res
-									.json()
-									.catch(
-										() => ({}),
-									);
-						}
-					}
-				}
-				if (!res.ok) {
-				throw new Error(
-					getApiErrorMessage(
-						errorBody,
-						"Failed to add sale to account",
-					),
-				);
-				}
-			}
-			toast.success(
-				"Sale added to customer account",
-			);
-			setManualAmountCents(0);
-			onSuccess();
-		} catch (err) {
-			toast.error(
-				err instanceof Error
-					? err.message
-					: "Failed to add sale to account",
-			);
-		} finally {
-			setLoading(false);
-		}
-	};
-
-	return (
-		<form
-			onSubmit={handleSubmit}
-			className="flex flex-col h-[60vh]"
-		>
-			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
-				<QuickAddSaleItems
-					items={items}
-					setItems={setItems}
-					products={products}
-				/>
-				<div className="space-y-3">
-					<CustomerSelect
-						customers={customers}
-						value={customerId}
-						onChange={setCustomerId}
-						label="Tab Holder"
-					/>
-					<Dialog
-						open={tempTabOpen}
-						onOpenChange={setTempTabOpen}
-					>
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							className="w-full"
-							onClick={() => setTempTabOpen(true)}
-						>
-							Open Temporary Tab
-						</Button>
-						<DialogContent>
-							<DialogHeader>
-								<DialogTitle>
-									Open Temporary Tab
-								</DialogTitle>
-								<DialogDescription>
-									Create a temporary running tab for this session.
-									It auto-closes after full payment.
-								</DialogDescription>
-							</DialogHeader>
-							<form
-								onSubmit={handleCreateTemporaryTab}
-								className="space-y-3"
-							>
-								<div className="space-y-2">
-									<Label>Tab Name</Label>
-									<Input
-										value={tempTabName}
-										onChange={(e) =>
-											setTempTabName(
-												e.target.value,
-											)
-										}
-										placeholder="e.g. Blue Jacket"
-										required
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label>
-										Phone (optional)
-									</Label>
-									<Input
-										type="tel"
-										value={tempTabPhone}
-										onChange={(e) =>
-											setTempTabPhone(
-												e.target.value,
-											)
-										}
-										placeholder="072 123 4567"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label>Note (optional)</Label>
-									<Textarea
-										value={tempTabNote}
-										onChange={(e) =>
-											setTempTabNote(
-												e.target.value,
-											)
-										}
-										rows={2}
-										placeholder="Quick identifier or context..."
-									/>
-								</div>
-								<MoneyInput
-									label="Opening Owing Amount"
-									value={tempTabOpeningBalanceCents}
-									onChange={
-										setTempTabOpeningBalanceCents
-									}
-								/>
-								<label className="flex items-center gap-2 text-sm">
-									<Input
-										type="checkbox"
-										checked={createAnotherTempTab}
-										onChange={(e) =>
-											setCreateAnotherTempTab(
-												e.target.checked,
-											)
-										}
-										className="h-4 w-4"
-									/>
-									<span>
-										Keep this open to add another temporary tab
-									</span>
-								</label>
-								<div className="flex justify-end gap-2">
-									<Button
-										type="button"
-										variant="outline"
-										onClick={() =>
-											setTempTabOpen(false)
-										}
-									>
-										Cancel
-									</Button>
-									<Button
-										type="submit"
-										disabled={
-											tempTabLoading ||
-											!tempTabName.trim()
-										}
-									>
-										{tempTabLoading
-											? "Opening..."
-											: "Open Tab"}
-									</Button>
-								</div>
-							</form>
-						</DialogContent>
-					</Dialog>
-				</div>
-				<div className="space-y-3">
-					<MoneyInput
-						label="Extra Owed Amount"
-						value={manualAmountCents}
-						onChange={setManualAmountCents}
-					/>
-					<p className="text-xs text-muted-foreground">
-						Use this for money added to the tab that is
-						not tied to stock items.
-					</p>
-					<div className="rounded-md border p-3 text-sm">
-						<p>
-							Items subtotal:{" "}
-							{formatZAR(itemsSubtotalCents)}
-						</p>
-						<p>
-							Extra owed:{" "}
-							{formatZAR(manualAmountCents)}
-						</p>
-						<p className="font-medium">
-							Total charge:{" "}
-							{formatZAR(totalChargeCents)}
-						</p>
-					</div>
-				</div>
-				<div className="space-y-2">
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						className="w-full"
-						onClick={() =>
-							setShowNote((prev) => !prev)
-						}
-					>
-						{showNote ? "Hide Note" : "Add Note"}
-					</Button>
-					{showNote && (
-						<Textarea
-							value={note}
-							onChange={(e) =>
-								setNote(e.target.value)
-							}
-							placeholder="Optional note for this account sale"
-							rows={2}
-						/>
-					)}
-				</div>
-			</div>
-			<SaveFooter
-				disabled={
-					loading ||
-					!customerId ||
-					totalChargeCents <= 0
-				}
-				loading={loading}
-			/>
-		</form>
-	);
-}
-
 function AccountPaymentForm({
 	customers,
 	date,
@@ -3728,8 +1211,10 @@ function AccountPaymentForm({
 		React.useState(0);
 	const [paymentMethod, setPaymentMethod] =
 		React.useState<PaymentMethod | "">("");
-	const [cashReceivedCents, setCashReceivedCents] =
-		React.useState(0);
+	const [
+		cashReceivedCents,
+		setCashReceivedCents,
+	] = React.useState(0);
 	const [cashStep, setCashStep] =
 		React.useState(false);
 	const [reference, setReference] =
@@ -3739,6 +1224,7 @@ function AccountPaymentForm({
 	const [note, setNote] = React.useState("");
 	const [showNote, setShowNote] =
 		React.useState(false);
+
 	React.useEffect(() => {
 		if (paymentMethod !== "CASH") {
 			setCashStep(false);
@@ -3777,22 +1263,12 @@ function AccountPaymentForm({
 					showReference && reference
 						? reference
 						: undefined,
-				note:
-					showNote && note ? note : undefined,
+				note: showNote && note ? note : undefined,
 			};
 			const queueResult =
 				await postTabPaymentWithOfflineQueue(
 					payload,
 				);
-			if (queueResult.queued) {
-				toast.success(
-					"Payment recorded successfully.",
-				);
-				setCashReceivedCents(0);
-				setCashStep(false);
-				onSuccess();
-				return;
-			}
 			const res = queueResult.response;
 			if (!res.ok) {
 				const errorBody = await res
@@ -3838,13 +1314,18 @@ function AccountPaymentForm({
 								Confirm cash received and change
 							</p>
 							<p className="text-xs text-muted-foreground">
-								Payment amount: {formatZAR(amountCents)}
+								Payment amount:{" "}
+								{formatZAR(amountCents)}
 							</p>
 						</div>
 						<CashChangeCalculator
 							totalCents={amountCents}
-							cashReceivedCents={cashReceivedCents}
-							onCashReceivedChange={setCashReceivedCents}
+							cashReceivedCents={
+								cashReceivedCents
+							}
+							onCashReceivedChange={
+								setCashReceivedCents
+							}
 						/>
 						<Button
 							type="button"
@@ -3876,7 +1357,9 @@ function AccountPaymentForm({
 							<Select
 								value={paymentMethod}
 								onValueChange={(v) =>
-									setPaymentMethod(v as PaymentMethod)
+									setPaymentMethod(
+										v as PaymentMethod,
+									)
 								}
 							>
 								<SelectTrigger>
@@ -3904,7 +1387,9 @@ function AccountPaymentForm({
 									size="sm"
 									className="w-full"
 									onClick={() =>
-										setShowReference((prev) => !prev)
+										setShowReference(
+											(prev) => !prev,
+										)
 									}
 								>
 									{showReference
@@ -3927,7 +1412,9 @@ function AccountPaymentForm({
 							</div>
 							{showReference && (
 								<div className="space-y-2">
-									<Label>Reference (optional)</Label>
+									<Label>
+										Reference (optional)
+									</Label>
 									<Input
 										value={reference}
 										onChange={(e) =>
@@ -4020,13 +1507,6 @@ function ExpenseForm({
 				await postTabExpenseWithOfflineQueue(
 					payload,
 				);
-			if (queueResult.queued) {
-				toast.success(
-					"Expense recorded successfully.",
-				);
-				onSuccess();
-				return;
-			}
 			const res = queueResult.response;
 			if (!res.ok) {
 				const errorBody = await res
@@ -4078,15 +1558,33 @@ function ExpenseForm({
 								<SelectValue placeholder="Select category" />
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="RENT">Rent</SelectItem>
-								<SelectItem value="UTILITIES">Utilities</SelectItem>
-								<SelectItem value="TRANSPORT">Transport</SelectItem>
-								<SelectItem value="WAGES">Wages</SelectItem>
-								<SelectItem value="REPAIRS">Repairs</SelectItem>
-								<SelectItem value="SUPPLIES">Supplies</SelectItem>
-								<SelectItem value="MARKETING">Marketing</SelectItem>
-								<SelectItem value="TAX">Tax</SelectItem>
-								<SelectItem value="OTHER">Other</SelectItem>
+								<SelectItem value="RENT">
+									Rent
+								</SelectItem>
+								<SelectItem value="UTILITIES">
+									Utilities
+								</SelectItem>
+								<SelectItem value="TRANSPORT">
+									Transport
+								</SelectItem>
+								<SelectItem value="WAGES">
+									Wages
+								</SelectItem>
+								<SelectItem value="REPAIRS">
+									Repairs
+								</SelectItem>
+								<SelectItem value="SUPPLIES">
+									Supplies
+								</SelectItem>
+								<SelectItem value="MARKETING">
+									Marketing
+								</SelectItem>
+								<SelectItem value="TAX">
+									Tax
+								</SelectItem>
+								<SelectItem value="OTHER">
+									Other
+								</SelectItem>
 							</SelectContent>
 						</Select>
 					</div>
@@ -4175,8 +1673,10 @@ function AddCustomerForm({
 		React.useState<"ACCOUNT" | "DEBT_ONLY">(
 			"ACCOUNT",
 		);
-	const [openingBalanceCents, setOpeningBalanceCents] =
-		React.useState(0);
+	const [
+		openingBalanceCents,
+		setOpeningBalanceCents,
+	] = React.useState(0);
 	const [creditLimitCents, setCreditLimitCents] =
 		React.useState(0);
 	const [dueDays, setDueDays] =
@@ -4259,9 +1759,7 @@ function AddCustomerForm({
 						value={customerMode}
 						onValueChange={(value) =>
 							setCustomerMode(
-								value as
-									| "ACCOUNT"
-									| "DEBT_ONLY",
+								value as "ACCOUNT" | "DEBT_ONLY",
 							)
 						}
 					>
@@ -4288,13 +1786,13 @@ function AddCustomerForm({
 						}
 						placeholder="072 123 4567"
 					/>
-					</div>
-					<MoneyInput
-						label="Opening Owing Amount"
-						value={openingBalanceCents}
-						onChange={setOpeningBalanceCents}
-					/>
-					{customerMode === "ACCOUNT" && (
+				</div>
+				<MoneyInput
+					label="Opening Owing Amount"
+					value={openingBalanceCents}
+					onChange={setOpeningBalanceCents}
+				/>
+				{customerMode === "ACCOUNT" && (
 					<>
 						<MoneyInput
 							label="Credit Limit"
@@ -4523,7 +2021,9 @@ function AddSupplierForm({
 					),
 				);
 			}
-			toast.success("Supplier added successfully");
+			toast.success(
+				"Supplier added successfully",
+			);
 			onSuccess();
 		} catch (err) {
 			toast.error(
@@ -4727,15 +2227,15 @@ function AddSupplierPriceForm({
 						/>
 					</div>
 					<div className="space-y-2">
-						<Label>Lead Time Days (optional)</Label>
+						<Label>
+							Lead Time Days (optional)
+						</Label>
 						<Input
 							type="number"
 							min="0"
 							value={leadTimeDays}
 							onChange={(e) =>
-								setLeadTimeDays(
-									e.target.value,
-								)
+								setLeadTimeDays(e.target.value)
 							}
 							placeholder="2"
 						/>
@@ -4888,13 +2388,6 @@ function AddPurchaseForm({
 				await postPurchaseWithOfflineQueue(
 					payload,
 				);
-			if (queueResult.queued) {
-				toast.success(
-					"Purchase recorded successfully.",
-				);
-				onSuccess();
-				return;
-			}
 			const res = queueResult.response;
 			if (!res.ok) {
 				const errorBody = await res
@@ -4974,7 +2467,7 @@ function AddPurchaseForm({
 									units > 0
 										? Math.round(
 												subtotalCents / units,
-										  )
+											)
 										: 0;
 								return (
 									<div
@@ -5034,13 +2527,14 @@ function AddPurchaseForm({
 													<Label className="text-xs">
 														Total
 													</Label>
-														<MoneyInput
-															value={
-																item.lineSubtotalCents
-															}
-															onChange={(v) =>
-																updateItem(index, {
-																	lineSubtotalCents: v,
+													<MoneyInput
+														value={
+															item.lineSubtotalCents
+														}
+														onChange={(v) =>
+															updateItem(index, {
+																lineSubtotalCents:
+																	v,
 															})
 														}
 														placeholder="0.00"
@@ -5056,8 +2550,7 @@ function AddPurchaseForm({
 															setItems((prev) =>
 																prev.filter(
 																	(_, i) =>
-																		i !==
-																		index,
+																		i !== index,
 																),
 															)
 														}
@@ -5068,11 +2561,14 @@ function AddPurchaseForm({
 											</div>
 										</div>
 										<p className="text-[11px] text-muted-foreground">
-											Subtotal {formatZAR(subtotalCents)}
+											Subtotal{" "}
+											{formatZAR(subtotalCents)}
 										</p>
 										<p className="text-[11px] text-muted-foreground">
 											Estimated unit cost:{" "}
-											{formatZAR(estimatedUnitCost)}
+											{formatZAR(
+												estimatedUnitCost,
+											)}
 										</p>
 									</div>
 								);
@@ -5193,13 +2689,6 @@ function AddAdjustmentForm({
 					date,
 					items: validItems,
 				});
-			if (queueResult.queued) {
-				toast.success(
-					"Adjustments submitted successfully.",
-				);
-				onSuccess();
-				return;
-			}
 			const res = queueResult.response;
 			if (!res.ok) {
 				const errorBody = await res
