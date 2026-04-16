@@ -2,9 +2,7 @@
 /* eslint-disable max-len */
 
 import * as React from "react";
-import {
-	useSearchParams,
-} from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import useSWR, { useSWRConfig } from "swr";
 import { toast } from "sonner";
 import {
@@ -23,7 +21,6 @@ import {
 	LoadingForm,
 } from "@/components/loading-state";
 import { EmptyState } from "@/components/empty-state";
-import { ProductSelect } from "@/components/product-select";
 import { CustomerSelect } from "@/components/customer-select";
 import { MoneyInput } from "@/components/money-input";
 import { CashChangeCalculator } from "@/components/cash-change-calculator";
@@ -56,7 +53,6 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-	DialogTrigger,
 } from "@/components/ui/dialog";
 import {
 	Select,
@@ -73,14 +69,8 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
-import {
-	formatDateDisplay,
-} from "@/lib/date-utils";
-import {
-	postSaleWithOfflineQueue,
-	postTabPaymentWithOfflineQueue,
-} from "@/lib/offline-sales-queue";
-import { useOfflineCachedArraySWR } from "@/lib/use-offline-cached-swr";
+import { formatDateDisplay } from "@/lib/date-utils";
+import { postTabPaymentWithOfflineQueue } from "@/lib/offline-sales-queue";
 import { formatZAR } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { useGlobalDateRangeQuery } from "@/lib/use-global-date-range-query";
@@ -115,8 +105,10 @@ const getApiErrorMessage = (
 		unknown
 	>;
 	const maybeError = maybePayload.error;
-	if (typeof maybeError === "string")
+
+	if (typeof maybeError === "string") {
 		return maybeError;
+	}
 
 	if (
 		maybeError &&
@@ -134,31 +126,6 @@ const getApiErrorMessage = (
 	}
 
 	return fallback;
-};
-
-const getApiErrorCode = (
-	payload: unknown,
-): string | null => {
-	if (!payload || typeof payload !== "object")
-		return null;
-	const maybePayload = payload as Record<
-		string,
-		unknown
-	>;
-	const maybeError = maybePayload.error;
-	if (
-		maybeError &&
-		typeof maybeError === "object"
-	) {
-		const maybeErrorObj = maybeError as Record<
-			string,
-			unknown
-		>;
-		return typeof maybeErrorObj.code === "string"
-			? maybeErrorObj.code
-			: null;
-	}
-	return null;
 };
 
 interface TabTransactionHistory {
@@ -226,91 +193,6 @@ interface CustomerStatementResponse {
 	}>;
 	reminderText: string;
 }
-
-type TransactionKindFilter =
-	| "all-transactions"
-	| "direct-sales"
-	| "account-sales"
-	| "account-payments"
-	| "expense-transactions"
-	| "reversal-transactions";
-
-const normalizeTransactionKind = (
-	value: string | null | undefined,
-): TransactionKindFilter => {
-	switch ((value ?? "").toLowerCase()) {
-		case "direct":
-		case "direct-sales":
-			return "direct-sales";
-		case "account":
-		case "account-sales":
-			return "account-sales";
-		case "payment":
-		case "account-payments":
-			return "account-payments";
-		case "expense":
-		case "expenses":
-		case "expense-transactions":
-			return "expense-transactions";
-		case "reversals":
-		case "reversal-transactions":
-			return "reversal-transactions";
-		default:
-			return "all-transactions";
-	}
-};
-
-const SEARCH_KIND_OPTIONS: Array<{
-	kind: TransactionKindFilter;
-	label: string;
-	aliases: string[];
-}> = [
-	{
-		kind: "all-transactions",
-		label: "All transactions",
-		aliases: [
-			"all",
-			"all transactions",
-			"all-transactions",
-		],
-	},
-	{
-		kind: "direct-sales",
-		label: "Direct sales",
-		aliases: ["direct sales", "direct-sales"],
-	},
-	{
-		kind: "account-sales",
-		label: "Account sales",
-		aliases: ["account sales", "account-sales"],
-	},
-	{
-		kind: "account-payments",
-		label: "Account payments",
-		aliases: [
-			"account payments",
-			"account-payments",
-		],
-	},
-	{
-		kind: "expense-transactions",
-		label: "Expenses",
-		aliases: [
-			"expense",
-			"expenses",
-			"expense-transactions",
-		],
-	},
-	{
-		kind: "reversal-transactions",
-		label: "Reversal transactions",
-		aliases: [
-			"reversal transactions",
-			"reversal-transactions",
-			"reversals",
-		],
-	},
-];
 
 const timeFormatter = new Intl.DateTimeFormat(
 	undefined,
@@ -388,6 +270,23 @@ const formatTransactionHistoryTime = (
 	return `${dateFormatter.format(created)} ${timeFormatter.format(created)}`;
 };
 
+const getTransactionTypeLabel = (
+	type: TabTransactionHistory["type"],
+) => {
+	switch (type) {
+		case "PAYMENT":
+			return "Payment";
+		case "EXPENSE":
+			return "Expense";
+		case "ADJUSTMENT":
+			return "Adjustment";
+		case "DIRECT_SALE":
+			return "Legacy Direct Sale";
+		case "CHARGE":
+			return "Legacy Account Charge";
+	}
+};
+
 export function TabsClient({
 	view = "both",
 }: TabsClientProps) {
@@ -418,6 +317,7 @@ export function TabsClient({
 			onError: (err) => toast.error(err.message),
 		},
 	);
+
 	const { data: access } = useSWR<{
 		isAdmin: boolean;
 	}>("/api/session/access", fetcher);
@@ -427,42 +327,52 @@ export function TabsClient({
 		data: products,
 		error: productsError,
 		isLoading: productsLoading,
-	} = useSWR<Product[]>("/api/products", fetcher);
-	const transactionsCacheKey = React.useMemo(
-		() => `transactions:${from}:${date}:limit=200`,
-		[from, date],
-	);
-	const {
-		items: transactionsHistory,
-		isLoading: effectiveTransactionsLoading,
-		mutate: mutateTransactions,
-	} = useOfflineCachedArraySWR<TabTransactionHistory>({
-		key: `/api/transactions?from=${from}&to=${date}&limit=200`,
-		cacheKey: transactionsCacheKey,
+	} = useSWR<Product[]>(
+		"/api/products",
 		fetcher,
-		onError: (err) => toast.error(err.message),
-	});
-	const refreshConnectedViews = React.useCallback(async () => {
-		await Promise.all([
-			mutateTransactions(),
-			mutateCustomers(),
-			mutateGlobal(
-				(key) =>
-					typeof key === "string" &&
-					(key.startsWith("/api/reports") ||
-						key.startsWith("/api/transactions") ||
-						key.startsWith("/api/customers") ||
-						key.startsWith("/api/tabs") ||
-						key.startsWith("/api/products") ||
-						key.startsWith("/api/exceptions") ||
-						key.startsWith("/api/header")),
-			),
+		{
+			onError: (err) => toast.error(err.message),
+		},
+	);
+
+	const {
+		data: transactionsHistory,
+		error: transactionsError,
+		isLoading: transactionsLoading,
+		mutate: mutateTransactions,
+	} = useSWR<TabTransactionHistory[]>(
+		`/api/transactions?from=${from}&to=${date}&limit=200`,
+		fetcher,
+		{
+			onError: (err) => toast.error(err.message),
+		},
+	);
+
+	const refreshConnectedViews =
+		React.useCallback(async () => {
+			await Promise.all([
+				mutateTransactions(),
+				mutateCustomers(),
+				mutateGlobal(
+					(key) =>
+						typeof key === "string" &&
+						(key.startsWith("/api/reports") ||
+							key.startsWith(
+								"/api/transactions",
+							) ||
+							key.startsWith("/api/customers") ||
+							key.startsWith("/api/tabs") ||
+							key.startsWith("/api/products") ||
+							key.startsWith("/api/exceptions") ||
+							key.startsWith("/api/header")),
+				),
+			]);
+		}, [
+			mutateCustomers,
+			mutateGlobal,
+			mutateTransactions,
 		]);
-	}, [
-		mutateCustomers,
-		mutateGlobal,
-		mutateTransactions,
-	]);
+
 	const normalizedProducts = React.useMemo(
 		() =>
 			Array.isArray(products) ? products : [],
@@ -473,100 +383,85 @@ export function TabsClient({
 			Array.isArray(customers) ? customers : [],
 		[customers],
 	);
+	const normalizedTransactions = React.useMemo(
+		() =>
+			Array.isArray(transactionsHistory)
+				? transactionsHistory
+				: [],
+		[transactionsHistory],
+	);
+
 	const selectedCustomerId =
 		searchParams.get("customerId");
-	const customerFilter =
-		searchParams.get("customerFilter");
+	const customerFilter = searchParams.get(
+		"customerFilter",
+	);
+	const action = searchParams.get("action");
+
 	const displayedCustomers = React.useMemo(() => {
 		const baseList =
 			customerFilter === "overdue"
-				? normalizedCustomers.filter(
-						(customer) =>
-							Boolean(customer.isOverdue),
-				  )
+				? normalizedCustomers.filter((customer) =>
+						Boolean(customer.isOverdue),
+					)
 				: normalizedCustomers;
+
 		if (!selectedCustomerId) return baseList;
+
 		const selected = normalizedCustomers.find(
 			(customer) =>
 				customer.id === selectedCustomerId,
 		);
-		return selected
-			? [selected]
-			: baseList;
+
+		return selected ? [selected] : baseList;
 	}, [
 		customerFilter,
 		normalizedCustomers,
 		selectedCustomerId,
 	]);
+
+	const [transactionQuery, setTransactionQuery] =
+		React.useState("");
 	const [addCustomerOpen, setAddCustomerOpen] =
 		React.useState(false);
 	const [editingCustomer, setEditingCustomer] =
 		React.useState<Customer | null>(null);
-	const [saleDialogOpen, setSaleDialogOpen] =
-		React.useState(false);
 	const [
 		paymentDialogOpen,
 		setPaymentDialogOpen,
 	] = React.useState(false);
 	const [
-		directSaleDialogOpen,
-		setDirectSaleDialogOpen,
-	] = React.useState(false);
-	const [reverseReason, setReverseReason] =
-		React.useState("");
-	const [
-		historyDetailTxn,
-		setHistoryDetailTxn,
-	] = React.useState<TabTransactionHistory | null>(
-		null,
-	);
-	const [reversingTxn, setReversingTxn] =
-		React.useState<TabTransactionHistory | null>(
-			null,
-		);
-	const [reverseLoading, setReverseLoading] =
-		React.useState(false);
-	const [repeatDirectSeed, setRepeatDirectSeed] =
-		React.useState<{
-			items: ChargeItem[];
-			paymentMethod: PaymentMethod | "";
-			note: string;
-		} | null>(null);
-	const [
-		repeatAccountSeed,
-		setRepeatAccountSeed,
-	] = React.useState<{
-		customerId: string;
-		items: ChargeItem[];
-		note: string;
-	} | null>(null);
-	const kindFilter = normalizeTransactionKind(
-		searchParams.get("kind"),
-	);
-	const productFilter =
-		searchParams.get("productId");
-	const action = searchParams.get("action");
-	const [transactionQuery, setTransactionQuery] =
-		React.useState("");
-	const [
 		statementCustomerId,
 		setStatementCustomerId,
 	] = React.useState("");
+	const [statementLoading, setStatementLoading] =
+		React.useState(false);
 	const [
-		statementLoading,
-		setStatementLoading,
-	] = React.useState(false);
-	const [deletingCustomerId, setDeletingCustomerId] =
-		React.useState<string | null>(null);
+		deletingCustomerId,
+		setDeletingCustomerId,
+	] = React.useState<string | null>(null);
 	const [
 		pendingDeleteCustomer,
 		setPendingDeleteCustomer,
 	] = React.useState<Customer | null>(null);
+	const [historyDetailTxn, setHistoryDetailTxn] =
+		React.useState<TabTransactionHistory | null>(
+			null,
+		);
+	const [reversingTxn, setReversingTxn] =
+		React.useState<TabTransactionHistory | null>(
+			null,
+		);
+	const [reverseReason, setReverseReason] =
+		React.useState("");
+	const [reverseLoading, setReverseLoading] =
+		React.useState(false);
 
 	React.useEffect(() => {
 		const qsQuery = searchParams.get("q");
 		setTransactionQuery(qsQuery ?? "");
 	}, [searchParams]);
+
 	React.useEffect(() => {
 		if (
 			selectedCustomerId &&
@@ -578,7 +473,10 @@ export function TabsClient({
 			setStatementCustomerId(selectedCustomerId);
 			return;
 		}
-		if (!statementCustomerId && normalizedCustomers[0]) {
+		if (
+			!statementCustomerId &&
+			normalizedCustomers[0]
+		) {
 			setStatementCustomerId(
 				normalizedCustomers[0].id,
 			);
@@ -591,22 +489,8 @@ export function TabsClient({
 
 	React.useEffect(() => {
 		if (!isTransactionsOnly) return;
-		if (action === "direct-sale") {
-			setDirectSaleDialogOpen(true);
-			setSaleDialogOpen(false);
-			setPaymentDialogOpen(false);
-			return;
-		}
-		if (action === "account-sale") {
-			setSaleDialogOpen(true);
-			setDirectSaleDialogOpen(false);
-			setPaymentDialogOpen(false);
-			return;
-		}
 		if (action === "account-payment") {
 			setPaymentDialogOpen(true);
-			setSaleDialogOpen(false);
-			setDirectSaleDialogOpen(false);
 		}
 	}, [action, isTransactionsOnly]);
 
@@ -620,83 +504,26 @@ export function TabsClient({
 			),
 		[normalizedProducts],
 	);
-	const productByBarcode = React.useMemo(
-		() =>
-			new Map(
-				normalizedProducts
-					.filter((product) =>
-						Boolean(product.barcode),
-					)
-					.map((product) => [
-						String(product.barcode)
-							.trim()
-							.toLowerCase(),
-						product.id,
-					]),
-			),
-		[normalizedProducts],
-	);
-	const parsedKindFromQuery =
+
+	const filteredTransactions =
 		React.useMemo(() => {
 			const normalizedQuery = transactionQuery
 				.trim()
 				.toLowerCase();
-			if (!normalizedQuery) return null;
-			const option = SEARCH_KIND_OPTIONS.find(
-				(entry) =>
-					entry.aliases.includes(normalizedQuery),
-			);
-			return option?.kind ?? null;
-		}, [transactionQuery]);
-	const freeTextQuery = React.useMemo(() => {
-		if (parsedKindFromQuery) return "";
-		return transactionQuery.trim().toLowerCase();
-	}, [parsedKindFromQuery, transactionQuery]);
-	const filteredTransactions =
-		React.useMemo(() => {
-			const effectiveKind =
-				parsedKindFromQuery ?? kindFilter;
-			const barcodeProductId = freeTextQuery
-				? productByBarcode.get(freeTextQuery)
-				: undefined;
-			return (transactionsHistory ?? []).filter(
+
+			return normalizedTransactions.filter(
 				(txn) => {
-					const kindMatch =
-						effectiveKind === "direct-sales"
-							? txn.type === "DIRECT_SALE"
-							: effectiveKind === "account-sales"
-								? txn.type === "CHARGE"
-								: effectiveKind ===
-									  "account-payments"
-									? txn.type === "PAYMENT"
-									: effectiveKind ===
-										  "expense-transactions"
-										? txn.type === "EXPENSE"
-									: effectiveKind ===
-										  "reversal-transactions"
-										? Boolean(txn.isReversal)
-										: true;
-					if (!kindMatch) return false;
 					if (
-						productFilter &&
-						!(txn.items ?? []).some(
-							(item) =>
-								item.productId === productFilter,
-						)
+						selectedCustomerId &&
+						txn.customerId !== selectedCustomerId
 					) {
 						return false;
 					}
-					if (!freeTextQuery) return true;
-					if (
-						barcodeProductId &&
-						(txn.items ?? []).some(
-							(item) =>
-								item.productId ===
-								barcodeProductId,
-						)
-					) {
+
+					if (!normalizedQuery) {
 						return true;
 					}
+
 					const productNames = (txn.items ?? [])
 						.map((item) =>
 							productNameById.get(item.productId),
@@ -704,80 +531,72 @@ export function TabsClient({
 						.filter(Boolean)
 						.join(" ")
 						.toLowerCase();
+
 					const searchable = [
 						txn.customerName,
+						getTransactionTypeLabel(txn.type),
 						txn.payee,
 						txn.expenseCategory,
 						txn.reference,
 						txn.reason,
 						txn.note,
 						txn.paymentMethod,
-						txn.type,
 						formatZAR(txn.amountCents),
 						productNames,
 					]
 						.filter(Boolean)
 						.join(" ")
 						.toLowerCase();
+
 					return searchable.includes(
-						freeTextQuery,
+						normalizedQuery,
 					);
 				},
 			);
 		}, [
-			transactionsHistory,
-			parsedKindFromQuery,
-			kindFilter,
-			freeTextQuery,
-			productFilter,
-			productByBarcode,
+			normalizedTransactions,
 			productNameById,
+			selectedCustomerId,
+			transactionQuery,
 		]);
+
 	const transactionSearchOptions =
 		React.useMemo(() => {
-			const options = new Set<string>(
-				SEARCH_KIND_OPTIONS.map(
-					(option) => option.label,
-				),
-			);
+			const options = new Set<string>([
+				"Payment",
+				"Expense",
+				"Adjustment",
+				"Legacy Direct Sale",
+				"Legacy Account Charge",
+			]);
+
 			for (const customer of normalizedCustomers) {
 				options.add(customer.name);
 			}
+
 			for (const product of normalizedProducts) {
 				options.add(product.name);
 				if (product.barcode) {
 					options.add(String(product.barcode));
 				}
 			}
-			for (const txn of transactionsHistory ??
-				[]) {
-				if (txn.reference)
+
+			for (const txn of normalizedTransactions) {
+				if (txn.reference) {
 					options.add(txn.reference);
+				}
+				if (txn.payee) {
+					options.add(txn.payee);
+				}
 			}
+
 			return Array.from(options).slice(0, 200);
 		}, [
 			normalizedCustomers,
 			normalizedProducts,
-			transactionsHistory,
+			normalizedTransactions,
 		]);
-	const latestRepeatableSale = React.useMemo(
-		() =>
-			(
-				transactionsHistory ?? []
-			).find(
-				(txn) =>
-					!txn.isReversal &&
-					!txn.isReversed &&
-					(txn.type === "DIRECT_SALE" ||
-						txn.type === "CHARGE") &&
-					(txn.items ?? []).some(
-						(item) =>
-							Boolean(item.productId) &&
-							(item.units ?? 0) > 0,
-					),
-			) ?? null,
-		[transactionsHistory],
-	);
+
 	const openHistoryDetails = React.useCallback(
 		(txn: TabTransactionHistory) => {
 			setHistoryDetailTxn(txn);
@@ -787,6 +606,7 @@ export function TabsClient({
 
 	const handleReverseTransaction = async () => {
 		if (!reversingTxn) return;
+
 		setReverseLoading(true);
 		try {
 			const res = await fetch(
@@ -830,6 +650,7 @@ export function TabsClient({
 			setReverseLoading(false);
 		}
 	};
+
 	const handleDeleteCustomer = React.useCallback(
 		async (customer: Customer) => {
 			setDeletingCustomerId(customer.id);
@@ -867,45 +688,6 @@ export function TabsClient({
 		[refreshConnectedViews],
 	);
 
-	const repeatSaleFromHistory = (
-		txn: TabTransactionHistory,
-	) => {
-		const items = (txn.items ?? [])
-			.filter(
-				(item) =>
-					item.productId && (item.units ?? 0) > 0,
-			)
-			.map((item) => ({
-				productId: item.productId,
-				units: String(item.units),
-			}));
-		if (!items.length) {
-			toast.error("No sale items to repeat");
-			return;
-		}
-		if (txn.type === "DIRECT_SALE") {
-			setRepeatDirectSeed({
-				items,
-				paymentMethod:
-					txn.paymentMethod ?? "CASH",
-				note: txn.note ?? "",
-			});
-			setDirectSaleDialogOpen(true);
-			setSaleDialogOpen(false);
-			setPaymentDialogOpen(false);
-			return;
-		}
-		if (txn.type === "CHARGE" && txn.customerId) {
-			setRepeatAccountSeed({
-				customerId: txn.customerId,
-				items,
-				note: txn.note ?? "",
-			});
-			setSaleDialogOpen(true);
-			setDirectSaleDialogOpen(false);
-			setPaymentDialogOpen(false);
-		}
-	};
 	const fetchCustomerStatement = async () => {
 		if (!statementCustomerId) {
 			toast.error("Select a customer first");
@@ -940,9 +722,12 @@ export function TabsClient({
 			setStatementLoading(false);
 		}
 	};
+
 	const exportStatementCsv = async () => {
-		const statement = await fetchCustomerStatement();
+		const statement =
+			await fetchCustomerStatement();
 		if (!statement) return;
+
 		const rows = [
 			[
 				"Date",
@@ -963,15 +748,18 @@ export function TabsClient({
 				row.note ?? "",
 			]),
 		];
+
 		const csv = rows
 			.map((row) =>
 				row
-					.map((cell) =>
-						`"${String(cell).replaceAll('"', '""')}"`,
+					.map(
+						(cell) =>
+							`"${String(cell).replaceAll('"', '""')}"`,
 					)
 					.join(","),
 			)
 			.join("\n");
+
 		const blob = new Blob([csv], {
 			type: "text/csv;charset=utf-8",
 		});
@@ -987,15 +775,19 @@ export function TabsClient({
 		a.remove();
 		URL.revokeObjectURL(url);
 	};
+
 	const exportStatementPdf = async () => {
-		const statement = await fetchCustomerStatement();
+		const statement =
+			await fetchCustomerStatement();
 		if (!statement) return;
+
 		const htmlRows = statement.ledger
 			.map(
 				(row) =>
 					`<tr><td>${row.date ?? ""}</td><td>${row.type}</td><td>${formatZAR(row.signedAmountCents)}</td><td>${row.paymentMethod ?? "-"}</td><td>${row.reference ?? "-"}</td><td>${row.note ?? "-"}</td></tr>`,
 			)
 			.join("");
+
 		const printWindow = window.open(
 			"",
 			"_blank",
@@ -1005,6 +797,7 @@ export function TabsClient({
 			toast.error("Could not open print window");
 			return;
 		}
+
 		printWindow.document.write(`
 			<html>
 				<head>
@@ -1035,9 +828,12 @@ export function TabsClient({
 		printWindow.focus();
 		printWindow.print();
 	};
+
 	const copyReminderText = async () => {
-		const statement = await fetchCustomerStatement();
+		const statement =
+			await fetchCustomerStatement();
 		if (!statement) return;
+
 		try {
 			await navigator.clipboard.writeText(
 				statement.reminderText,
@@ -1059,8 +855,8 @@ export function TabsClient({
 			}
 			description={
 				isTransactionsOnly
-					? "Record direct sales, account sales, payments, and expenses."
-					: "Track customer credit balances and account settings."
+					? "Review payments, expenses, adjustments, reversals, and legacy transaction history."
+					: "Track customer balances, statements, and account settings."
 			}
 			actions={
 				isAccountsOnly ? undefined : (
@@ -1103,7 +899,6 @@ export function TabsClient({
 					</TabsList>
 				)}
 
-				{/* Customers Panel */}
 				{!isTransactionsOnly && (
 					<TabsContent value="customers">
 						{customersLoading ? (
@@ -1118,27 +913,18 @@ export function TabsClient({
 							</Alert>
 						) : (
 							<>
-								<div className="flex justify-end mb-4">
-									<Dialog
-										open={addCustomerOpen}
-										onOpenChange={
-											setAddCustomerOpen
+								<div className="mb-4 flex justify-end">
+									<Button
+										type="button"
+										onClick={() =>
+											setAddCustomerOpen(true)
 										}
 									>
-										<DialogTrigger asChild>
-											<Button className="hidden">
-												<Plus className="mr-2 h-4 w-4" />
-												Add Customer
-											</Button>
-										</DialogTrigger>
-										<AddCustomerDialog
-										onSuccess={() => {
-											setAddCustomerOpen(false);
-											void refreshConnectedViews();
-										}}
-										/>
-									</Dialog>
+										<Plus className="mr-2 h-4 w-4" />
+										Add Customer
+									</Button>
 								</div>
+
 								<Card className="mb-4 shadow-sm">
 									<CardHeader className="pb-2">
 										<CardTitle className="text-base">
@@ -1150,9 +936,7 @@ export function TabsClient({
 											customers={
 												normalizedCustomers
 											}
-											value={
-												statementCustomerId
-											}
+											value={statementCustomerId}
 											onChange={
 												setStatementCustomerId
 											}
@@ -1192,9 +976,7 @@ export function TabsClient({
 													statementLoading ||
 													!statementCustomerId
 												}
-												onClick={
-													copyReminderText
-												}
+												onClick={copyReminderText}
 											>
 												Copy WhatsApp
 											</Button>
@@ -1209,7 +991,7 @@ export function TabsClient({
 											<Users className="h-8 w-8 text-muted-foreground" />
 										}
 										title="No customer accounts yet"
-										description="Add your first customer to start tracking credit balances."
+										description="Add your first customer to start tracking balances."
 									/>
 								) : (
 									<Card className="shadow-lg">
@@ -1454,7 +1236,7 @@ export function TabsClient({
 																					)}
 																			</div>
 																		</TableCell>
-																		<TableCell className="text-muted-foreground max-w-50 truncate">
+																		<TableCell className="max-w-50 truncate text-muted-foreground">
 																			{customer.note ??
 																				"-"}
 																		</TableCell>
@@ -1506,630 +1288,378 @@ export function TabsClient({
 								)}
 							</>
 						)}
-
-						<Dialog
-							open={Boolean(editingCustomer)}
-							onOpenChange={(open) => {
-								if (!open)
-									setEditingCustomer(null);
-							}}
-						>
-							{editingCustomer && (
-								<EditCustomerDialog
-									customer={editingCustomer}
-									onSuccess={() => {
-										setEditingCustomer(null);
-										void refreshConnectedViews();
-									}}
-								/>
-							)}
-						</Dialog>
 					</TabsContent>
 				)}
 
-				{/* Transactions Panel */}
 				{!isAccountsOnly && (
 					<TabsContent value="transactions">
 						{productsLoading ||
 						customersLoading ? (
 							<LoadingForm />
 						) : productsError ||
-						  customersError ? (
+						  customersError ||
+						  transactionsError ? (
 							<Alert variant="destructive">
 								<AlertCircle className="h-4 w-4" />
 								<AlertTitle>Error</AlertTitle>
 								<AlertDescription>
-									Failed to load data
+									{productsError?.message ??
+										customersError?.message ??
+										transactionsError?.message ??
+										"Failed to load data"}
 								</AlertDescription>
 							</Alert>
 						) : (
 							<>
-								<div className="mb-4 hidden flex-wrap justify-end gap-2">
-									<Dialog
-										open={directSaleDialogOpen}
-										onOpenChange={(next) => {
-											setDirectSaleDialogOpen(
-												next,
-											);
-											if (!next) {
-												setRepeatDirectSeed(null);
-											}
-										}}
-									>
-										<DialogTrigger asChild>
-											<Button
-												type="button"
-												variant="secondary"
-											>
-												Add Direct Sale
-											</Button>
-										</DialogTrigger>
-										<DialogContent className="h-[70vh] w-[90vw] max-w-[90vw] overflow-hidden p-0 sm:max-w-[90vw]">
-											<DialogHeader className="shrink-0 space-y-0.5 border-b px-4 py-1.5 h-16">
-												<DialogTitle>
-													Add Direct Sale
-												</DialogTitle>
-												<DialogDescription className="text-xs leading-tight">
-													Record an immediate paid
-													sale for{" "}
-													{formatDateDisplay(
-														date,
-													)}
-													.
-												</DialogDescription>
-											</DialogHeader>
-											<DirectSaleForm
-												key={
-													repeatDirectSeed
-														? `repeat-direct-${repeatDirectSeed.items
-																.map(
-																	(item) =>
-																		`${item.productId}:${item.units}`,
-																)
-																.join("|")}`
-														: "direct-default"
-												}
-												products={
-													normalizedProducts
-												}
-												date={date}
-												initialData={
-													repeatDirectSeed ??
-													undefined
-												}
-											onSuccess={() => {
-												void refreshConnectedViews();
-												setDirectSaleDialogOpen(
-													false,
-												);
-												setRepeatDirectSeed(
-													null,
-												);
-											}}
-										/>
-										</DialogContent>
-									</Dialog>
+								<Alert className="mb-4">
+									<AlertCircle className="h-4 w-4" />
+									<AlertTitle>
+										Sale capture removed
+									</AlertTitle>
+									<AlertDescription>
+										New sales are no longer
+										captured from this page. Use
+										stock counts, purchases, and
+										adjustments for stock
+										movement. Payments, expenses,
+										reversals, and legacy
+										transaction history remain
+										here.
+									</AlertDescription>
+								</Alert>
 
-									<Dialog
-										open={saleDialogOpen}
-										onOpenChange={(next) => {
-											setSaleDialogOpen(next);
-											if (!next) {
-												setRepeatAccountSeed(
-													null,
-												);
-											}
-										}}
-									>
-										<DialogTrigger asChild>
-											<Button type="button">
-												Add Sale
-											</Button>
-										</DialogTrigger>
-										<DialogContent className="h-[70vh] w-[90vw] max-w-[90vw] overflow-hidden p-0 sm:max-w-[90vw]">
-											<DialogHeader className="shrink-0 space-y-0.5 border-b px-4 py-1.5 h-16">
-												<DialogTitle>
-													Add Sale to Account
-												</DialogTitle>
-												<DialogDescription className="text-xs leading-tight">
-													Record a customer
-													account sale for{" "}
-													{formatDateDisplay(
-														date,
-													)}
-													.
-												</DialogDescription>
-											</DialogHeader>
-											<TabChargeForm
-												key={
-													repeatAccountSeed
-														? `repeat-account-${repeatAccountSeed.customerId}-${repeatAccountSeed.items
-																.map(
-																	(item) =>
-																		`${item.productId}:${item.units}`,
-																)
-																.join("|")}`
-														: "account-default"
-												}
-												customers={
-													normalizedCustomers
-												}
-												products={
-													normalizedProducts
-												}
-												date={date}
-												initialData={
-													repeatAccountSeed ??
-													undefined
-												}
-												onCustomerCreated={() => {
-													void refreshConnectedViews();
-												}}
-											onSuccess={() => {
-												void refreshConnectedViews();
-												setSaleDialogOpen(
-													false,
-												);
-												setRepeatAccountSeed(
-													null,
-												);
-											}}
-										/>
-										</DialogContent>
-									</Dialog>
-
-									<Dialog
-										open={paymentDialogOpen}
-										onOpenChange={
-											setPaymentDialogOpen
+								<div className="mb-4 flex flex-wrap justify-end gap-2">
+									<Button
+										type="button"
+										variant="outline"
+										onClick={() =>
+											setPaymentDialogOpen(true)
 										}
 									>
-										<DialogTrigger asChild>
-											<Button
-												type="button"
-												variant="outline"
-											>
-												Add Payment
-											</Button>
-										</DialogTrigger>
-										<DialogContent className="h-[70vh] w-[90vw] max-w-[90vw] overflow-hidden p-0 sm:max-w-[90vw]">
-											<DialogHeader className="shrink-0 space-y-0.5 border-b px-4 py-1.5 h-16">
-												<DialogTitle>
-													Record Account Payment
-												</DialogTitle>
-												<DialogDescription className="text-xs leading-tight">
-													Save a customer payment
-													for{" "}
-													{formatDateDisplay(
-														date,
-													)}
-													.
-												</DialogDescription>
-											</DialogHeader>
-											<TabPaymentForm
-												customers={
-													normalizedCustomers
-												}
-												date={date}
-											onSuccess={() => {
-												void refreshConnectedViews();
-												setPaymentDialogOpen(
-													false,
-												);
-											}}
-										/>
-										</DialogContent>
-									</Dialog>
+										Add Payment
+									</Button>
 								</div>
-							</>
-						)}
 
-						{!(
-							productsLoading ||
-							customersLoading ||
-							productsError ||
-							customersError
-						) && (
-							<Card className="shadow-md mt-6">
-								<CardHeader>
-									<div className="flex flex-wrap items-center justify-between gap-2">
-										<div className="flex items-center gap-2">
+								<Card className="mt-6 shadow-md">
+									<CardHeader>
+										<div className="flex flex-wrap items-center justify-between gap-2">
 											<CardTitle>
-												Transaction
-												History
+												Transaction History
 											</CardTitle>
-											<Button
-												type="button"
-												variant="outline"
-												size="sm"
-												disabled={
-													!latestRepeatableSale
-												}
-												onClick={() => {
-													if (
-														!latestRepeatableSale
-													)
-														return;
-													repeatSaleFromHistory(
-														latestRepeatableSale,
-													);
-												}}
-											>
-												Repeat Last Sale
-											</Button>
-										</div>
-										<div className="w-full sm:w-[24rem]">
-											<Input
-												value={transactionQuery}
-												onChange={(e) =>
-													setTransactionQuery(
-														e.target.value,
-													)
-												}
-												list="transaction-search-options"
-												placeholder="Search/select/scan customer, product, reference, or barcode"
-											/>
-											<datalist id="transaction-search-options">
-												{transactionSearchOptions.map(
-													(option) => (
-														<option
-															key={option}
-															value={option}
-														/>
-													),
-												)}
-											</datalist>
-											<p className="mt-1 text-[11px] text-muted-foreground">
-												Type, pick from
-												suggestions, or scan
-												barcode.
-											</p>
-										</div>
-									</div>
-								</CardHeader>
-								<CardContent>
-									{effectiveTransactionsLoading ? (
-										<LoadingTable />
-									) : !filteredTransactions.length ? (
-										<p className="text-sm text-muted-foreground">
-											No transactions saved for
-											this date yet.
-										</p>
-									) : (
-										<>
-											{(kindFilter !==
-												"all-transactions" ||
-												productFilter ||
-												parsedKindFromQuery !==
-													null) && (
-												<p className="mb-3 text-xs text-muted-foreground">
-													Showing filtered
-													transactions for this
-													view.
+											<div className="w-full sm:w-[24rem]">
+												<Input
+													value={transactionQuery}
+													onChange={(e) =>
+														setTransactionQuery(
+															e.target.value,
+														)
+													}
+													list="transaction-search-options"
+													placeholder="Search customer, product, reference, payee, or type"
+												/>
+												<datalist id="transaction-search-options">
+													{transactionSearchOptions.map(
+														(option) => (
+															<option
+																key={option}
+																value={option}
+															/>
+														),
+													)}
+												</datalist>
+												<p className="mt-1 text-[11px] text-muted-foreground">
+													Search current and
+													legacy transactions.
 												</p>
-											)}
-											<div className="space-y-3 md:hidden">
-												{filteredTransactions.map(
-													(txn) => (
-														<div
-															key={txn.id}
-															role="button"
-															tabIndex={0}
-															className="rounded-lg border p-3 cursor-pointer transition-colors hover:bg-muted/40"
-															onClick={() =>
-																openHistoryDetails(
-																	txn,
-																)
-															}
-															onKeyDown={(event) => {
-																if (
-																	event.key ===
-																		"Enter" ||
-																	event.key === " "
-																) {
-																	event.preventDefault();
+											</div>
+										</div>
+									</CardHeader>
+									<CardContent>
+										{transactionsLoading ? (
+											<LoadingTable />
+										) : !filteredTransactions.length ? (
+											<p className="text-sm text-muted-foreground">
+												No transactions found for
+												this date range.
+											</p>
+										) : (
+											<>
+												<div className="space-y-3 md:hidden">
+													{filteredTransactions.map(
+														(txn) => (
+															<div
+																key={txn.id}
+																role="button"
+																tabIndex={0}
+																className="cursor-pointer rounded-lg border p-3 transition-colors hover:bg-muted/40"
+																onClick={() =>
 																	openHistoryDetails(
 																		txn,
-																	);
+																	)
 																}
-															}}
-														>
-															<div className="flex items-start justify-between gap-2">
-																<div>
-																	<p className="font-medium">
-																		{
-																			txn.customerName
-																		}
-																	</p>
-																	<p className="text-xs text-muted-foreground">
-																		{formatTransactionHistoryTime(
-																			txn.createdAt,
-																		)}
-																	</p>
-																</div>
-																<p className="font-semibold">
-																	{formatZAR(
-																		txn.amountCents,
-																	)}
-																</p>
-															</div>
-															<div className="mt-2 flex items-center justify-between text-sm">
-																<span className="text-muted-foreground">
-																	{txn.type ===
-																	"DIRECT_SALE"
-																		? "Direct Sale"
-																		: txn.type ===
-																			  "CHARGE"
-																			? "Sale"
-																			: txn.type ===
-																				  "PAYMENT"
-																				? "Payment"
-																				: txn.type ===
-																					  "EXPENSE"
-																					? "Expense"
-																				: "Adjustment"}
-																</span>
-																<span className="text-muted-foreground">
-																	{txn.paymentMethod ??
-																		"-"}
-																</span>
-															</div>
-															{txn.paymentMethod ===
-																"CASH" && (
-																<p className="mt-1 text-xs text-muted-foreground">
-																	Received{" "}
-																	{typeof txn.cashReceivedCents ===
-																	"number"
-																		? formatZAR(
-																				txn.cashReceivedCents,
-																		  )
-																		: "-"}{" "}
-																	| Change{" "}
-																	{typeof txn.changeCents ===
-																	"number"
-																		? formatZAR(
-																				txn.changeCents,
-																		  )
-																		: "-"}
-																</p>
-															)}
-															{txn.payee && (
-																<p className="mt-1 text-xs text-muted-foreground">
-																	Payee: {txn.payee}
-																</p>
-															)}
-															{txn.expenseCategory && (
-																<p className="mt-1 text-xs text-muted-foreground">
-																	Category: {txn.expenseCategory.replaceAll("_", " ")}
-																</p>
-															)}
-															{txn.reason && (
-																<p className="mt-1 text-xs text-muted-foreground">
-																	Reason: {txn.reason}
-																</p>
-															)}
-															<div className="mt-3 flex items-center justify-end gap-2">
-																{txn.isReversal && (
-																	<span className="rounded px-2 py-1 text-xs bg-muted text-muted-foreground">
-																		Reversal
-																	</span>
-																)}
-																{txn.isReversed && (
-																	<span className="rounded px-2 py-1 text-xs bg-amber-500/10 text-amber-700">
-																		Reversed
-																	</span>
-																)}
-																{!txn.isReversal &&
-																	!txn.isReversed &&
-																	(txn.type ===
-																		"DIRECT_SALE" ||
-																		txn.type ===
-																			"CHARGE") && (
-																		<Button
-																			type="button"
-																			size="sm"
-																			variant="secondary"
-																			onClick={(event) => {
-																				event.stopPropagation();
-																				repeatSaleFromHistory(
-																					txn,
-																				);
-																			}}
-																		>
-																			Repeat
-																		</Button>
-																	)}
-																{!txn.isReversal &&
-																	!txn.isReversed &&
-																	(txn.type ===
-																		"DIRECT_SALE" ||
-																		txn.type ===
-																			"CHARGE" ||
-																		txn.type ===
-																			"PAYMENT" ||
-																		txn.type ===
-																			"EXPENSE") && (
-																		<Button
-																			type="button"
-																			size="sm"
-																			variant="outline"
-																			onClick={(event) => {
-																				event.stopPropagation();
-																				setReversingTxn(
-																					txn,
-																				);
-																			}}
-																		>
-																			<RotateCcw className="mr-2 h-3.5 w-3.5" />
-																			Reverse
-																		</Button>
-																	)}
-															</div>
-														</div>
-													),
-												)}
-											</div>
-
-											<div className="hidden md:block">
-												<Table>
-													<TableHeader>
-														<TableRow>
-															<TableHead>
-																Time
-															</TableHead>
-															<TableHead>
-																Customer
-															</TableHead>
-															<TableHead>
-																Type
-															</TableHead>
-															<TableHead className="text-right">
-																Amount
-															</TableHead>
-															<TableHead>
-																Details
-															</TableHead>
-															<TableHead className="text-right">
-																Actions
-															</TableHead>
-														</TableRow>
-													</TableHeader>
-													<TableBody>
-														{filteredTransactions.map(
-															(txn) => (
-																<TableRow
-																	key={txn.id}
-																	className="cursor-pointer"
-																	onClick={() =>
+																onKeyDown={(
+																	event,
+																) => {
+																	if (
+																		event.key ===
+																			"Enter" ||
+																		event.key ===
+																			" "
+																	) {
+																		event.preventDefault();
 																		openHistoryDetails(
 																			txn,
-																		)
+																		);
 																	}
-																>
-																	<TableCell className="text-muted-foreground">
-																		{formatTransactionHistoryTime(
-																			txn.createdAt,
-																		)}
-																	</TableCell>
-																	<TableCell>
-																		{
-																			txn.customerName
-																		}
-																	</TableCell>
-																	<TableCell>
-																		{txn.type ===
-																		"DIRECT_SALE"
-																			? "Direct Sale"
-																			: txn.type ===
-																				  "CHARGE"
-																				? "Sale"
-																				: txn.type ===
-																					  "PAYMENT"
-																					? "Payment"
-																					: txn.type ===
-																						  "EXPENSE"
-																						? "Expense"
-																					: "Adjustment"}
-																	</TableCell>
-																	<TableCell className="text-right">
+																}}
+															>
+																<div className="flex items-start justify-between gap-2">
+																	<div>
+																		<p className="font-medium">
+																			{
+																				txn.customerName
+																			}
+																		</p>
+																		<p className="text-xs text-muted-foreground">
+																			{formatTransactionHistoryTime(
+																				txn.createdAt,
+																			)}
+																		</p>
+																	</div>
+																	<p className="font-semibold">
 																		{formatZAR(
 																			txn.amountCents,
 																		)}
-																	</TableCell>
-																	<TableCell className="text-muted-foreground">
-																		<div className="space-y-0.5">
-																			<p>
-																				{txn.paymentMethod ??
-																					"-"}
-																			</p>
-																			{txn.paymentMethod ===
-																				"CASH" && (
-																				<p className="text-xs">
-																					Received{" "}
-																					{typeof txn.cashReceivedCents ===
-																					"number"
-																						? formatZAR(
-																								txn.cashReceivedCents,
-																						  )
-																						: "-"}{" "}
-																					| Change{" "}
-																					{typeof txn.changeCents ===
-																					"number"
-																						? formatZAR(
-																								txn.changeCents,
-																						  )
-																						: "-"}
-																				</p>
+																	</p>
+																</div>
+																<div className="mt-2 flex items-center justify-between text-sm">
+																	<span className="text-muted-foreground">
+																		{getTransactionTypeLabel(
+																			txn.type,
+																		)}
+																	</span>
+																	<span className="text-muted-foreground">
+																		{txn.paymentMethod ??
+																			"-"}
+																	</span>
+																</div>
+																{txn.paymentMethod ===
+																	"CASH" && (
+																	<p className="mt-1 text-xs text-muted-foreground">
+																		Received{" "}
+																		{typeof txn.cashReceivedCents ===
+																		"number"
+																			? formatZAR(
+																					txn.cashReceivedCents,
+																				)
+																			: "-"}{" "}
+																		| Change{" "}
+																		{typeof txn.changeCents ===
+																		"number"
+																			? formatZAR(
+																					txn.changeCents,
+																				)
+																			: "-"}
+																	</p>
+																)}
+																{txn.payee && (
+																	<p className="mt-1 text-xs text-muted-foreground">
+																		Payee:{" "}
+																		{txn.payee}
+																	</p>
+																)}
+																{txn.expenseCategory && (
+																	<p className="mt-1 text-xs text-muted-foreground">
+																		Category:{" "}
+																		{txn.expenseCategory.replaceAll(
+																			"_",
+																			" ",
+																		)}
+																	</p>
+																)}
+																{txn.reason && (
+																	<p className="mt-1 text-xs text-muted-foreground">
+																		Reason:{" "}
+																		{txn.reason}
+																	</p>
+																)}
+																<div className="mt-3 flex items-center justify-end gap-2">
+																	{txn.isReversal && (
+																		<span className="rounded bg-muted px-2 py-1 text-xs text-muted-foreground">
+																			Reversal
+																		</span>
+																	)}
+																	{txn.isReversed && (
+																		<span className="rounded bg-amber-500/10 px-2 py-1 text-xs text-amber-700">
+																			Reversed
+																		</span>
+																	)}
+																	{!txn.isReversal &&
+																		!txn.isReversed && (
+																			<Button
+																				type="button"
+																				size="sm"
+																				variant="outline"
+																				onClick={(
+																					event,
+																				) => {
+																					event.stopPropagation();
+																					setReversingTxn(
+																						txn,
+																					);
+																				}}
+																			>
+																				<RotateCcw className="mr-2 h-3.5 w-3.5" />
+																				Reverse
+																			</Button>
+																		)}
+																</div>
+															</div>
+														),
+													)}
+												</div>
+
+												<div className="hidden md:block">
+													<Table>
+														<TableHeader>
+															<TableRow>
+																<TableHead>
+																	Time
+																</TableHead>
+																<TableHead>
+																	Customer
+																</TableHead>
+																<TableHead>
+																	Type
+																</TableHead>
+																<TableHead className="text-right">
+																	Amount
+																</TableHead>
+																<TableHead>
+																	Details
+																</TableHead>
+																<TableHead className="text-right">
+																	Actions
+																</TableHead>
+															</TableRow>
+														</TableHeader>
+														<TableBody>
+															{filteredTransactions.map(
+																(txn) => (
+																	<TableRow
+																		key={txn.id}
+																		className="cursor-pointer"
+																		onClick={() =>
+																			openHistoryDetails(
+																				txn,
+																			)
+																		}
+																	>
+																		<TableCell className="text-muted-foreground">
+																			{formatTransactionHistoryTime(
+																				txn.createdAt,
 																			)}
-																			{txn.reference && (
-																				<p className="text-xs">
-																					Ref:{" "}
-																					{txn.reference}
-																				</p>
+																		</TableCell>
+																		<TableCell>
+																			{
+																				txn.customerName
+																			}
+																		</TableCell>
+																		<TableCell>
+																			{getTransactionTypeLabel(
+																				txn.type,
 																			)}
-																			{txn.payee && (
-																				<p className="text-xs truncate max-w-48">
-																					Payee: {txn.payee}
-																				</p>
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{formatZAR(
+																				txn.amountCents,
 																			)}
-																			{txn.expenseCategory && (
-																				<p className="text-xs truncate max-w-48">
-																					Category: {txn.expenseCategory.replaceAll("_", " ")}
+																		</TableCell>
+																		<TableCell className="text-muted-foreground">
+																			<div className="space-y-0.5">
+																				<p>
+																					{txn.paymentMethod ??
+																						"-"}
 																				</p>
-																			)}
-																			{txn.reason && (
-																				<p className="text-xs truncate max-w-48">
-																					Reason: {txn.reason}
-																				</p>
-																			)}
-																			{txn.note && (
-																				<p className="text-xs truncate max-w-48">
-																					{txn.note}
-																				</p>
-																			)}
-																		</div>
-																	</TableCell>
-																	<TableCell className="text-right">
-																		{txn.isReversal ? (
-																			<span className="rounded px-2 py-1 text-xs bg-muted text-muted-foreground">
-																				Reversal
-																			</span>
-																		) : txn.isReversed ? (
-																			<span className="rounded px-2 py-1 text-xs bg-amber-500/10 text-amber-700">
-																				Reversed
-																			</span>
-																		) : txn.type ===
-																				"DIRECT_SALE" ||
-																		  txn.type ===
-																				"CHARGE" ||
-																		  txn.type ===
-																				"PAYMENT" ||
-																		  txn.type ===
-																				"EXPENSE" ? (
-																			<div className="inline-flex items-center gap-2">
-																				{(txn.type ===
-																					"DIRECT_SALE" ||
-																					txn.type ===
-																						"CHARGE") && (
-																					<Button
-																						type="button"
-																						size="sm"
-																						variant="secondary"
-																						onClick={(event) => {
-																							event.stopPropagation();
-																							repeatSaleFromHistory(
-																								txn,
-																							);
-																						}}
-																					>
-																						Repeat
-																					</Button>
+																				{txn.paymentMethod ===
+																					"CASH" && (
+																					<p className="text-xs">
+																						Received{" "}
+																						{typeof txn.cashReceivedCents ===
+																						"number"
+																							? formatZAR(
+																									txn.cashReceivedCents,
+																								)
+																							: "-"}{" "}
+																						|
+																						Change{" "}
+																						{typeof txn.changeCents ===
+																						"number"
+																							? formatZAR(
+																									txn.changeCents,
+																								)
+																							: "-"}
+																					</p>
 																				)}
+																				{txn.reference && (
+																					<p className="max-w-48 truncate text-xs">
+																						Ref:{" "}
+																						{
+																							txn.reference
+																						}
+																					</p>
+																				)}
+																				{txn.payee && (
+																					<p className="max-w-48 truncate text-xs">
+																						Payee:{" "}
+																						{
+																							txn.payee
+																						}
+																					</p>
+																				)}
+																				{txn.expenseCategory && (
+																					<p className="max-w-48 truncate text-xs">
+																						Category:{" "}
+																						{txn.expenseCategory.replaceAll(
+																							"_",
+																							" ",
+																						)}
+																					</p>
+																				)}
+																				{txn.reason && (
+																					<p className="max-w-48 truncate text-xs">
+																						Reason:{" "}
+																						{
+																							txn.reason
+																						}
+																					</p>
+																				)}
+																				{txn.note && (
+																					<p className="max-w-48 truncate text-xs">
+																						{
+																							txn.note
+																						}
+																					</p>
+																				)}
+																			</div>
+																		</TableCell>
+																		<TableCell className="text-right">
+																			{txn.isReversal ? (
+																				<span className="rounded bg-muted px-2 py-1 text-xs text-muted-foreground">
+																					Reversal
+																				</span>
+																			) : txn.isReversed ? (
+																				<span className="rounded bg-amber-500/10 px-2 py-1 text-xs text-amber-700">
+																					Reversed
+																				</span>
+																			) : (
 																				<Button
 																					type="button"
 																					size="sm"
 																					variant="outline"
-																					onClick={(event) => {
+																					onClick={(
+																						event,
+																					) => {
 																						event.stopPropagation();
 																						setReversingTxn(
 																							txn,
@@ -2139,25 +1669,79 @@ export function TabsClient({
 																					<RotateCcw className="mr-2 h-3.5 w-3.5" />
 																					Reverse
 																				</Button>
-																			</div>
-																		) : (
-																			"-"
-																		)}
-																	</TableCell>
-																</TableRow>
-															),
-														)}
-													</TableBody>
-												</Table>
-											</div>
-										</>
-									)}
-								</CardContent>
-							</Card>
+																			)}
+																		</TableCell>
+																	</TableRow>
+																),
+															)}
+														</TableBody>
+													</Table>
+												</div>
+											</>
+										)}
+									</CardContent>
+								</Card>
+							</>
 						)}
 					</TabsContent>
 				)}
 			</Tabs>
+
+			<Dialog
+				open={addCustomerOpen}
+				onOpenChange={setAddCustomerOpen}
+			>
+				<AddCustomerDialog
+					onSuccess={() => {
+						setAddCustomerOpen(false);
+						void refreshConnectedViews();
+					}}
+				/>
+			</Dialog>
+
+			<Dialog
+				open={Boolean(editingCustomer)}
+				onOpenChange={(open) => {
+					if (!open) {
+						setEditingCustomer(null);
+					}
+				}}
+			>
+				{editingCustomer && (
+					<EditCustomerDialog
+						customer={editingCustomer}
+						onSuccess={() => {
+							setEditingCustomer(null);
+							void refreshConnectedViews();
+						}}
+					/>
+				)}
+			</Dialog>
+
+			<Dialog
+				open={paymentDialogOpen}
+				onOpenChange={setPaymentDialogOpen}
+			>
+				<DialogContent className="h-[70vh] w-[90vw] max-w-[90vw] overflow-hidden p-0 sm:max-w-[90vw]">
+					<DialogHeader className="h-16 shrink-0 space-y-0.5 border-b px-4 py-1.5">
+						<DialogTitle>
+							Record Account Payment
+						</DialogTitle>
+						<DialogDescription className="text-xs leading-tight">
+							Save a customer payment for{" "}
+							{formatDateDisplay(date)}.
+						</DialogDescription>
+					</DialogHeader>
+					<TabPaymentForm
+						customers={normalizedCustomers}
+						date={date}
+						onSuccess={() => {
+							void refreshConnectedViews();
+							setPaymentDialogOpen(false);
+						}}
+					/>
+				</DialogContent>
+			</Dialog>
 
 			<Dialog
 				open={Boolean(pendingDeleteCustomer)}
@@ -2177,7 +1761,8 @@ export function TabsClient({
 							<strong>
 								{pendingDeleteCustomer?.name}
 							</strong>
-							? This is only allowed when their balance is zero.
+							? This is only allowed when their
+							balance is zero.
 						</DialogDescription>
 					</DialogHeader>
 					<DialogFooter>
@@ -2229,8 +1814,7 @@ export function TabsClient({
 							Transaction Details
 						</DialogTitle>
 						<DialogDescription>
-							{historyDetailTxn?.customerName}{" "}
-							at{" "}
+							{historyDetailTxn?.customerName} at{" "}
 							{formatTransactionHistoryTime(
 								historyDetailTxn?.createdAt,
 							)}
@@ -2240,19 +1824,11 @@ export function TabsClient({
 						<div className="rounded-md border p-3 text-sm">
 							<p>
 								Type:{" "}
-								{historyDetailTxn?.type ===
-								"DIRECT_SALE"
-									? "Direct Sale"
-									: historyDetailTxn?.type ===
-										  "CHARGE"
-										? "Sale"
-										: historyDetailTxn?.type ===
-											  "PAYMENT"
-											? "Payment"
-											: historyDetailTxn?.type ===
-												  "EXPENSE"
-												? "Expense"
-												: "Adjustment"}
+								{historyDetailTxn
+									? getTransactionTypeLabel(
+											historyDetailTxn.type,
+										)
+									: "-"}
 							</p>
 							<p>
 								Amount:{" "}
@@ -2272,19 +1848,42 @@ export function TabsClient({
 									)}
 								</p>
 							) : null}
+							{historyDetailTxn?.paymentMethod && (
+								<p>
+									Payment Method:{" "}
+									{historyDetailTxn.paymentMethod}
+								</p>
+							)}
+							{historyDetailTxn?.reference && (
+								<p>
+									Reference:{" "}
+									{historyDetailTxn.reference}
+								</p>
+							)}
+							{historyDetailTxn?.reason && (
+								<p>
+									Reason:{" "}
+									{historyDetailTxn.reason}
+								</p>
+							)}
+							{historyDetailTxn?.payee && (
+								<p>
+									Payee: {historyDetailTxn.payee}
+								</p>
+							)}
 						</div>
+
 						<div className="space-y-2">
 							<p className="text-sm font-medium">
-								Items bought
+								Items
 							</p>
-							{(historyDetailTxn?.items ?? []).length >
-							0 ? (
+							{(historyDetailTxn?.items ?? [])
+								.length > 0 ? (
 								<div className="max-h-60 space-y-1 overflow-y-auto rounded-md border p-3">
 									{(historyDetailTxn?.items ?? [])
 										.filter(
 											(item) =>
-												(item.units ?? 0) >
-												0,
+												(item.units ?? 0) > 0,
 										)
 										.map((item, index) => (
 											<div
@@ -2294,8 +1893,7 @@ export function TabsClient({
 												<span className="truncate pr-2">
 													{productNameById.get(
 														item.productId,
-													) ??
-														"Unknown product"}
+													) ?? "Unknown product"}
 												</span>
 												<span className="text-muted-foreground">
 													x{item.units}
@@ -2305,11 +1903,21 @@ export function TabsClient({
 								</div>
 							) : (
 								<p className="text-sm text-muted-foreground">
-									No sale items on this
-									transaction.
+									No items on this transaction.
 								</p>
 							)}
 						</div>
+
+						{historyDetailTxn?.note && (
+							<div className="space-y-2">
+								<p className="text-sm font-medium">
+									Note
+								</p>
+								<div className="rounded-md border p-3 text-sm text-muted-foreground">
+									{historyDetailTxn.note}
+								</div>
+							</div>
+						)}
 					</div>
 				</DialogContent>
 			</Dialog>
@@ -2431,7 +2039,7 @@ function AddCustomerDialog({
 							: 0,
 					dueDays: formData.dueDays
 						? formData.customerMode === "ACCOUNT"
-							? parseInt(formData.dueDays)
+							? parseInt(formData.dueDays, 10)
 							: undefined
 						: undefined,
 				}),
@@ -2467,8 +2075,8 @@ function AddCustomerDialog({
 			<DialogHeader>
 				<DialogTitle>Add Customer</DialogTitle>
 				<DialogDescription>
-					Create a customer account for credit
-					purchases and payments.
+					Create a customer account for balances
+					and payments.
 				</DialogDescription>
 			</DialogHeader>
 			<form onSubmit={handleSubmit}>
@@ -2638,10 +2246,14 @@ function EditCustomerDialog({
 			? String(customer.dueDays)
 			: "",
 	});
-	const [targetBalanceCents, setTargetBalanceCents] =
-		React.useState(currentBalanceCents);
-	const [balanceAdjustmentNote, setBalanceAdjustmentNote] =
-		React.useState("");
+	const [
+		targetBalanceCents,
+		setTargetBalanceCents,
+	] = React.useState(currentBalanceCents);
+	const [
+		balanceAdjustmentNote,
+		setBalanceAdjustmentNote,
+	] = React.useState("");
 
 	React.useEffect(() => {
 		setFormData({
@@ -2656,7 +2268,9 @@ function EditCustomerDialog({
 				? String(customer.dueDays)
 				: "",
 		});
-		setTargetBalanceCents(customer.balanceCents ?? 0);
+		setTargetBalanceCents(
+			customer.balanceCents ?? 0,
+		);
 		setBalanceAdjustmentNote("");
 	}, [customer]);
 
@@ -2714,8 +2328,7 @@ function EditCustomerDialog({
 					{
 						method: "POST",
 						headers: {
-							"Content-Type":
-								"application/json",
+							"Content-Type": "application/json",
 						},
 						body: JSON.stringify({
 							customerId: customer.id,
@@ -2730,6 +2343,7 @@ function EditCustomerDialog({
 						}),
 					},
 				);
+
 				if (!adjustmentRes.ok) {
 					const errorBody = await adjustmentRes
 						.json()
@@ -2761,7 +2375,8 @@ function EditCustomerDialog({
 			<DialogHeader>
 				<DialogTitle>Edit Customer</DialogTitle>
 				<DialogDescription>
-					Update account details and credit limit.
+					Update account details and balance
+					settings.
 				</DialogDescription>
 			</DialogHeader>
 			<form onSubmit={handleSubmit}>
@@ -2931,598 +2546,6 @@ function EditCustomerDialog({
 	);
 }
 
-interface ChargeItem {
-	productId: string;
-	units: string;
-}
-
-function TabChargeForm({
-	customers,
-	products,
-	date,
-	initialData,
-	onCustomerCreated,
-	onSuccess,
-}: {
-	customers: Customer[];
-	products: Product[];
-	date: string;
-	initialData?: {
-		customerId: string;
-		items: ChargeItem[];
-		manualAmountCents?: number;
-		note: string;
-	};
-	onCustomerCreated?: () => void;
-	onSuccess?: () => void;
-}) {
-	const [loading, setLoading] =
-		React.useState(false);
-	const [customerId, setCustomerId] =
-		React.useState(initialData?.customerId ?? "");
-	const [items, setItems] = React.useState<
-		ChargeItem[]
-	>(
-		initialData?.items &&
-			initialData.items.length > 0
-			? initialData.items
-			: [
-					{
-						productId: "",
-						units: "",
-					},
-				],
-	);
-	const [note, setNote] = React.useState(
-		initialData?.note ?? "",
-	);
-	const [manualAmountCents, setManualAmountCents] =
-		React.useState(
-			initialData?.manualAmountCents ?? 0,
-		);
-	const [tempTabOpen, setTempTabOpen] =
-		React.useState(false);
-	const [tempTabLoading, setTempTabLoading] =
-		React.useState(false);
-	const [tempTabName, setTempTabName] =
-		React.useState("");
-	const [tempTabPhone, setTempTabPhone] =
-		React.useState("");
-	const [tempTabNote, setTempTabNote] =
-		React.useState("");
-	const [tempTabOpeningBalanceCents, setTempTabOpeningBalanceCents] =
-		React.useState(0);
-	const [createAnotherTempTab, setCreateAnotherTempTab] =
-		React.useState(false);
-	const [showNote, setShowNote] = React.useState(
-		Boolean(initialData?.note),
-	);
-	const productPriceById = React.useMemo(
-		() =>
-			new Map(
-				products.map((product) => [
-					product.id,
-					product.currentPriceCents ?? 0,
-				]),
-			),
-		[products],
-	);
-	const itemsSubtotalCents = React.useMemo(
-		() =>
-			items.reduce((total, item) => {
-				const units =
-					parseInt(item.units, 10) || 0;
-				const unitPrice =
-					productPriceById.get(item.productId) ?? 0;
-				return total + units * unitPrice;
-			}, 0),
-		[items, productPriceById],
-	);
-	const totalChargeCents =
-		itemsSubtotalCents + manualAmountCents;
-	React.useEffect(() => {
-		if (!initialData) return;
-		setCustomerId(initialData.customerId);
-		setItems(
-			initialData.items.length > 0
-				? initialData.items
-				: [
-						{
-							productId: "",
-							units: "",
-						},
-					],
-		);
-		setManualAmountCents(
-			initialData.manualAmountCents ?? 0,
-		);
-		setNote(initialData.note);
-		setShowNote(Boolean(initialData.note));
-	}, [initialData]);
-
-	const addItem = () => {
-		setItems([
-			...items,
-			{
-				productId: "",
-				units: "",
-			},
-		]);
-	};
-
-	const removeItem = (index: number) => {
-		setItems(items.filter((_, i) => i !== index));
-	};
-
-	const updateItem = (
-		index: number,
-		updates: Partial<ChargeItem>,
-	) => {
-		setItems(
-			items.map((item, i) =>
-				i === index
-					? { ...item, ...updates }
-					: item,
-			),
-		);
-	};
-
-	const handleSubmit = async (
-		e: React.FormEvent,
-	) => {
-		e.preventDefault();
-		setLoading(true);
-
-		const validItems = items
-			.filter(
-				(item) => item.productId && item.units,
-			)
-			.map((item) => ({
-				productId: item.productId,
-				units: parseInt(item.units) || 0,
-			}));
-		if (
-			validItems.length === 0 &&
-			manualAmountCents <= 0
-		) {
-			toast.error(
-				"Add at least one item or an owed amount",
-			);
-			setLoading(false);
-			return;
-		}
-
-		try {
-			const payload: Record<string, unknown> = {
-				date,
-				customerId,
-				items: validItems,
-				manualAmountCents:
-					manualAmountCents > 0
-						? manualAmountCents
-						: undefined,
-				note: showNote && note ? note : undefined,
-			};
-			let {
-				response: res,
-			} = await postSaleWithOfflineQueue(
-				"/api/tabs/charge",
-				payload,
-			);
-
-			if (!res.ok) {
-				let errorBody = await res
-					.json()
-					.catch(() => ({}));
-				const errorCode =
-					getApiErrorCode(errorBody);
-				if (errorCode === "BELOW_COST") {
-					const proceed = window.confirm(
-						`${getApiErrorMessage(
-							errorBody,
-							"Below-cost sale detected.",
-						)}\n\nProceed with override?`,
-					);
-					if (proceed) {
-						payload.belowCostApproved = true;
-						payload.belowCostReason =
-							"User override from account sale form";
-						({
-							response: res,
-						} = await postSaleWithOfflineQueue(
-							"/api/tabs/charge",
-							payload,
-						));
-						if (!res.ok) {
-							errorBody = await res
-								.json()
-								.catch(() => ({}));
-						}
-					}
-				}
-				if (!res.ok) {
-				throw new Error(
-					getApiErrorMessage(
-						errorBody,
-						"Failed to add sale to account",
-					),
-				);
-				}
-			}
-
-			await res.json();
-			toast.success(
-				"Sale added to customer account",
-			);
-
-			onSuccess?.();
-
-			// Reset form
-			setCustomerId("");
-			setItems([
-				{
-					productId: "",
-					units: "",
-				},
-			]);
-			setManualAmountCents(0);
-			setNote("");
-			setShowNote(false);
-		} catch (err) {
-			toast.error(
-				err instanceof Error
-					? err.message
-					: "Failed to add sale to account",
-			);
-		} finally {
-			setLoading(false);
-		}
-	};
-
-	const handleCreateTemporaryTab = async (
-		e: React.FormEvent,
-	) => {
-		e.preventDefault();
-		if (!tempTabName.trim()) {
-			toast.error(
-				"Temporary tab name is required",
-			);
-			return;
-		}
-
-		setTempTabLoading(true);
-		try {
-			const res = await fetch("/api/customers", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					name: tempTabName.trim(),
-					phone: tempTabPhone.trim() || undefined,
-					note: tempTabNote.trim() || undefined,
-					customerMode: "DEBT_ONLY",
-					isTemporaryTab: true,
-					openingBalanceCents:
-						tempTabOpeningBalanceCents,
-					creditLimitCents: 0,
-				}),
-			});
-			const body = await res
-				.json()
-				.catch(() => ({}));
-			if (!res.ok) {
-				throw new Error(
-					getApiErrorMessage(
-						body,
-						"Failed to open temporary tab",
-					),
-				);
-			}
-
-			const createdId =
-				body?.data?.id ?? body?.id;
-			if (
-				typeof createdId === "string" &&
-				createdId &&
-				!createAnotherTempTab
-			) {
-				setCustomerId(createdId);
-			}
-			onCustomerCreated?.();
-			toast.success("Temporary tab opened");
-			setTempTabName("");
-			setTempTabPhone("");
-			setTempTabNote("");
-			setTempTabOpeningBalanceCents(0);
-			if (!createAnotherTempTab) {
-				setTempTabOpen(false);
-			}
-		} catch (err) {
-			toast.error(
-				err instanceof Error
-					? err.message
-					: "Failed to open temporary tab",
-			);
-		} finally {
-			setTempTabLoading(false);
-		}
-	};
-
-	return (
-		<form
-			onSubmit={handleSubmit}
-			className="flex flex-col h-[60vh]"
-		>
-			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
-				<div className="flex min-h-0 flex-1 flex-col space-y-2 h-[50vh]">
-					<Label>Items Sold</Label>
-					<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-						{items.map((item, index) => {
-							const units =
-								parseInt(item.units, 10) || 0;
-							const subtotalCents =
-								(productPriceById.get(
-									item.productId,
-								) ?? 0) * units;
-							return (
-								<div
-									key={index}
-									className="space-y-1"
-								>
-									<div className="flex gap-2 items-end">
-										<div className="flex-1">
-											<ProductSelect
-												products={products}
-												value={item.productId}
-												onChange={(v) =>
-													updateItem(index, {
-														productId: v,
-													})
-												}
-												placeholder="Product"
-											/>
-										</div>
-										<div className="w-20">
-											<Input
-												type="number"
-												min="1"
-												value={item.units}
-												onChange={(e) =>
-													updateItem(index, {
-														units: e.target.value,
-													})
-												}
-												placeholder="Qty"
-											/>
-										</div>
-										{items.length > 1 && (
-											<Button
-												type="button"
-												variant="destructive"
-												size="icon"
-												onClick={() =>
-													removeItem(index)
-												}
-											>
-												<Trash2 className="h-4 w-4" />
-											</Button>
-										)}
-									</div>
-									<p className="text-[11px] text-muted-foreground">
-										Subtotal{" "}
-										{formatZAR(subtotalCents)}
-									</p>
-								</div>
-							);
-						})}
-					</div>
-				</div>
-
-				<div className="space-y-3">
-					<CustomerSelect
-						customers={customers}
-						value={customerId}
-						onChange={setCustomerId}
-						label="Tab Holder"
-					/>
-					<Dialog
-						open={tempTabOpen}
-						onOpenChange={setTempTabOpen}
-					>
-						<DialogTrigger asChild>
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								className="w-full"
-							>
-								Open Temporary Tab
-							</Button>
-						</DialogTrigger>
-						<DialogContent>
-							<DialogHeader>
-								<DialogTitle>
-									Open Temporary Tab
-								</DialogTitle>
-								<DialogDescription>
-									Create a temporary running tab
-									for this session. It auto-closes
-									after full payment.
-								</DialogDescription>
-							</DialogHeader>
-							<form
-								onSubmit={
-									handleCreateTemporaryTab
-								}
-								className="space-y-3"
-							>
-								<div className="space-y-2">
-									<Label>Tab Name</Label>
-									<Input
-										value={tempTabName}
-										onChange={(e) =>
-											setTempTabName(
-												e.target.value,
-											)
-										}
-										placeholder="e.g. Blue Jacket"
-										required
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label>Phone (optional)</Label>
-									<Input
-										type="tel"
-										value={tempTabPhone}
-										onChange={(e) =>
-											setTempTabPhone(
-												e.target.value,
-											)
-										}
-										placeholder="072 123 4567"
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label>Note (optional)</Label>
-									<Textarea
-										value={tempTabNote}
-										onChange={(e) =>
-											setTempTabNote(
-												e.target.value,
-											)
-										}
-										rows={2}
-										placeholder="Quick identifier or context..."
-									/>
-								</div>
-								<MoneyInput
-									label="Opening Owing Amount"
-									value={tempTabOpeningBalanceCents}
-									onChange={
-										setTempTabOpeningBalanceCents
-									}
-								/>
-								<label className="flex items-center gap-2 text-sm">
-									<Input
-										type="checkbox"
-										checked={createAnotherTempTab}
-										onChange={(e) =>
-											setCreateAnotherTempTab(
-												e.target.checked,
-											)
-										}
-										className="h-4 w-4"
-									/>
-									<span>
-										Keep this open to add another temporary tab
-									</span>
-								</label>
-								<DialogFooter>
-									<DialogClose asChild>
-										<Button
-											type="button"
-											variant="outline"
-										>
-											Cancel
-										</Button>
-									</DialogClose>
-									<Button
-										type="submit"
-										disabled={
-											tempTabLoading ||
-											!tempTabName.trim()
-										}
-									>
-										{tempTabLoading
-											? "Opening..."
-											: "Open Tab"}
-									</Button>
-								</DialogFooter>
-							</form>
-						</DialogContent>
-					</Dialog>
-				</div>
-				<div className="space-y-3">
-					<MoneyInput
-						label="Extra Owed Amount"
-						value={manualAmountCents}
-						onChange={setManualAmountCents}
-					/>
-					<p className="text-xs text-muted-foreground">
-						Use this for money added to the tab that is
-						not tied to stock items.
-					</p>
-					<div className="rounded-md border p-3 text-sm">
-						<p>
-							Items subtotal:{" "}
-							{formatZAR(itemsSubtotalCents)}
-						</p>
-						<p>
-							Extra owed:{" "}
-							{formatZAR(manualAmountCents)}
-						</p>
-						<p className="font-medium">
-							Total charge:{" "}
-							{formatZAR(totalChargeCents)}
-						</p>
-					</div>
-				</div>
-				<div className="space-y-2">
-					<div className="grid grid-cols-2 gap-2">
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							className="w-full"
-							onClick={addItem}
-						>
-							<Plus className="mr-2 h-4 w-4" />
-							Add Item
-						</Button>
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							className="w-full"
-							onClick={() =>
-								setShowNote((prev) => !prev)
-							}
-						>
-							{showNote
-								? "Hide Note"
-								: "Add Note"}
-						</Button>
-					</div>
-					{showNote && (
-						<Textarea
-							value={note}
-							onChange={(e) =>
-								setNote(e.target.value)
-							}
-							placeholder="Optional note for this account sale"
-							rows={2}
-						/>
-					)}
-				</div>
-			</div>
-			<div className="shrink-0 border-t px-4 py-3">
-				<Button
-					type="submit"
-					className="w-full"
-					disabled={
-						loading ||
-						!customerId ||
-						totalChargeCents <= 0
-					}
-				>
-					{loading ? "Saving..." : "Save"}
-				</Button>
-			</div>
-		</form>
-	);
-}
-
 function TabPaymentForm({
 	customers,
 	date,
@@ -3538,8 +2561,10 @@ function TabPaymentForm({
 		React.useState("");
 	const [amountCents, setAmountCents] =
 		React.useState(0);
-	const [cashReceivedCents, setCashReceivedCents] =
-		React.useState(0);
+	const [
+		cashReceivedCents,
+		setCashReceivedCents,
+	] = React.useState(0);
 	const [paymentMethod, setPaymentMethod] =
 		React.useState<PaymentMethod | "">("");
 	const [reference, setReference] =
@@ -3551,6 +2576,7 @@ function TabPaymentForm({
 		React.useState(false);
 	const [cashStep, setCashStep] =
 		React.useState(false);
+
 	React.useEffect(() => {
 		const stored = localStorage.getItem(
 			"default_payment_method",
@@ -3563,6 +2589,7 @@ function TabPaymentForm({
 			setPaymentMethod(stored);
 		}
 	}, []);
+
 	React.useEffect(() => {
 		if (!paymentMethod) return;
 		localStorage.setItem(
@@ -3570,6 +2597,7 @@ function TabPaymentForm({
 			paymentMethod,
 		);
 	}, [paymentMethod]);
+
 	React.useEffect(() => {
 		if (paymentMethod !== "CASH") {
 			setCashStep(false);
@@ -3580,10 +2608,12 @@ function TabPaymentForm({
 		e: React.FormEvent,
 	) => {
 		e.preventDefault();
+
 		if (paymentMethod === "CASH" && !cashStep) {
 			setCashStep(true);
 			return;
 		}
+
 		if (
 			paymentMethod === "CASH" &&
 			cashReceivedCents < amountCents
@@ -3593,6 +2623,7 @@ function TabPaymentForm({
 			);
 			return;
 		}
+
 		setLoading(true);
 
 		try {
@@ -3609,14 +2640,13 @@ function TabPaymentForm({
 					showReference && reference
 						? reference
 						: undefined,
-				note:
-					showNote && note ? note : undefined,
+				note: showNote && note ? note : undefined,
 			};
-			const {
-				response: res,
-			} = await postTabPaymentWithOfflineQueue(
-				payload,
-			);
+
+			const { response: res } =
+				await postTabPaymentWithOfflineQueue(
+					payload,
+				);
 
 			if (!res.ok) {
 				const errorBody = await res
@@ -3630,12 +2660,12 @@ function TabPaymentForm({
 				);
 			}
 
-			await res.json();
+			await res.json().catch(() => ({}));
+
 			toast.success(
 				"Payment recorded successfully",
 			);
 
-			// Reset form
 			setCustomerId("");
 			setAmountCents(0);
 			setCashReceivedCents(0);
@@ -3660,9 +2690,9 @@ function TabPaymentForm({
 	return (
 		<form
 			onSubmit={handleSubmit}
-			className="flex flex-col h-[60vh]"
+			className="flex h-[60vh] flex-col"
 		>
-			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
+			<div className="flex h-[60vh] min-h-0 flex-1 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2">
 				{cashStep && paymentMethod === "CASH" ? (
 					<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
 						<div className="rounded-md border p-3">
@@ -3673,13 +2703,18 @@ function TabPaymentForm({
 								Confirm cash received and change
 							</p>
 							<p className="text-xs text-muted-foreground">
-								Payment amount: {formatZAR(amountCents)}
+								Payment amount:{" "}
+								{formatZAR(amountCents)}
 							</p>
 						</div>
 						<CashChangeCalculator
 							totalCents={amountCents}
-							cashReceivedCents={cashReceivedCents}
-							onCashReceivedChange={setCashReceivedCents}
+							cashReceivedCents={
+								cashReceivedCents
+							}
+							onCashReceivedChange={
+								setCashReceivedCents
+							}
 						/>
 						<Button
 							type="button"
@@ -3699,7 +2734,6 @@ function TabPaymentForm({
 								onChange={setCustomerId}
 								label="Tab Holder"
 							/>
-
 							<MoneyInput
 								label="Amount"
 								value={amountCents}
@@ -3712,7 +2746,9 @@ function TabPaymentForm({
 							<Select
 								value={paymentMethod}
 								onValueChange={(v) =>
-									setPaymentMethod(v as PaymentMethod)
+									setPaymentMethod(
+										v as PaymentMethod,
+									)
 								}
 							>
 								<SelectTrigger>
@@ -3772,7 +2808,9 @@ function TabPaymentForm({
 										<Input
 											value={reference}
 											onChange={(e) =>
-												setReference(e.target.value)
+												setReference(
+													e.target.value,
+												)
 											}
 											placeholder="e.g. Receipt #123"
 										/>
@@ -3806,444 +2844,8 @@ function TabPaymentForm({
 				>
 					{loading
 						? "Saving..."
-						: cashStep &&
-							paymentMethod === "CASH"
+						: cashStep && paymentMethod === "CASH"
 							? "Confirm Payment"
-							: "Save"}
-				</Button>
-			</div>
-		</form>
-	);
-}
-
-function DirectSaleForm({
-	products,
-	date,
-	initialData,
-	onSuccess,
-}: {
-	products: Product[];
-	date: string;
-	initialData?: {
-		items: ChargeItem[];
-		paymentMethod: PaymentMethod | "";
-		note: string;
-	};
-	onSuccess: () => void;
-}) {
-	const [loading, setLoading] =
-		React.useState(false);
-	const [items, setItems] = React.useState<
-		ChargeItem[]
-	>(
-		initialData?.items &&
-			initialData.items.length > 0
-			? initialData.items
-			: [
-					{
-						productId: "",
-						units: "",
-					},
-				],
-	);
-	const [paymentMethod, setPaymentMethod] =
-		React.useState<PaymentMethod | "">(
-			initialData?.paymentMethod ?? "",
-		);
-	const [cashReceivedCents, setCashReceivedCents] =
-		React.useState(0);
-	const [cashStep, setCashStep] =
-		React.useState(false);
-	const [note, setNote] = React.useState(
-		initialData?.note ?? "",
-	);
-	const [showNote, setShowNote] = React.useState(
-		Boolean(initialData?.note),
-	);
-	React.useEffect(() => {
-		if (initialData?.paymentMethod) return;
-		const stored = localStorage.getItem(
-			"default_payment_method",
-		);
-		if (
-			stored === "CASH" ||
-			stored === "CARD" ||
-			stored === "EFT"
-		) {
-			setPaymentMethod(stored);
-		}
-	}, [initialData?.paymentMethod]);
-	React.useEffect(() => {
-		if (!paymentMethod) return;
-		localStorage.setItem(
-			"default_payment_method",
-			paymentMethod,
-		);
-	}, [paymentMethod]);
-	const productPriceById = React.useMemo(
-		() =>
-			new Map(
-				products.map((product) => [
-					product.id,
-					product.currentPriceCents ?? 0,
-				]),
-			),
-		[products],
-	);
-	const totalDueCents = React.useMemo(
-		() =>
-			items.reduce((sum, item) => {
-				const units =
-					parseInt(item.units, 10) || 0;
-				const unitPrice =
-					productPriceById.get(item.productId) ??
-					0;
-				return sum + units * unitPrice;
-			}, 0),
-		[items, productPriceById],
-	);
-	React.useEffect(() => {
-		if (!initialData) return;
-		setItems(
-			initialData.items.length > 0
-				? initialData.items
-				: [
-						{
-							productId: "",
-							units: "",
-						},
-					],
-		);
-		setPaymentMethod(initialData.paymentMethod);
-		setNote(initialData.note);
-		setShowNote(Boolean(initialData.note));
-	}, [initialData]);
-	React.useEffect(() => {
-		if (paymentMethod !== "CASH") {
-			setCashStep(false);
-		}
-	}, [paymentMethod]);
-
-	const addItem = () => {
-		setItems([
-			...items,
-			{
-				productId: "",
-				units: "",
-			},
-		]);
-	};
-
-	const removeItem = (index: number) => {
-		setItems(items.filter((_, i) => i !== index));
-	};
-
-	const updateItem = (
-		index: number,
-		updates: Partial<ChargeItem>,
-	) => {
-		setItems(
-			items.map((item, i) =>
-				i === index
-					? { ...item, ...updates }
-					: item,
-			),
-		);
-	};
-
-	const handleSubmit = async (
-		e: React.FormEvent,
-	) => {
-		e.preventDefault();
-		if (paymentMethod === "CASH" && !cashStep) {
-			setCashStep(true);
-			return;
-		}
-		if (
-			paymentMethod === "CASH" &&
-			cashReceivedCents < totalDueCents
-		) {
-			toast.error(
-				"Cash received is less than the sale total.",
-			);
-			return;
-		}
-		setLoading(true);
-
-		const validItems = items
-			.filter(
-				(item) => item.productId && item.units,
-			)
-			.map((item) => ({
-				productId: item.productId,
-				units: parseInt(item.units) || 0,
-			}))
-			.filter((item) => item.units > 0);
-		const estimatedAmountCents = totalDueCents;
-
-		if (validItems.length === 0) {
-			toast.error("Please add at least one item");
-			setLoading(false);
-			return;
-		}
-
-		try {
-			const payload: Record<string, unknown> = {
-				date,
-				paymentMethod,
-				cashReceivedCents:
-					paymentMethod === "CASH"
-						? cashReceivedCents
-						: undefined,
-				items: validItems,
-				note: showNote && note ? note : undefined,
-			};
-			let {
-				response: res,
-			} = await postSaleWithOfflineQueue(
-				"/api/sales",
-				payload,
-			);
-
-			if (!res.ok) {
-				let errorBody = await res
-					.json()
-					.catch(() => ({}));
-				const errorCode =
-					getApiErrorCode(errorBody);
-				if (errorCode === "BELOW_COST") {
-					const proceed = window.confirm(
-						`${getApiErrorMessage(
-							errorBody,
-							"Below-cost sale detected.",
-						)}\n\nProceed with override?`,
-					);
-					if (proceed) {
-						payload.belowCostApproved = true;
-						payload.belowCostReason =
-							"User override from direct sale form";
-						({
-							response: res,
-						} = await postSaleWithOfflineQueue(
-							"/api/sales",
-							payload,
-						));
-						if (!res.ok) {
-							errorBody = await res
-								.json()
-								.catch(() => ({}));
-						}
-					}
-				}
-				if (!res.ok) {
-				throw new Error(
-					getApiErrorMessage(
-						errorBody,
-						"Failed to save direct sale",
-					),
-				);
-				}
-			}
-
-			toast.success("Direct sale saved");
-			setItems([
-				{
-					productId: "",
-					units: "",
-				},
-			]);
-			setCashReceivedCents(0);
-			setCashStep(false);
-			setNote("");
-			onSuccess();
-		} catch (err) {
-			toast.error(
-				err instanceof Error
-					? err.message
-					: "Failed to save direct sale",
-			);
-		} finally {
-			setLoading(false);
-		}
-	};
-
-	return (
-		<form
-			onSubmit={handleSubmit}
-			className="flex flex-col h-[60vh]"
-		>
-			<div className="flex flex-1 min-h-0 flex-col gap-3 overflow-hidden px-4 pb-3 pt-2 h-[60vh]">
-				{cashStep && paymentMethod === "CASH" ? (
-					<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-						<div className="rounded-md border p-3">
-							<p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-								Cash Settlement
-							</p>
-							<p className="text-sm font-medium">
-								Enter cash received
-							</p>
-							<p className="text-xs text-muted-foreground">
-								Total due: {formatZAR(totalDueCents)}
-							</p>
-						</div>
-						<CashChangeCalculator
-							totalCents={totalDueCents}
-							cashReceivedCents={cashReceivedCents}
-							onCashReceivedChange={setCashReceivedCents}
-						/>
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							onClick={() => setCashStep(false)}
-						>
-							Back to Items
-						</Button>
-					</div>
-				) : (
-					<>
-				<div className="flex min-h-0 flex-1 flex-col space-y-2 h-[50vh]">
-					<Label>Items Sold</Label>
-					<div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-						{items.map((item, index) => {
-							const units =
-								parseInt(item.units, 10) || 0;
-							const subtotalCents =
-								(productPriceById.get(
-									item.productId,
-								) ?? 0) * units;
-							return (
-								<div
-									key={index}
-									className="space-y-1"
-								>
-									<div className="flex gap-2 items-end">
-										<div className="flex-1">
-											<ProductSelect
-												products={products}
-												value={item.productId}
-												onChange={(v) =>
-													updateItem(index, {
-														productId: v,
-													})
-												}
-												placeholder="Product"
-											/>
-										</div>
-										<div className="w-20">
-											<Input
-												type="number"
-												min="1"
-												value={item.units}
-												onChange={(e) =>
-													updateItem(index, {
-														units: e.target.value,
-													})
-												}
-												placeholder="Qty"
-											/>
-										</div>
-										{items.length > 1 && (
-											<Button
-												type="button"
-												variant="destructive"
-												size="icon"
-												onClick={() =>
-													removeItem(index)
-												}
-											>
-												<Trash2 className="h-4 w-4" />
-											</Button>
-										)}
-									</div>
-									<p className="text-[11px] text-muted-foreground">
-										Subtotal{" "}
-										{formatZAR(subtotalCents)}
-									</p>
-								</div>
-							);
-						})}
-					</div>
-				</div>
-
-				<div className="space-y-3">
-					<Label>Payment Method</Label>
-					<Select
-						value={paymentMethod}
-						onValueChange={(v) =>
-							setPaymentMethod(v as PaymentMethod)
-						}
-					>
-						<SelectTrigger>
-							<SelectValue placeholder="Select method" />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="CASH">
-								Cash
-							</SelectItem>
-							<SelectItem value="CARD">
-								Card
-							</SelectItem>
-							<SelectItem value="EFT">
-								EFT
-							</SelectItem>
-						</SelectContent>
-					</Select>
-				</div>
-				<div className="space-y-2">
-					<div className="grid grid-cols-2 gap-2">
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							className="w-full"
-							onClick={addItem}
-						>
-							<Plus className="mr-2 h-4 w-4" />
-							Add Item
-						</Button>
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							className="w-full"
-							onClick={() =>
-								setShowNote((prev) => !prev)
-							}
-						>
-							{showNote
-								? "Hide Note"
-								: "Add Note"}
-						</Button>
-					</div>
-					{showNote && (
-						<Textarea
-							value={note}
-							onChange={(e) =>
-								setNote(e.target.value)
-							}
-							placeholder="Any notes..."
-							rows={2}
-						/>
-					)}
-				</div>
-					</>
-				)}
-			</div>
-			<div className="shrink-0 border-t px-4 py-3">
-				<Button
-					type="submit"
-					className="w-full"
-					disabled={
-						loading ||
-						!paymentMethod
-					}
-				>
-					{loading
-						? "Saving..."
-						: cashStep &&
-							paymentMethod === "CASH"
-							? "Confirm Cash Sale"
 							: "Save"}
 				</Button>
 			</div>
