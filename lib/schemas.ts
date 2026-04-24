@@ -58,8 +58,6 @@ export const purchaseUpdateSchema = z.object({
 	attachments: z.array(z.string()).optional(),
 });
 
-// Legacy open/close count payload. The current operating workflow uses
-// morningStockCountSchema and calculates movement from the next morning count.
 export const stockCountSchema = z.object({
 	date: ymdSchema.optional(),
 	type: z.enum(["OPEN", "CLOSE"]),
