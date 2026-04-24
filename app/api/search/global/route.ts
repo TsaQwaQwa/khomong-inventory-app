@@ -6,7 +6,6 @@ import { ok, fail } from "@/lib/http";
 import { Product } from "@/models/Product";
 import { Customer } from "@/models/Customer";
 import { TabTransaction } from "@/models/TabTransaction";
-import { SaleTransaction } from "@/models/SaleTransaction";
 import { BusinessDay } from "@/models/BusinessDay";
 
 interface SearchResultItem {
@@ -44,73 +43,51 @@ export async function GET(req: Request) {
 	const regex = new RegExp(escapeRegex(q), "i");
 
 	try {
-		const [products, customers, tabTxns, saleTxns] =
-			await Promise.all([
-				Product.find({
-					isActive: true,
-					$or: [
-						{ name: regex },
-						{ barcode: regex },
-					],
+		const [products, customers, tabTxns] = await Promise.all([
+			Product.find({
+				isActive: true,
+				$or: [{ name: regex }, { barcode: regex }],
+			})
+				.select({ _id: 1, name: 1, barcode: 1 })
+				.limit(limit)
+				.lean(),
+			Customer.find({
+				isActive: true,
+				$or: [{ name: regex }, { phone: regex }],
+			})
+				.select({ _id: 1, name: 1, phone: 1 })
+				.limit(limit)
+				.lean(),
+			TabTransaction.find({
+				type: { $in: ["PAYMENT", "ADJUSTMENT", "EXPENSE"] },
+				$or: [
+					{ reference: regex },
+					{ reason: regex },
+					{ payee: regex },
+					{ expenseCategory: regex },
+					{ note: regex },
+				],
+			})
+				.sort({ createdAt: -1 })
+				.select({
+					_id: 1,
+					type: 1,
+					reference: 1,
+					reason: 1,
+					payee: 1,
+					expenseCategory: 1,
+					note: 1,
+					businessDayId: 1,
 				})
-					.select({ _id: 1, name: 1, barcode: 1 })
-					.limit(limit)
-					.lean(),
-				Customer.find({
-					isActive: true,
-					$or: [
-						{ name: regex },
-						{ phone: regex },
-					],
-				})
-					.select({ _id: 1, name: 1, phone: 1 })
-					.limit(limit)
-					.lean(),
-				TabTransaction.find({
-					$or: [
-						{ reference: regex },
-						{ reason: regex },
-						{ payee: regex },
-						{ expenseCategory: regex },
-						{ note: regex },
-					],
-				})
-					.sort({ createdAt: -1 })
-					.select({
-						_id: 1,
-						type: 1,
-						reference: 1,
-						reason: 1,
-						payee: 1,
-						expenseCategory: 1,
-						note: 1,
-						businessDayId: 1,
-					})
-					.limit(limit)
-					.lean(),
-				SaleTransaction.find({
-					note: regex,
-				})
-					.sort({ createdAt: -1 })
-					.select({
-						_id: 1,
-						note: 1,
-						businessDayId: 1,
-					})
-					.limit(limit)
-					.lean(),
-			]);
+				.limit(limit)
+				.lean(),
+		]);
 
 		const dayIds = Array.from(
-			new Set([
-				...tabTxns.map((txn) => txn.businessDayId),
-				...saleTxns.map((txn) => txn.businessDayId),
-			]),
+			new Set(tabTxns.map((txn) => txn.businessDayId)),
 		).filter(Boolean);
 		const days = dayIds.length
-			? await BusinessDay.find({
-					_id: { $in: dayIds },
-			  })
+			? await BusinessDay.find({ _id: { $in: dayIds } })
 					.select({ _id: 1, date: 1 })
 					.lean()
 			: [];
@@ -142,8 +119,7 @@ export async function GET(req: Request) {
 			});
 		}
 		for (const txn of tabTxns) {
-			const date =
-				dayById.get(txn.businessDayId) ?? "";
+			const date = dayById.get(txn.businessDayId) ?? "";
 			const reference =
 				txn.reference ??
 				txn.reason ??
@@ -157,27 +133,13 @@ export async function GET(req: Request) {
 						? "Expense"
 						: `Account ${txn.type}`,
 				description: `${reference}${date ? ` | ${date}` : ""}`,
-				href: date
-					? `/transactions?date=${date}`
-					: "/transactions",
-			});
-		}
-		for (const txn of saleTxns) {
-			const date =
-				dayById.get(txn.businessDayId) ?? "";
-			results.push({
-				id: `sale_${String(txn._id)}`,
-				type: "TRANSACTION",
-				title: "Direct Sale",
-				description: `${txn.note ?? "(no reference)"}${date ? ` | ${date}` : ""}`,
-				href: date
-					? `/transactions?date=${date}&kind=direct-sales`
-					: "/transactions?kind=direct-sales",
+				href: date ? `/transactions?date=${date}` : "/transactions",
 			});
 		}
 
 		return ok(results.slice(0, limit * 3));
-	} catch {
+	} catch (error) {
+		console.error("Global search failed", { q, error });
 		return fail("Failed to search", {
 			status: 500,
 			code: "SERVER_ERROR",

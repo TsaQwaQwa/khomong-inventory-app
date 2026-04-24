@@ -44,7 +44,9 @@ export interface DailyStockMovementRow {
 	purchasedUnits: number;
 	adjustments: number;
 	closingUnits: number | null;
+	calculatedUnitsSold: number;
 	unitsSold: number;
+	negativeVarianceUnits: number;
 	unitPriceCents: number;
 	expectedRevenueCents: number;
 	missingOpeningCount: boolean;
@@ -192,13 +194,12 @@ export async function computeDailyStockMovement(
 		if (missingOpeningCount) missingOpeningProductIds.push(productId);
 		if (missingClosingCount) missingClosingProductIds.push(productId);
 
-		const unitsSold =
+		const calculatedUnitsSold =
 			openingUnits === null || closingUnits === null
 				? 0
-				: Math.max(
-						0,
-						openingUnits + purchasedUnits + adjustmentUnits - closingUnits,
-				  );
+				: openingUnits + purchasedUnits + adjustmentUnits - closingUnits;
+		const unitsSold = Math.max(0, calculatedUnitsSold);
+		const negativeVarianceUnits = Math.max(0, -calculatedUnitsSold);
 		const unitPriceCents = priceByProduct.get(productId) ?? 0;
 
 		rows.push({
@@ -208,7 +209,9 @@ export async function computeDailyStockMovement(
 			purchasedUnits,
 			adjustments: adjustmentUnits,
 			closingUnits,
+			calculatedUnitsSold,
 			unitsSold,
+			negativeVarianceUnits,
 			unitPriceCents,
 			expectedRevenueCents: unitsSold * unitPriceCents,
 			missingOpeningCount,
@@ -235,6 +238,12 @@ export async function computeDailyStockMovement(
 	if (missingClosingProductIds.length > 0 && closingCounts.length > 0) {
 		warnings.push(
 			`${missingClosingProductIds.length} product(s) are missing from the next morning count.`,
+		);
+	}
+	const negativeRows = rows.filter((row) => row.negativeVarianceUnits > 0);
+	if (negativeRows.length > 0) {
+		warnings.push(
+			`${negativeRows.length} product(s) have negative movement variance. Check counts, purchases, and adjustments before trusting sales quantities.`,
 		);
 	}
 

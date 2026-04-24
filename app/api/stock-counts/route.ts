@@ -21,6 +21,10 @@ import {
 const normalizeDate = (date?: string | null) =>
 	date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : todayYMD();
 
+async function getActiveProductCount() {
+	return Product.countDocuments({ isActive: true });
+}
+
 export async function GET(req: Request) {
 	try {
 		await requireOrgAuth();
@@ -44,7 +48,7 @@ export async function GET(req: Request) {
 					name: 1,
 					category: 1,
 					barcode: 1,
-					packSize: 1
+					packSize: 1,
 				})
 				.lean(),
 			StockCount.find({ date }).lean(),
@@ -107,6 +111,19 @@ export async function POST(req: Request) {
 		const date = normalizeDate(input.date);
 		const now = new Date();
 		const sessionId = input.sessionId ?? `morning-${date}`;
+		const uniqueProductIds = new Set(
+			input.counts.map((count) => count.productId)
+		);
+
+		if (input.status === "COMPLETED") {
+			const activeProductCount = await getActiveProductCount();
+			if (uniqueProductIds.size < activeProductCount) {
+				return fail(
+					"Capture every active product before finalizing the morning count.",
+					{ status: 400, code: "INCOMPLETE_STOCK_COUNT" },
+				);
+			}
+		}
 
 		const writes = input.counts.map((count) => ({
 			updateOne: {
@@ -178,9 +195,20 @@ export async function PATCH(req: Request) {
 	try {
 		const input = await parseJson(req, finalizeMorningStockCountSchema);
 		const date = normalizeDate(input.date);
-		const filter = input.sessionId
-			? { date, sessionId: input.sessionId }
-			: { date };
+		const filter =
+			input.sessionId ? { date, sessionId: input.sessionId } : { date };
+		const [activeProductCount, capturedCount] = await Promise.all([
+			getActiveProductCount(),
+			StockCount.countDocuments(filter),
+		]);
+
+		if (capturedCount < activeProductCount) {
+			return fail(
+				"Capture every active product before finalizing the morning count.",
+				{ status: 400, code: "INCOMPLETE_STOCK_COUNT" },
+			);
+		}
+
 		const result = await StockCount.updateMany(filter, {
 			$set: {
 				status: "COMPLETED",

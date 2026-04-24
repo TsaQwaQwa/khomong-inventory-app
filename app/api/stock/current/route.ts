@@ -3,18 +3,14 @@ export const runtime = "nodejs";
 import { connectDB } from "@/lib/db";
 import { requireOrgAuth } from "@/lib/authz";
 import { ok, fail } from "@/lib/http";
+import { todayYMD } from "@/lib/dates";
+import { computeStockPositionAsOfDate } from "@/lib/stock-movement";
 import { Product } from "@/models/Product";
-import { Purchase } from "@/models/Purchase";
-import { Adjustment } from "@/models/Adjustment";
-import { TabTransaction } from "@/models/TabTransaction";
-import { SaleTransaction } from "@/models/SaleTransaction";
 
-type TotalsRow = {
-	_id: string;
-	units: number;
-};
+const isYmd = (value: string | null) =>
+	Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
 
-export async function GET() {
+export async function GET(req: Request) {
 	try {
 		await requireOrgAuth();
 	} catch {
@@ -26,14 +22,12 @@ export async function GET() {
 
 	await connectDB();
 
+	const url = new URL(req.url);
+	const asOfParam = url.searchParams.get("asOf");
+	const asOf = isYmd(asOfParam) ? asOfParam! : todayYMD();
+
 	try {
-		const [
-			products,
-			purchasedTotals,
-			adjustmentTotals,
-			tabSoldTotals,
-			directSoldTotals,
-		] = await Promise.all([
+		const [products, stockByProduct] = await Promise.all([
 			Product.find({ isActive: true })
 				.select({
 					_id: 1,
@@ -43,90 +37,13 @@ export async function GET() {
 				})
 				.sort({ name: 1 })
 				.lean(),
-			Purchase.aggregate<TotalsRow>([
-				{ $unwind: "$items" },
-				{
-					$group: {
-						_id: "$items.productId",
-						units: {
-							$sum: {
-								$ifNull: ["$items.units", 0],
-							},
-						},
-					},
-				},
-			]),
-			Adjustment.aggregate<TotalsRow>([
-				{ $unwind: "$items" },
-				{
-					$group: {
-						_id: "$items.productId",
-						units: {
-							$sum: {
-								$ifNull: [
-									"$items.unitsDelta",
-									0,
-								],
-							},
-						},
-					},
-				},
-			]),
-			TabTransaction.aggregate<TotalsRow>([
-				{ $match: { type: "CHARGE" } },
-				{ $unwind: "$items" },
-				{
-					$group: {
-						_id: "$items.productId",
-						units: {
-							$sum: {
-								$ifNull: ["$items.units", 0],
-							},
-						},
-					},
-				},
-			]),
-			SaleTransaction.aggregate<TotalsRow>([
-				{ $unwind: "$items" },
-				{
-					$group: {
-						_id: "$items.productId",
-						units: {
-							$sum: {
-								$ifNull: ["$items.units", 0],
-							},
-						},
-					},
-				},
-			]),
+			computeStockPositionAsOfDate(asOf),
 		]);
-
-		const purchasedByProduct = new Map(
-			purchasedTotals.map((row) => [row._id, row.units]),
-		);
-		const adjustedByProduct = new Map(
-			adjustmentTotals.map((row) => [row._id, row.units]),
-		);
-		const tabSoldByProduct = new Map(
-			tabSoldTotals.map((row) => [row._id, row.units]),
-		);
-		const directSoldByProduct = new Map(
-			directSoldTotals.map((row) => [row._id, row.units]),
-		);
 
 		const rows = products.map((product) => {
 			const productId = String(product._id);
-			const purchased =
-				purchasedByProduct.get(productId) ?? 0;
-			const adjusted =
-				adjustedByProduct.get(productId) ?? 0;
-			const sold =
-				(tabSoldByProduct.get(productId) ?? 0) +
-				(directSoldByProduct.get(productId) ?? 0);
-			const currentUnits =
-				purchased + adjusted - sold;
-			const reorderLevelUnits =
-				product.reorderLevelUnits ?? 0;
+			const currentUnits = stockByProduct.get(productId) ?? 0;
+			const reorderLevelUnits = product.reorderLevelUnits ?? 0;
 			const status =
 				currentUnits <= 0
 					? "OUT"
@@ -141,15 +58,16 @@ export async function GET() {
 				currentUnits,
 				reorderLevelUnits,
 				status,
+				asOf,
 			};
 		});
 
 		return ok(rows);
-	} catch {
+	} catch (error) {
+		console.error("Current stock load failed", { asOf, error });
 		return fail("Failed to load current stock", {
 			status: 500,
 			code: "SERVER_ERROR",
 		});
 	}
 }
-

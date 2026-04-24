@@ -53,6 +53,11 @@ const navItems = [
 		icon: BarChart3,
 	},
 	{
+		href: "/stock-counts",
+		label: "Morning Count",
+		icon: ClipboardList,
+	},
+	{
 		href: "/reports",
 		label: "Reports",
 		icon: LineChart,
@@ -125,35 +130,28 @@ interface HeaderSummary {
 const headerSummaryFetcher = async (url: string) => {
 	const res = await fetch(url);
 	const json = await res.json().catch(() => ({}));
-	if (!res.ok)
+	if (!res.ok) {
 		return {
 			isAdmin: false,
 			unreadCount: 0,
 			todayOutOfStockCount: 0,
 		} as HeaderSummary;
+	}
 	return (json?.data ?? json) as HeaderSummary;
 };
 
 export function Header() {
 	const pathname = usePathname();
 	const [open, setOpen] = React.useState(false);
-	const { data: headerSummary } = useSWR<
-		HeaderSummary
-	>(
+	const { data: headerSummary } = useSWR<HeaderSummary>(
 		"/api/header/summary",
 		headerSummaryFetcher,
 	);
-	const unreadAlertCount =
-		headerSummary?.unreadCount ?? 0;
-	const outOfStockCount =
-		headerSummary?.todayOutOfStockCount ?? 0;
-	const isAdmin =
-		headerSummary?.isAdmin ?? false;
+	const unreadAlertCount = headerSummary?.unreadCount ?? 0;
+	const outOfStockCount = headerSummary?.todayOutOfStockCount ?? 0;
+	const isAdmin = headerSummary?.isAdmin ?? false;
 	const visibleNavItems = React.useMemo(
-		() =>
-			navItems.filter(
-				(item) => !item.adminOnly || isAdmin,
-			),
+		() => navItems.filter((item) => !item.adminOnly || isAdmin),
 		[isAdmin],
 	);
 	const desktopPrimaryItems = React.useMemo(
@@ -186,18 +184,13 @@ export function Header() {
 					href="/dashboard"
 					className="mr-2 flex shrink-0 items-center space-x-2"
 				>
-					<span className="font-bold text-lg">
-						Kgomong
-					</span>
+					<span className="font-bold text-lg">Kgomong</span>
 				</Link>
 
 				<nav className="hidden min-w-0 flex-1 items-center space-x-0.5 overflow-x-auto text-sm md:flex">
 					{desktopPrimaryItems.map((item) => {
-						const isActive =
-							pathname === item.href;
-						const badgeCount = getBadgeCount(
-							item.href,
-						);
+						const isActive = pathname === item.href;
+						const badgeCount = getBadgeCount(item.href);
 						return (
 							<Link
 								key={item.href}
@@ -215,8 +208,7 @@ export function Header() {
 									<span
 										className={cn(
 											"rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-none text-white",
-											item.href ===
-												"/dashboard"
+											item.href === "/dashboard"
 												? "bg-amber-500"
 												: "bg-rose-500",
 										)}
@@ -239,21 +231,14 @@ export function Header() {
 									More
 								</Button>
 							</PopoverTrigger>
-							<PopoverContent
-								align="start"
-								className="w-56 p-2"
-							>
+							<PopoverContent align="start" className="w-56 p-2">
 								<div className="space-y-1">
 									{desktopMoreItems.map((item) => {
-										const isActive =
-											pathname ===
-											item.href;
+										const isActive = pathname === item.href;
 										return (
 											<Link
 												key={`more-${item.href}`}
-												href={
-													item.href
-												}
+												href={item.href}
 												className={cn(
 													"flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
 													isActive
@@ -262,9 +247,7 @@ export function Header() {
 												)}
 											>
 												<item.icon className="h-4 w-4" />
-												<span>
-													{item.label}
-												</span>
+												<span>{item.label}</span>
 											</Link>
 										);
 									})}
@@ -289,33 +272,20 @@ export function Header() {
 				</div>
 
 				<Sheet open={open} onOpenChange={setOpen}>
-					<SheetTrigger
-						asChild
-						className="md:hidden"
-					>
+					<SheetTrigger asChild className="md:hidden">
 						<Button variant="ghost" size="icon">
 							<Menu className="h-5 w-5" />
-							<span className="sr-only">
-								Open navigation menu
-							</span>
+							<span className="sr-only">Open navigation menu</span>
 						</Button>
 					</SheetTrigger>
-					<SheetContent
-						side="left"
-						className="w-70"
-					>
+					<SheetContent side="left" className="w-70">
 						<div className="mb-6 flex items-center gap-2">
-							<SheetTitle className="text-left">
-								Kgomong
-							</SheetTitle>
+							<SheetTitle className="text-left">Kgomong</SheetTitle>
 						</div>
 						<nav className="flex flex-col space-y-1">
 							{visibleNavItems.map((item) => {
-								const isActive =
-									pathname === item.href;
-								const badgeCount = getBadgeCount(
-									item.href,
-								);
+								const isActive = pathname === item.href;
+								const badgeCount = getBadgeCount(item.href);
 								return (
 									<Link
 										key={item.href}
@@ -334,8 +304,7 @@ export function Header() {
 											<span
 												className={cn(
 													"ml-auto rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-none text-white",
-													item.href ===
-														"/dashboard"
+													item.href === "/dashboard"
 														? "bg-amber-500"
 														: "bg-rose-500",
 												)}
@@ -353,9 +322,7 @@ export function Header() {
 									type="button"
 									variant="outline"
 									className="w-full justify-start"
-									onClick={() =>
-										setOpen(false)
-									}
+									onClick={() => setOpen(false)}
 								>
 									<LogOut className="mr-2 h-4 w-4" />
 									Logout

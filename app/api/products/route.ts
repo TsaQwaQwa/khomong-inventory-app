@@ -5,12 +5,10 @@ import { requireOrgAuth } from "@/lib/authz";
 import { ok, fail } from "@/lib/http";
 import { parseJson } from "@/lib/validate";
 import { productCreateSchema } from "@/lib/schemas";
+import { todayYMD } from "@/lib/dates";
+import { computeStockPositionAsOfDate } from "@/lib/stock-movement";
 import { Product } from "@/models/Product";
 import { Price } from "@/models/Price";
-import { Purchase } from "@/models/Purchase";
-import { Adjustment } from "@/models/Adjustment";
-import { TabTransaction } from "@/models/TabTransaction";
-import { SaleTransaction } from "@/models/SaleTransaction";
 import { serializeDoc, serializeDocs } from "@/lib/serialize";
 import {
 	getScopeIdFromAuth,
@@ -18,27 +16,29 @@ import {
 	writeAuditLog,
 } from "@/lib/audit";
 
-type TotalsRow = {
-	_id: string;
-	units: number;
-};
+const isYmd = (value: string | null) =>
+	Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
 
 export async function GET(req: Request) {
-	await requireOrgAuth().catch(() => null);
+	try {
+		await requireOrgAuth();
+	} catch {
+		return fail("Unauthorized", {
+			status: 401,
+			code: "UNAUTHORIZED",
+		});
+	}
 
 	await connectDB();
 	const url = new URL(req.url);
-	const includeStock =
-		url.searchParams.get("includeStock") === "1";
+	const includeStock = url.searchParams.get("includeStock") === "1";
+	const asOfParam = url.searchParams.get("asOf");
+	const asOf = isYmd(asOfParam) ? asOfParam! : todayYMD();
 
-	const products = await Product.find({
-		isActive: true,
-	})
+	const products = await Product.find({ isActive: true })
 		.sort({ name: 1 })
 		.lean();
-	const productIds = products.map((p) =>
-		String(p._id),
-	);
+	const productIds = products.map((product) => String(product._id));
 	const priceDocs = await Price.find({
 		productId: { $in: productIds },
 	})
@@ -49,123 +49,33 @@ export async function GET(req: Request) {
 		if (priceMap.has(price.productId)) continue;
 		priceMap.set(price.productId, price.priceCents);
 	}
-	const productsWithPrice = products.map(
-		(product) => ({
-			...product,
-			currentPriceCents: priceMap.get(
-				String(product._id),
-			),
-		}),
-	);
+	const productsWithPrice = products.map((product) => ({
+		...product,
+		currentPriceCents: priceMap.get(String(product._id)),
+	}));
 
 	if (!includeStock) {
 		return ok(serializeDocs(productsWithPrice));
 	}
 
-	const [
-		purchasedTotals,
-		adjustmentTotals,
-		tabSoldTotals,
-		directSoldTotals,
-	] = await Promise.all([
-		Purchase.aggregate<TotalsRow>([
-			{ $unwind: "$items" },
-			{
-				$group: {
-					_id: "$items.productId",
-					units: {
-						$sum: {
-							$ifNull: ["$items.units", 0],
-						},
-					},
-				},
-			},
-		]),
-		Adjustment.aggregate<TotalsRow>([
-			{ $unwind: "$items" },
-			{
-				$group: {
-					_id: "$items.productId",
-					units: {
-						$sum: {
-							$ifNull: [
-								"$items.unitsDelta",
-								0,
-							],
-						},
-					},
-				},
-			},
-		]),
-		TabTransaction.aggregate<TotalsRow>([
-			{ $match: { type: "CHARGE" } },
-			{ $unwind: "$items" },
-			{
-				$group: {
-					_id: "$items.productId",
-					units: {
-						$sum: {
-							$ifNull: ["$items.units", 0],
-						},
-					},
-				},
-			},
-		]),
-		SaleTransaction.aggregate<TotalsRow>([
-			{ $unwind: "$items" },
-			{
-				$group: {
-					_id: "$items.productId",
-					units: {
-						$sum: {
-							$ifNull: ["$items.units", 0],
-						},
-					},
-				},
-			},
-		]),
-	]);
-
-	const purchasedByProduct = new Map(
-		purchasedTotals.map((row) => [row._id, row.units]),
-	);
-	const adjustedByProduct = new Map(
-		adjustmentTotals.map((row) => [row._id, row.units]),
-	);
-	const tabSoldByProduct = new Map(
-		tabSoldTotals.map((row) => [row._id, row.units]),
-	);
-	const directSoldByProduct = new Map(
-		directSoldTotals.map((row) => [row._id, row.units]),
-	);
-
-	const productsWithPriceAndStock = productsWithPrice.map(
-		(product) => {
-			const productId = String(product._id);
-			const purchased =
-				purchasedByProduct.get(productId) ?? 0;
-			const adjusted =
-				adjustedByProduct.get(productId) ?? 0;
-			const sold =
-				(tabSoldByProduct.get(productId) ?? 0) +
-				(directSoldByProduct.get(productId) ?? 0);
-			const currentUnits =
-				purchased + adjusted - sold;
-			const reorderLevelUnits =
-				product.reorderLevelUnits ?? 0;
-			const stockStatus =
-				currentUnits <= 0
-					? "OUT"
-					: currentUnits <= reorderLevelUnits
-						? "LOW"
-						: "OK";
-			return {
-				...product,
-				currentUnits,
-				stockStatus,
-			};
-		},
-	);
+	const stockByProduct = await computeStockPositionAsOfDate(asOf);
+	const productsWithPriceAndStock = productsWithPrice.map((product) => {
+		const productId = String(product._id);
+		const currentUnits = stockByProduct.get(productId) ?? 0;
+		const reorderLevelUnits = product.reorderLevelUnits ?? 0;
+		const stockStatus =
+			currentUnits <= 0
+				? "OUT"
+				: currentUnits <= reorderLevelUnits
+					? "LOW"
+					: "OK";
+		return {
+			...product,
+			currentUnits,
+			stockStatus,
+			stockAsOf: asOf,
+		};
+	});
 	return ok(serializeDocs(productsWithPriceAndStock));
 }
 
@@ -183,13 +93,8 @@ export async function POST(req: Request) {
 	await connectDB();
 
 	try {
-		const input = await parseJson(
-			req,
-			productCreateSchema,
-		);
-		const created = await Product.create({
-			...input,
-		});
+		const input = await parseJson(req, productCreateSchema);
+		const created = await Product.create({ ...input });
 		await writeAuditLog({
 			scopeId: getScopeIdFromAuth(a),
 			actorUserId: a.userId ?? undefined,
@@ -199,21 +104,21 @@ export async function POST(req: Request) {
 			oldValues: null,
 			newValues: toAuditObject(created.toObject()),
 		});
-		return ok(serializeDoc(created.toObject()), {
-			status: 201,
-		});
-	} catch (e: any) {
-		const msg = String(e?.message ?? e);
-		if (msg.startsWith("VALIDATION_ERROR:"))
-			return fail(
-				msg.replace("VALIDATION_ERROR:", ""),
-				{ status: 400, code: "VALIDATION_ERROR" },
-			);
-		if (msg.includes("E11000"))
+		return ok(serializeDoc(created.toObject()), { status: 201 });
+	} catch (e: unknown) {
+		const msg = String(e instanceof Error ? e.message : e);
+		if (msg.startsWith("VALIDATION_ERROR:")) {
+			return fail(msg.replace("VALIDATION_ERROR:", ""), {
+				status: 400,
+				code: "VALIDATION_ERROR",
+			});
+		}
+		if (msg.includes("E11000")) {
 			return fail("Product already exists", {
 				status: 409,
 				code: "DUPLICATE",
 			});
+		}
 		return fail("Failed to create product", {
 			status: 500,
 			code: "SERVER_ERROR",

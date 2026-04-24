@@ -7,6 +7,10 @@ export interface Product {
 	packSize: number;
 	reorderLevelUnits: number;
 	currentPriceCents?: number;
+	currentUnits?: number;
+	stockStatus?: "OUT" | "LOW" | "OK";
+	stockSource?: "LATEST_COMPLETED_COUNT";
+	stockAsOf?: string;
 }
 
 // Supplier types
@@ -87,7 +91,7 @@ export interface AdjustmentItem {
 	note?: string;
 }
 
-// Tab types
+// Tab/payment types
 export interface TabChargeItem {
 	productId: string;
 	units: number;
@@ -105,6 +109,8 @@ export interface DailyReportProduct {
 	adjustments: number;
 	openingUnits?: number | null;
 	closingUnits?: number | null;
+	calculatedUnitsSold?: number | null;
+	negativeVarianceUnits?: number;
 	missingOpeningCount?: boolean;
 	missingClosingCount?: boolean;
 }
@@ -191,7 +197,7 @@ export interface DailyReport {
 		currentUnits: number;
 		reorderLevelUnits: number;
 		recommendedOrderUnits: number;
-	recentAvgDailySoldUnits?: number;
+		recentAvgDailySoldUnits?: number;
 		targetCoverDays?: number;
 		recommendationBasis?:
 			| "REORDER_LEVEL"

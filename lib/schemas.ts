@@ -144,15 +144,15 @@ export const tabChargeSchema = z.object({
 	manualAmountCents: z.number().int().min(0).optional(),
 	belowCostApproved: z.boolean().optional(),
 	belowCostReason: z.string().max(300).optional(),
-	items: z.array(z.object({
-		productId: z.string().min(1),
-		units: z.number().int().min(1),
-	})).default([]),
+	items: z.array(
+		z.object({
+			productId: z.string().min(1),
+			units: z.number().int().min(1),
+		}),
+	).default([]),
 	note: z.string().optional(),
 }).refine(
-	(value) =>
-		value.items.length > 0 ||
-		(value.manualAmountCents ?? 0) > 0,
+	(value) => value.items.length > 0 || (value.manualAmountCents ?? 0) > 0,
 	{
 		message: "Add at least one item or an owed amount",
 		path: ["items"],
@@ -195,19 +195,6 @@ export const tabExpenseSchema = z.object({
 	]),
 	payee: z.string().trim().min(2).max(120),
 	reference: z.string().optional(),
-	note: z.string().optional(),
-});
-
-export const directSaleSchema = z.object({
-	date: ymdSchema.optional(),
-	paymentMethod: z.enum(["CASH", "CARD", "EFT"]),
-	cashReceivedCents: z.number().int().min(0).optional(),
-	belowCostApproved: z.boolean().optional(),
-	belowCostReason: z.string().max(300).optional(),
-	items: z.array(z.object({
-		productId: z.string().min(1),
-		units: z.number().int().min(1),
-	})).min(1),
 	note: z.string().optional(),
 });
 
