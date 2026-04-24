@@ -21,8 +21,67 @@ import {
 const normalizeDate = (date?: string | null) =>
 	date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : todayYMD();
 
-async function getActiveProductCount() {
-	return Product.countDocuments({ isActive: true });
+type CountProductInput = {
+	productId: string;
+};
+
+type ActiveProductLookup = {
+	activeProductIds: string[];
+	activeProductIdSet: Set<string>;
+};
+
+async function getActiveProductLookup(): Promise<ActiveProductLookup> {
+	const products = await Product.find({ isActive: true })
+		.select({ _id: 1 })
+		.lean<{ _id: unknown }[]>();
+
+	const activeProductIds = products.map((product) => String(product._id));
+	return {
+		activeProductIds,
+		activeProductIdSet: new Set(activeProductIds),
+	};
+}
+
+function findDuplicateProductIds(counts: CountProductInput[]) {
+	const seen = new Set<string>();
+	const duplicates = new Set<string>();
+
+	for (const count of counts) {
+		if (seen.has(count.productId)) {
+			duplicates.add(count.productId);
+		}
+		seen.add(count.productId);
+	}
+
+	return Array.from(duplicates);
+}
+
+function validateCountProductIds(
+	counts: CountProductInput[],
+	lookup: ActiveProductLookup,
+) {
+	const submittedProductIds = new Set(
+		counts.map((count) => count.productId),
+	);
+	const duplicateProductIds = findDuplicateProductIds(counts);
+	const invalidProductIds = Array.from(submittedProductIds).filter(
+		(productId) => !lookup.activeProductIdSet.has(productId),
+	);
+	const missingProductIds = lookup.activeProductIds.filter(
+		(productId) => !submittedProductIds.has(productId),
+	);
+
+	return {
+		submittedProductIds,
+		duplicateProductIds,
+		invalidProductIds,
+		missingProductIds,
+	};
+}
+
+function formatProductList(productIds: string[]) {
+	if (productIds.length <= 5) return productIds.join(", ");
+	return `${productIds.slice(0, 5).join(", ")} and ${productIds.length - 5} more`;
 }
 
 export async function GET(req: Request) {
@@ -111,18 +170,41 @@ export async function POST(req: Request) {
 		const date = normalizeDate(input.date);
 		const now = new Date();
 		const sessionId = input.sessionId ?? `morning-${date}`;
-		const uniqueProductIds = new Set(
-			input.counts.map((count) => count.productId)
-		);
+		const activeProductLookup = await getActiveProductLookup();
+		const {
+			duplicateProductIds,
+			invalidProductIds,
+			missingProductIds,
+		} = validateCountProductIds(input.counts, activeProductLookup);
 
-		if (input.status === "COMPLETED") {
-			const activeProductCount = await getActiveProductCount();
-			if (uniqueProductIds.size < activeProductCount) {
-				return fail(
-					"Capture every active product before finalizing the morning count.",
-					{ status: 400, code: "INCOMPLETE_STOCK_COUNT" },
-				);
-			}
+		if (duplicateProductIds.length > 0) {
+			return fail(
+				`Duplicate product count rows found: ${formatProductList(duplicateProductIds)}.`,
+				{
+					status: 400,
+					code: "DUPLICATE_STOCK_COUNT_PRODUCTS",
+				},
+			);
+		}
+
+		if (invalidProductIds.length > 0) {
+			return fail(
+				`Stock count includes inactive or unknown product IDs: ${formatProductList(invalidProductIds)}.`,
+				{
+					status: 400,
+					code: "INVALID_STOCK_COUNT_PRODUCTS",
+				},
+			);
+		}
+
+		if (input.status === "COMPLETED" && missingProductIds.length > 0) {
+			return fail(
+				`Capture every active product before finalizing the morning count. Missing: ${formatProductList(missingProductIds)}.`,
+				{
+					status: 400,
+					code: "INCOMPLETE_STOCK_COUNT",
+				},
+			);
 		}
 
 		const writes = input.counts.map((count) => ({
@@ -197,15 +279,53 @@ export async function PATCH(req: Request) {
 		const date = normalizeDate(input.date);
 		const filter =
 			input.sessionId ? { date, sessionId: input.sessionId } : { date };
-		const [activeProductCount, capturedCount] = await Promise.all([
-			getActiveProductCount(),
-			StockCount.countDocuments(filter),
+		const [activeProductLookup, capturedCounts] = await Promise.all([
+			getActiveProductLookup(),
+			StockCount.find(filter)
+				.select({ productId: 1 })
+				.lean<{ productId: string }[]>(),
 		]);
 
-		if (capturedCount < activeProductCount) {
+		const {
+			duplicateProductIds,
+			invalidProductIds,
+			missingProductIds,
+		} = validateCountProductIds(capturedCounts, activeProductLookup);
+
+		if (capturedCounts.length === 0) {
+			return fail("No stock count rows exist for this date/session.", {
+				status: 400,
+				code: "EMPTY_STOCK_COUNT",
+			});
+		}
+
+		if (duplicateProductIds.length > 0) {
 			return fail(
-				"Capture every active product before finalizing the morning count.",
-				{ status: 400, code: "INCOMPLETE_STOCK_COUNT" },
+				`Duplicate product count rows found: ${formatProductList(duplicateProductIds)}.`,
+				{
+					status: 400,
+					code: "DUPLICATE_STOCK_COUNT_PRODUCTS",
+				},
+			);
+		}
+
+		if (invalidProductIds.length > 0) {
+			return fail(
+				`Stock count includes inactive or unknown product IDs: ${formatProductList(invalidProductIds)}.`,
+				{
+					status: 400,
+					code: "INVALID_STOCK_COUNT_PRODUCTS",
+				},
+			);
+		}
+
+		if (missingProductIds.length > 0) {
+			return fail(
+				`Capture every active product before finalizing the morning count. Missing: ${formatProductList(missingProductIds)}.`,
+				{
+					status: 400,
+					code: "INCOMPLETE_STOCK_COUNT",
+				},
 			);
 		}
 

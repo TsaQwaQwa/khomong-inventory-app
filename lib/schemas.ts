@@ -58,6 +58,8 @@ export const purchaseUpdateSchema = z.object({
 	attachments: z.array(z.string()).optional(),
 });
 
+// Legacy open/close count payload. The current operating workflow uses
+// morningStockCountSchema and calculates movement from the next morning count.
 export const stockCountSchema = z.object({
 	date: ymdSchema.optional(),
 	type: z.enum(["OPEN", "CLOSE"]),
@@ -138,7 +140,10 @@ export const customerUpdateSchema = z.object({
 	dueDays: z.number().int().min(1).max(365).optional(),
 });
 
-export const tabChargeSchema = z.object({
+// This schema is deliberately named around debt, not stock movement.
+// Product rows on account charges are legacy/account-led debt context only.
+// They must not be used as the source of stock movement.
+export const manualDebtChargeSchema = z.object({
 	date: ymdSchema.optional(),
 	customerId: z.string().min(1),
 	manualAmountCents: z.number().int().min(0).optional(),
@@ -158,6 +163,9 @@ export const tabChargeSchema = z.object({
 		path: ["items"],
 	},
 );
+
+// Backwards-compatible export for the existing tab charge route/imports.
+export const tabChargeSchema = manualDebtChargeSchema;
 
 export const tabPaymentSchema = z.object({
 	date: ymdSchema.optional(),
@@ -198,8 +206,13 @@ export const tabExpenseSchema = z.object({
 	note: z.string().optional(),
 });
 
-export const transactionReverseSchema = z.object({
+// Legacy reversal schema. DIRECT_SALE remains only so old historical reversal
+// requests can fail or be handled explicitly by the reverse endpoint instead of
+// disappearing into a generic validation error.
+export const legacyTransactionReverseSchema = z.object({
 	transactionId: z.string().min(1),
 	type: z.enum(["DIRECT_SALE", "CHARGE", "PAYMENT", "EXPENSE"]),
 	reason: z.string().min(3),
 });
+
+export const transactionReverseSchema = legacyTransactionReverseSchema;
