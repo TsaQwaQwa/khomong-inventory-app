@@ -7,23 +7,16 @@ import { computeDailySummary } from "@/lib/reporting";
 import { connectDB } from "@/lib/db";
 import { syncStockAlertsForDay } from "@/lib/alerts";
 
-type DailySummary = Awaited<
-	ReturnType<typeof computeDailySummary>
->;
+type DailySummary = Awaited<ReturnType<typeof computeDailySummary>>;
 
 const dailySummaryCache = new Map<
 	string,
 	{ summary: DailySummary; expiresAt: number }
 >();
-const dailySummaryInflight = new Map<
-	string,
-	Promise<DailySummary>
->();
+const dailySummaryInflight = new Map<string, Promise<DailySummary>>();
 
-const getDailySummaryCacheKey = (
-	scopeId: string,
-	date: string,
-) => `${scopeId}:${date}`;
+const getDailySummaryCacheKey = (scopeId: string, date: string) =>
+	`${scopeId}:${date}`;
 
 const getDailySummaryTtlMs = (date: string) =>
 	date === todayYMD() ? 15_000 : 300_000;
@@ -39,8 +32,7 @@ const pruneDailySummaryCache = () => {
 		}
 	}
 	while (dailySummaryCache.size > 500) {
-		const oldestKey =
-			dailySummaryCache.keys().next().value;
+		const oldestKey = dailySummaryCache.keys().next().value;
 		if (!oldestKey) break;
 		dailySummaryCache.delete(oldestKey);
 	}
@@ -78,15 +70,11 @@ async function getDailySummaryCached({
 		};
 	}
 
-	const computePromise = computeDailySummary(
-		date,
-		userId,
-	)
+	const computePromise = computeDailySummary(date, userId)
 		.then((summary) => {
 			dailySummaryCache.set(key, {
 				summary,
-				expiresAt:
-					Date.now() + getDailySummaryTtlMs(date),
+				expiresAt: Date.now() + getDailySummaryTtlMs(date),
 			});
 			pruneDailySummaryCache();
 			return summary;
@@ -113,12 +101,15 @@ const aggregateSummaries = (
 		EFT: 0,
 	};
 	const checklist = {
-		hasSalesEntries: false,
+		hasMorningCount: false,
+		hasNextMorningCount: false,
 		hasPurchases: false,
 		hasTabActivity: false,
 		hasAdjustments: false,
 	};
 	const warningsSet = new Set<string>();
+	const missingOpeningProductIds = new Set<string>();
+	const missingClosingProductIds = new Set<string>();
 	const byProductMap = new Map<
 		string,
 		{
@@ -128,6 +119,8 @@ const aggregateSummaries = (
 			expectedRevenueCents: number;
 			purchasedUnits: number;
 			adjustments: number;
+			missingOpeningCount: boolean;
+			missingClosingCount: boolean;
 		}
 	>();
 	const recommendationsMap = new Map<
@@ -164,52 +157,65 @@ const aggregateSummaries = (
 	let netProfitAfterExpensesCents = 0;
 
 	for (const summary of summaries) {
-		expectedRevenueCents +=
-			summary.expectedRevenueCents;
+		expectedRevenueCents += summary.expectedRevenueCents;
 		collectedSalesCents += summary.collectedSalesCents;
 		tabChargesCents += summary.tabChargesCents;
-		outstandingTabBalanceCents =
-			summary.outstandingTabBalanceCents;
-		overdueTabBalanceCents =
-			summary.overdueTabBalanceCents;
+		outstandingTabBalanceCents = summary.outstandingTabBalanceCents;
+		overdueTabBalanceCents = summary.overdueTabBalanceCents;
 		accountedSalesCents += summary.accountedSalesCents;
 		expensesCents += summary.expensesCents ?? 0;
 		revenueVarianceCents += summary.revenueVarianceCents;
 		payments.CASH += summary.tabPaymentsByMethodCents.CASH;
 		payments.CARD += summary.tabPaymentsByMethodCents.CARD;
 		payments.EFT += summary.tabPaymentsByMethodCents.EFT;
-		checklist.hasSalesEntries =
-			checklist.hasSalesEntries ||
-			summary.dayChecklist.hasSalesEntries;
+		checklist.hasMorningCount =
+			checklist.hasMorningCount || summary.dayChecklist.hasMorningCount;
+		checklist.hasNextMorningCount =
+			checklist.hasNextMorningCount ||
+			summary.dayChecklist.hasNextMorningCount;
 		checklist.hasPurchases =
-			checklist.hasPurchases ||
-			summary.dayChecklist.hasPurchases;
+			checklist.hasPurchases || summary.dayChecklist.hasPurchases;
 		checklist.hasTabActivity =
-			checklist.hasTabActivity ||
-			summary.dayChecklist.hasTabActivity;
+			checklist.hasTabActivity || summary.dayChecklist.hasTabActivity;
 		checklist.hasAdjustments =
-			checklist.hasAdjustments ||
-			summary.dayChecklist.hasAdjustments;
+			checklist.hasAdjustments || summary.dayChecklist.hasAdjustments;
+
 		for (const warning of summary.warnings ?? []) {
 			warningsSet.add(warning);
+		}
+		for (const productId of (
+			summary.movementStatus?.missingOpeningProductIds ?? []
+		)) {
+			missingOpeningProductIds.add(productId);
+		}
+		for (const productId of (
+			summary.movementStatus?.missingClosingProductIds ?? []
+		)) {
+			missingClosingProductIds.add(productId);
 		}
 		for (const row of summary.byProduct ?? []) {
 			const existing = byProductMap.get(row.productId);
 			if (existing) {
 				existing.unitsSold += row.unitsSold;
-				existing.expectedRevenueCents +=
-					row.expectedRevenueCents;
+				existing.expectedRevenueCents += row.expectedRevenueCents;
 				existing.purchasedUnits += row.purchasedUnits;
 				existing.adjustments += row.adjustments;
+				existing.missingOpeningCount =
+					existing.missingOpeningCount ||
+					Boolean(row.missingOpeningCount);
+				existing.missingClosingCount =
+					existing.missingClosingCount ||
+					Boolean(row.missingClosingCount);
 			} else {
 				byProductMap.set(row.productId, {
 					productId: row.productId,
 					productName: row.productName,
 					unitsSold: row.unitsSold,
-					expectedRevenueCents:
-						row.expectedRevenueCents,
+					expectedRevenueCents: row.expectedRevenueCents,
 					purchasedUnits: row.purchasedUnits,
 					adjustments: row.adjustments,
+					missingOpeningCount: Boolean(row.missingOpeningCount),
+					missingClosingCount: Boolean(row.missingClosingCount),
 				});
 			}
 		}
@@ -222,8 +228,7 @@ const aggregateSummaries = (
 		for (const rec of summary.stockRecommendations ?? []) {
 			const existing = stockRecMap.get(rec.productId);
 			if (existing) {
-				existing.recommendedOrderUnits +=
-					rec.recommendedOrderUnits;
+				existing.recommendedOrderUnits += rec.recommendedOrderUnits;
 				existing.currentUnits = rec.currentUnits;
 				existing.reorderLevelUnits = Math.max(
 					existing.reorderLevelUnits,
@@ -233,13 +238,10 @@ const aggregateSummaries = (
 					existing.priority = "HIGH";
 				}
 			} else {
-				stockRecMap.set(rec.productId, {
-					...rec,
-				});
+				stockRecMap.set(rec.productId, { ...rec });
 			}
 		}
-		for (const row of summary.inventoryInsights
-			.topMovers ?? []) {
+		for (const row of summary.inventoryInsights.topMovers ?? []) {
 			const existing = topMoverMap.get(row.productId);
 			if (existing) {
 				existing.unitsSoldToday += row.unitsSoldToday;
@@ -248,32 +250,26 @@ const aggregateSummaries = (
 				topMoverMap.set(row.productId, { ...row });
 			}
 		}
-		for (const row of summary.inventoryInsights
-			.slowMovers ?? []) {
+		for (const row of summary.inventoryInsights.slowMovers ?? []) {
 			const existing = slowMoverMap.get(row.productId);
 			if (existing) {
-				existing.unitsSoldLast30Days +=
-					row.unitsSoldLast30Days;
+				existing.unitsSoldLast30Days += row.unitsSoldLast30Days;
 				existing.currentUnits = row.currentUnits;
 			} else {
 				slowMoverMap.set(row.productId, { ...row });
 			}
 		}
-		for (const row of summary.inventoryInsights
-			.deadStock ?? []) {
+		for (const row of summary.inventoryInsights.deadStock ?? []) {
 			const existing = deadStockMap.get(row.productId);
 			if (existing) {
-				existing.unitsSoldLast30Days +=
-					row.unitsSoldLast30Days;
+				existing.unitsSoldLast30Days += row.unitsSoldLast30Days;
 				existing.currentUnits = row.currentUnits;
 			} else {
 				deadStockMap.set(row.productId, { ...row });
 			}
 		}
-		estimatedCogsCents +=
-			summary.grossProfit.estimatedCogsCents;
-		grossProfitCents +=
-			summary.grossProfit.grossProfitCents;
+		estimatedCogsCents += summary.grossProfit.estimatedCogsCents;
+		grossProfitCents += summary.grossProfit.grossProfitCents;
 		netProfitAfterExpensesCents +=
 			summary.netProfitAfterExpensesCents ?? 0;
 	}
@@ -283,16 +279,11 @@ const aggregateSummaries = (
 			...row,
 			unitPriceCents:
 				row.unitsSold > 0
-					? Math.round(
-							row.expectedRevenueCents / row.unitsSold,
-					  )
+					? Math.round(row.expectedRevenueCents / row.unitsSold)
 					: 0,
 		}))
-		.sort(
-			(a, b) =>
-				b.expectedRevenueCents -
-				a.expectedRevenueCents,
-		);
+		.sort((a, b) => b.expectedRevenueCents - a.expectedRevenueCents);
+
 	const topProducts = byProduct
 		.slice()
 		.sort((a, b) => b.unitsSold - a.unitsSold)
@@ -317,11 +308,22 @@ const aggregateSummaries = (
 		netProfitAfterExpensesCents,
 		tabPaymentsByMethodCents: payments,
 		dayChecklist: checklist,
+		movementStatus: {
+			hasOpeningCount: summaries.every(
+				(summary) => summary.movementStatus?.hasOpeningCount,
+			),
+			hasClosingCount: summaries.every(
+				(summary) => summary.movementStatus?.hasClosingCount,
+			),
+			nextDate: addDays(to, 1),
+			missingOpeningProductIds: Array.from(missingOpeningProductIds),
+			missingClosingProductIds: Array.from(missingClosingProductIds),
+		},
 		warnings: Array.from(warningsSet),
 		byProduct,
 		trends: {
 			sales: {
-				currentCents: accountedSalesCents,
+				currentCents: expectedRevenueCents,
 				previousCents: null,
 				changeCents: null,
 				changePct: null,
@@ -332,47 +334,25 @@ const aggregateSummaries = (
 			estimatedCogsCents,
 			grossProfitCents,
 			grossMarginPct:
-				accountedSalesCents > 0
-					? (grossProfitCents /
-							accountedSalesCents) *
-					  100
+				expectedRevenueCents > 0
+					? (grossProfitCents / expectedRevenueCents) * 100
 					: null,
 		},
 		inventoryInsights: {
 			topMovers: Array.from(topMoverMap.values())
-				.sort(
-					(a, b) =>
-						b.unitsSoldToday - a.unitsSoldToday,
-				)
+				.sort((a, b) => b.unitsSoldToday - a.unitsSoldToday)
 				.slice(0, 5),
 			slowMovers: Array.from(slowMoverMap.values())
-				.sort(
-					(a, b) =>
-						a.unitsSoldLast30Days -
-						b.unitsSoldLast30Days,
-				)
+				.sort((a, b) => a.unitsSoldLast30Days - b.unitsSoldLast30Days)
 				.slice(0, 5),
 			deadStock: Array.from(deadStockMap.values())
-				.sort(
-					(a, b) =>
-						a.unitsSoldLast30Days -
-						b.unitsSoldLast30Days,
-				)
+				.sort((a, b) => a.unitsSoldLast30Days - b.unitsSoldLast30Days)
 				.slice(0, 5),
 		},
-		recommendations: Array.from(
-			recommendationsMap.values(),
-		),
-		stockRecommendations: Array.from(
-			stockRecMap.values(),
-		).sort((a, b) => {
-			if (a.priority !== b.priority) {
-				return a.priority === "HIGH" ? -1 : 1;
-			}
-			return (
-				b.recommendedOrderUnits -
-				a.recommendedOrderUnits
-			);
+		recommendations: Array.from(recommendationsMap.values()),
+		stockRecommendations: Array.from(stockRecMap.values()).sort((a, b) => {
+			if (a.priority !== b.priority) return a.priority === "HIGH" ? -1 : 1;
+			return b.recommendedOrderUnits - a.recommendedOrderUnits;
 		}),
 	};
 };
@@ -393,16 +373,9 @@ export async function GET(req: Request) {
 	const toParam = url.searchParams.get("to");
 	const dateParam = url.searchParams.get("date");
 	const date = dateParam ?? toParam ?? todayYMD();
-	const from =
-		isYmd(fromParam) && isYmd(toParam)
-			? fromParam
-			: null;
-	const to =
-		isYmd(fromParam) && isYmd(toParam)
-			? toParam
-			: null;
-	const forceFresh =
-		url.searchParams.get("fresh") === "1";
+	const from = isYmd(fromParam) && isYmd(toParam) ? fromParam : null;
+	const to = isYmd(fromParam) && isYmd(toParam) ? toParam : null;
+	const forceFresh = url.searchParams.get("fresh") === "1";
 
 	try {
 		await connectDB();
@@ -424,11 +397,7 @@ export async function GET(req: Request) {
 					}).then((res) => res.summary),
 				),
 			);
-			const summary = aggregateSummaries(
-				from,
-				to,
-				summaries,
-			);
+			const summary = aggregateSummaries(from, to, summaries);
 			await syncStockAlertsForDay({
 				scopeId,
 				date: to,
@@ -436,13 +405,12 @@ export async function GET(req: Request) {
 			});
 			return ok(summary);
 		}
-		const { summary, cacheHit } =
-			await getDailySummaryCached({
-				scopeId,
-				date,
-				userId: a.userId!,
-				forceFresh,
-			});
+		const { summary, cacheHit } = await getDailySummaryCached({
+			scopeId,
+			date,
+			userId: a.userId!,
+			forceFresh,
+		});
 		if (!cacheHit || forceFresh) {
 			await syncStockAlertsForDay({
 				scopeId,
@@ -451,15 +419,11 @@ export async function GET(req: Request) {
 			});
 		}
 		return ok(summary);
-	} catch (e: any) {
-		console.error(
-			"Daily report failure",
-			{ date },
-			e,
-		);
-		return fail(
-			"Failed to compute daily summary",
-			{ status: 500, code: "SERVER_ERROR" },
-		);
+	} catch (e: unknown) {
+		console.error("Daily report failure", { date }, e);
+		return fail("Failed to compute daily summary", {
+			status: 500,
+			code: "SERVER_ERROR",
+		});
 	}
 }

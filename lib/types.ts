@@ -93,10 +93,7 @@ export interface TabChargeItem {
 	units: number;
 }
 
-export type PaymentMethod =
-	| "CASH"
-	| "CARD"
-	| "EFT";
+export type PaymentMethod = "CASH" | "CARD" | "EFT";
 
 export interface DailyReportProduct {
 	productId: string;
@@ -106,6 +103,10 @@ export interface DailyReportProduct {
 	expectedRevenueCents: number;
 	purchasedUnits: number;
 	adjustments: number;
+	openingUnits?: number | null;
+	closingUnits?: number | null;
+	missingOpeningCount?: boolean;
+	missingClosingCount?: boolean;
 }
 
 export interface DailyReport {
@@ -125,10 +126,18 @@ export interface DailyReport {
 		EFT: number;
 	};
 	dayChecklist: {
-		hasSalesEntries: boolean;
+		hasMorningCount: boolean;
+		hasNextMorningCount: boolean;
 		hasPurchases: boolean;
 		hasTabActivity: boolean;
 		hasAdjustments: boolean;
+	};
+	movementStatus?: {
+		hasOpeningCount: boolean;
+		hasClosingCount: boolean;
+		nextDate: string;
+		missingOpeningProductIds: string[];
+		missingClosingProductIds: string[];
 	};
 	warnings: string[];
 	byProduct: DailyReportProduct[];
@@ -182,7 +191,7 @@ export interface DailyReport {
 		currentUnits: number;
 		reorderLevelUnits: number;
 		recommendedOrderUnits: number;
-		recentAvgDailySoldUnits?: number;
+	recentAvgDailySoldUnits?: number;
 		targetCoverDays?: number;
 		recommendationBasis?:
 			| "REORDER_LEVEL"
